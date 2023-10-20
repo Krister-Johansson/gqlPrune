@@ -1,6 +1,6 @@
 {
   "name": "gqlprune",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "This script helps identify unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans .gql files for operations and checks if they are being used in your TypeScript/JavaScript files.",
   "bin": {
     "gqlPrune": "./dist/cli.js"
