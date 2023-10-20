@@ -110,4 +110,13 @@ export function mainFunction() {
   });
 
   console.log(kleur.blue('---------------------------------'));
+
+  if (unusedOperations.length > 0) {
+    console.log(
+      kleur.red(
+        `Found ${unusedOperations.length} unused GraphQL operations. Please remove them.`,
+      ),
+    );
+    process.exit(1);
+  }
 }
