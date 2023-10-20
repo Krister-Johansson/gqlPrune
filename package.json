@@ -5,6 +5,10 @@
   "bin": {
     "gqlPrune": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/cli.js",
   "type": "module",
   "scripts": {
     "clean": "rimraf dist",
@@ -17,9 +21,27 @@
     "lint:fix": "eslint 'src/**/*.{js,ts,tsx}' --fix",
     "format": "prettier --write 'src/**/*.{js,ts,tsx}'"
   },
-  "keywords": [],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "graphql",
+    "prune",
+    "unused",
+    "operations",
+    "queries",
+    "mutations"
+  ],
   "author": "Krister Johansson",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Krister-Johansson/gqlPrune.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Krister-Johansson/gqlPrune/issues"
+  },
+  "homepage": "https://github.com/Krister-Johansson/gqlPrune",
   "dependencies": {
     "graphql": "^16.8.1",
     "inquirer": "^9.2.11",
