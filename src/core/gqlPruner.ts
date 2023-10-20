@@ -47,15 +47,10 @@ export function mainFunction() {
   }
 
   // ---------------- Main Logic ----------------
-  const gqlFileExtension = Array.isArray(config.gqlFileExtension)
-    ? config.gqlFileExtension
-    : config.gqlFileExtension
-    ? [config.gqlFileExtension]
-    : ['.gql'];
 
   const gqlFiles = findFilesWithExtension(
     config.graphqlDir || '',
-    gqlFileExtension,
+    ['.gql', '.graphql'],
     excludedFolders,
   );
   const allOperations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
