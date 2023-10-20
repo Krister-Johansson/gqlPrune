@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.1.1](https://github.com/Krister-Johansson/gqlPrune/compare/v1.1.0...v1.1.1) (2023-10-20)
+
+
+### Bug Fixes
+
+* github action ([e0567a5](https://github.com/Krister-Johansson/gqlPrune/commit/e0567a51fcf6fca2be84a464f6e2f52a031405e3))
+
 ## [1.1.0](https://github.com/Krister-Johansson/gqlPrune/compare/v1.0.2...v1.1.0) (2023-10-20)
 
 
