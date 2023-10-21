@@ -28,13 +28,22 @@ jobs:
       - name: Generate Notices
         run: npm run generate:notices
 
-      - name: Commit and push changes
+        - name: Commit and push changes
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          ACTOR_NAME=$(echo "${{ github.actor }}")
+          USER_EMAIL=$(curl -s -H "Authorization: token ${{ secrets.GH_PAT }}" https://api.github.com/users/$ACTOR_NAME | jq -r ".email")
+          
+          # If the email is null (not publicly available), use a default one
+          if [ "$USER_EMAIL" == "null" ]; then
+            USER_EMAIL="actions@github.com"
+          fi
+      
+          git config user.name "$ACTOR_NAME"
+          git config user.email "$USER_EMAIL"
           git add -A
           git commit -m "chore: update NOTICES.md" || echo "No changes to commit"
           git push https://${{ secrets.GH_PAT }}@github.com/Krister-Johansson/gqlPrune.git HEAD:main
+      
 
       - name: Setup .npmrc file to publish to npm
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
