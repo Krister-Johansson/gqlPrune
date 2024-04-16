@@ -19,7 +19,7 @@ Upon running the `init` command with `gqlPrune`, it will launch a configurator t
 Example:
 
 ```bash
-npm gqlPrune init
+npx gqlPrune init
 ```
 
 ```yaml
