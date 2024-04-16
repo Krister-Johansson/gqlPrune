@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# But not these files:
+!dist/**
+!README.md
+!LICENSE
+!package.json
+!NOTICES.md
