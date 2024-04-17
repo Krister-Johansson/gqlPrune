@@ -1,4 +1,38 @@
-## @ljharb/through@2.3.11
+## @inquirer/figures@1.0.1
+- **License**: MIT
+- **Repository**: [https://github.com/SBoudrias/Inquirer.js](https://github.com/SBoudrias/Inquirer.js)
+- **Publisher**: Simon Boudrias
+- **Email**: admin@simonboudrias.com
+- **License Text**:
+```
+Copyright (c) 2023 Simon Boudrias
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+```
+
+---
+
+## @ljharb/through@2.3.13
 - **License**: MIT
 - **Repository**: [https://github.com/ljharb/through](https://github.com/ljharb/through)
 - **Publisher**: Dominic Tarr
@@ -455,7 +489,7 @@ THE SOFTWARE.
 
 ---
 
-## call-bind@1.0.5
+## call-bind@1.0.7
 - **License**: MIT
 - **Repository**: [https://github.com/ljharb/call-bind](https://github.com/ljharb/call-bind)
 - **Publisher**: Jordan Harband
@@ -743,7 +777,7 @@ THE SOFTWARE.
 
 ---
 
-## define-data-property@1.1.1
+## define-data-property@1.1.4
 - **License**: MIT
 - **Repository**: [https://github.com/ljharb/define-data-property](https://github.com/ljharb/define-data-property)
 - **Publisher**: Jordan Harband
@@ -808,23 +842,67 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
-## escape-string-regexp@5.0.0
+## es-define-property@1.0.0
 - **License**: MIT
-- **Repository**: [https://github.com/sindresorhus/escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp)
-- **Publisher**: Sindre Sorhus
-- **Email**: sindresorhus@gmail.com
-- **URL**: [https://sindresorhus.com](https://sindresorhus.com)
+- **Repository**: [https://github.com/ljharb/es-define-property](https://github.com/ljharb/es-define-property)
+- **Publisher**: Jordan Harband
+- **Email**: ljharb@gmail.com
 - **License Text**:
 ```
 MIT License
 
-Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+Copyright (c) 2024 Jordan Harband
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```
+
+---
+
+## es-errors@1.3.0
+- **License**: MIT
+- **Repository**: [https://github.com/ljharb/es-errors](https://github.com/ljharb/es-errors)
+- **Publisher**: Jordan Harband
+- **Email**: ljharb@gmail.com
+- **License Text**:
+```
+MIT License
+
+Copyright (c) 2024 Jordan Harband
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ```
 
@@ -864,28 +942,6 @@ SOFTWARE.
 
 ---
 
-## figures@5.0.0
-- **License**: MIT
-- **Repository**: [https://github.com/sindresorhus/figures](https://github.com/sindresorhus/figures)
-- **Publisher**: Sindre Sorhus
-- **Email**: sindresorhus@gmail.com
-- **URL**: [https://sindresorhus.com](https://sindresorhus.com)
-- **License Text**:
-```
-MIT License
-
-Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-```
-
----
-
 ## function-bind@1.1.2
 - **License**: MIT
 - **Repository**: [https://github.com/Raynos/function-bind](https://github.com/Raynos/function-bind)
@@ -918,7 +974,7 @@ THE SOFTWARE.
 
 ---
 
-## get-intrinsic@1.2.1
+## get-intrinsic@1.2.4
 - **License**: MIT
 - **Repository**: [https://github.com/ljharb/get-intrinsic](https://github.com/ljharb/get-intrinsic)
 - **Publisher**: Jordan Harband
@@ -984,7 +1040,7 @@ SOFTWARE.
 
 ---
 
-## gqlprune@1.1.2
+## gqlprune@1.2.3
 - **License**: MIT
 - **Repository**: [https://github.com/Krister-Johansson/gqlPrune](https://github.com/Krister-Johansson/gqlPrune)
 - **Publisher**: Krister Johansson
@@ -1069,7 +1125,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ---
 
-## has-property-descriptors@1.0.0
+## has-property-descriptors@1.0.2
 - **License**: MIT
 - **Repository**: [https://github.com/inspect-js/has-property-descriptors](https://github.com/inspect-js/has-property-descriptors)
 - **Publisher**: Jordan Harband
@@ -1102,7 +1158,7 @@ SOFTWARE.
 
 ---
 
-## has-proto@1.0.1
+## has-proto@1.0.3
 - **License**: MIT
 - **Repository**: [https://github.com/inspect-js/has-proto](https://github.com/inspect-js/has-proto)
 - **Publisher**: Jordan Harband
@@ -1169,35 +1225,34 @@ SOFTWARE.
 
 ---
 
-## has@1.0.4
+## hasown@2.0.2
 - **License**: MIT
-- **Repository**: [https://github.com/tarruda/has](https://github.com/tarruda/has)
-- **Publisher**: Thiago de Arruda
-- **Email**: tpadilha84@gmail.com
+- **Repository**: [https://github.com/inspect-js/hasOwn](https://github.com/inspect-js/hasOwn)
+- **Publisher**: Jordan Harband
+- **Email**: ljharb@gmail.com
 - **License Text**:
 ```
-Copyright (c) 2013 Thiago de Arruda
+MIT License
 
-Permission is hereby granted, free of charge, to any person
-obtaining a copy of this software and associated documentation
-files (the "Software"), to deal in the Software without
-restriction, including without limitation the rights to use,
-copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following
-conditions:
+Copyright (c) Jordan Harband and contributors
 
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-OTHER DEALINGS IN THE SOFTWARE.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ```
 
@@ -1286,7 +1341,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ---
 
-## inquirer@9.2.11
+## inquirer@9.2.19
 - **License**: MIT
 - **Repository**: [https://github.com/SBoudrias/Inquirer.js](https://github.com/SBoudrias/Inquirer.js)
 - **Publisher**: Simon Boudrias
@@ -1365,28 +1420,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 ## is-unicode-supported@0.1.0
-- **License**: MIT
-- **Repository**: [https://github.com/sindresorhus/is-unicode-supported](https://github.com/sindresorhus/is-unicode-supported)
-- **Publisher**: Sindre Sorhus
-- **Email**: sindresorhus@gmail.com
-- **URL**: [https://sindresorhus.com](https://sindresorhus.com)
-- **License Text**:
-```
-MIT License
-
-Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-```
-
----
-
-## is-unicode-supported@1.3.0
 - **License**: MIT
 - **Repository**: [https://github.com/sindresorhus/is-unicode-supported](https://github.com/sindresorhus/is-unicode-supported)
 - **Publisher**: Sindre Sorhus
@@ -2076,7 +2109,7 @@ SOFTWARE.
 
 ---
 
-## set-function-length@1.1.1
+## set-function-length@1.2.2
 - **License**: MIT
 - **Repository**: [https://github.com/ljharb/set-function-length](https://github.com/ljharb/set-function-length)
 - **Publisher**: Jordan Harband
