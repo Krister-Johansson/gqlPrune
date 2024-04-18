@@ -6,7 +6,7 @@ import * as path from 'path';
  *
  * @param {string} dir - The directory to start searching from.
  * @param {string[]} extensions - The list of file extensions to match.
- * @param {string[]} excludedFolders - Folders to exclude from the search.
+ * @param {string[]} excludedFolders - Folders to exclude from the search, should be absolute paths.
  * @returns {string[]} - An array of file paths that match the given extensions.
  */
 export function findFilesWithExtension(
@@ -15,12 +15,13 @@ export function findFilesWithExtension(
   excludedFolders: string[],
 ): string[] {
   let files: string[] = [];
-
+  const absDir = path.resolve(dir);
   try {
     const items = fs.readdirSync(dir);
 
     items.forEach((item) => {
       const itemPath = path.join(dir, item);
+      const absItemPath = path.resolve(itemPath);
       let stat;
 
       try {
@@ -36,7 +37,7 @@ export function findFilesWithExtension(
       }
 
       if (stat.isDirectory()) {
-        if (!excludedFolders.includes(item)) {
+        if (!excludedFolders.includes(absItemPath)) {
           files = files.concat(
             findFilesWithExtension(itemPath, extensions, excludedFolders),
           );
