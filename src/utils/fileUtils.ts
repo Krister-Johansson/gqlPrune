@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+const baseDir = path.resolve('./');
 
 /**
  * Recursively finds all files in a directory with the specified extensions.
@@ -16,6 +17,7 @@ export function findFilesWithExtension(
 ): string[] {
   let files: string[] = [];
   const absDir = path.resolve(dir);
+
   try {
     const items = fs.readdirSync(dir);
 
@@ -37,7 +39,9 @@ export function findFilesWithExtension(
       }
 
       if (stat.isDirectory()) {
-        if (!excludedFolders.includes(absItemPath)) {
+        const relativePath = path.relative(baseDir, absItemPath);
+        console.log(`Checking directory: ${relativePath}`);
+        if (!excludedFolders.includes(`./${relativePath}`)) {
           files = files.concat(
             findFilesWithExtension(itemPath, extensions, excludedFolders),
           );
