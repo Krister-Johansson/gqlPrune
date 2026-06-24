@@ -6,8 +6,13 @@ module.exports = {
     'plugin:prettier/recommended',
   ],
   parserOptions: {
-    ecmaVersion: 2020,
+    ecmaVersion: 2022,
     sourceType: 'module',
+  },
+  env: {
+    node: true,
+    es2022: true,
+    jest: true,
   },
   plugins: ['unused-imports'],
   rules: {

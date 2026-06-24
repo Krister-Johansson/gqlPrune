@@ -2,13 +2,17 @@ import * as fs from 'fs';
 import {
   directoryExists,
   findFilesWithExtension,
+  isExcludedFolder,
   isOperationUsed,
+  isOperationUsedInContents,
+  readFileContents,
 } from '../src/utils/fileUtils';
+import { buildUsagePatterns } from '../src/utils/usagePatterns';
 
 jest.mock('fs');
 
 // Suppress console.error logs for the entire test suite
-let originalConsoleError: any;
+let originalConsoleError: typeof console.error;
 
 beforeAll(() => {
   originalConsoleError = console.error;
@@ -123,6 +127,87 @@ describe('fileUtils', () => {
 
       const result = directoryExists('./file.txt');
       expect(result).toBe(false);
+    });
+  });
+
+  describe('isExcludedFolder', () => {
+    it('should exclude by folder basename anywhere in the tree', () => {
+      expect(isExcludedFolder('node_modules', ['node_modules'])).toBe(true);
+      expect(isExcludedFolder('src/api/__generated__', ['__generated__'])).toBe(
+        true,
+      );
+    });
+
+    it('should accept entries with a leading "./"', () => {
+      expect(isExcludedFolder('node_modules', ['./node_modules'])).toBe(true);
+    });
+
+    it('should exclude by path relative to the project root', () => {
+      expect(isExcludedFolder('src/generated', ['src/generated'])).toBe(true);
+    });
+
+    it('should not exclude unrelated folders', () => {
+      expect(isExcludedFolder('src', ['node_modules'])).toBe(false);
+      expect(isExcludedFolder('src/components', [])).toBe(false);
+    });
+  });
+
+  describe('readFileContents', () => {
+    it('should read each file once and return their contents', () => {
+      (fs.readFileSync as jest.Mock)
+        .mockReturnValueOnce('content-a')
+        .mockReturnValueOnce('content-b');
+
+      expect(readFileContents(['a.ts', 'b.ts'])).toEqual([
+        'content-a',
+        'content-b',
+      ]);
+      expect(fs.readFileSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('should skip files that cannot be read', () => {
+      (fs.readFileSync as jest.Mock)
+        .mockImplementationOnce(() => {
+          throw new Error('nope');
+        })
+        .mockReturnValueOnce('content-b');
+
+      expect(readFileContents(['bad.ts', 'b.ts'])).toEqual(['content-b']);
+    });
+  });
+
+  describe('isOperationUsedInContents', () => {
+    it('should detect a pattern across cached contents', () => {
+      expect(
+        isOperationUsedInContents(['useFoo'], ['nope', 'const x = useFoo()']),
+      ).toBe(true);
+      expect(isOperationUsedInContents(['useFoo'], ['nope', 'nada'])).toBe(
+        false,
+      );
+    });
+
+    it('should detect lazy, suspense and document usage (regression)', () => {
+      const patterns = buildUsagePatterns({
+        name: 'GetUser',
+        type: 'query',
+        filePath: 'GetUser.gql',
+      });
+
+      expect(isOperationUsedInContents(patterns, ['useGetUserQuery()'])).toBe(
+        true,
+      );
+      expect(
+        isOperationUsedInContents(patterns, ['useGetUserLazyQuery()']),
+      ).toBe(true);
+      expect(
+        isOperationUsedInContents(patterns, ['useGetUserSuspenseQuery()']),
+      ).toBe(true);
+      expect(
+        isOperationUsedInContents(patterns, ['useQuery(GetUserDocument)']),
+      ).toBe(true);
+      expect(isOperationUsedInContents(patterns, ['useGetThingQuery()'])).toBe(
+        false,
+      );
     });
   });
 });

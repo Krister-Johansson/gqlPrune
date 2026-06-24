@@ -1,56 +1,71 @@
 # gqlPrune: GraphQL Unused Operations Checker
 
-`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans `.gql` files for operations and checks their usage in your TypeScript/JavaScript files.
+`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans `.gql`/`.graphql` files for named operations and checks whether they are referenced anywhere in your TypeScript/JavaScript source.
+
+## How it detects usage
+
+An operation is considered **used** if any of a set of search strings derived from its name appears in your source files. By default `gqlPrune` looks for the conventions emitted by [GraphQL Code Generator](https://the-guild.dev/graphql/codegen) (the `typescript-react-apollo` / near-operation-file presets):
+
+For an operation `query GetUser`, the defaults match:
+
+| Pattern                  | Example                  |
+| ------------------------ | ------------------------ |
+| `use{Name}{Type}`        | `useGetUserQuery`        |
+| `use{Name}Lazy{Type}`    | `useGetUserLazyQuery`    |
+| `use{Name}Suspense{Type}`| `useGetUserSuspenseQuery`|
+| `{Name}Document`         | `GetUserDocument`        |
+
+If your project uses a different convention (urql, react-query, graphql-request, Vue, raw documents, etc.), override the patterns via `usagePatterns` in the config — see below. Without that, operations may be incorrectly reported as unused.
 
 ## Setup
 
-### Installation:
-
-To install `gqlPrune`, run the following command:
+### Installation
 
 ```bash
-npm install gqlPrune
+npm install --save-dev gqlprune
 ```
 
-### Configuration:
+### Configuration
 
-Upon running the `init` command with `gqlPrune`, it will launch a configurator that generates a configuration file named `gqlPrune.config.yaml`. This file should be located at the root of your project.
-
-Example:
+Run the `init` command to launch a configurator that generates `gqlPrune.config.yaml` at the root of your project:
 
 ```bash
-npx gqlPrune init
+npx gqlprune init
 ```
 
 ```yaml
-graphqlDir: path_to_your_graphql_files
-srcDir: path_to_your_source_files
+graphqlDir: ./path/to/graphql
+srcDir: ./src
 excludedFolders:
-  - folder_name_to_exclude
+  - __generated__
+# Optional — override how usage is detected.
+# Supports {name}, {Name}, {type}, {Type} placeholders.
+usagePatterns:
+  - use{Name}{Type}
+  - '{Name}Document'
 ```
 
-- `graphqlDir`: Directory path containing your `.gql` files.
-- `srcDir`: Directory path containing your source files (e.g., `.ts`, `.tsx`, `.js`, `.jsx`).
-- `excludedFolders`: List of folder names you wish to exclude from the search.
+- `graphqlDir`: directory containing your `.gql`/`.graphql` files.
+- `srcDir`: directory containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
+- `excludedFolders` _(optional)_: folder **names** (e.g. `__generated__`, matched anywhere in the tree) or **paths relative to the project root** (e.g. `src/legacy`). `node_modules` and `.git` are always excluded.
+- `usagePatterns` _(optional)_: templates used to detect usage. Defaults to the table above when omitted.
 
 ## Usage
 
-To execute `gqlPrune`:
-
 ```bash
-npx gqlPrune
+npx gqlprune
 ```
 
-This command will display a list of unused GraphQL operations in the console.
+This prints any unused GraphQL operations. The command exits with:
+
+- **0** when no unused operations are found (suitable for CI gates).
+- **1** when unused operations are found (or on configuration errors).
 
 ## Output
 
-The utility outputs the type of operation (query, mutation, subscription), the operation's name, and the filename where the operation is defined. For instance:
+The utility outputs the operation type, name, and the file where it is defined:
 
 ```bash
-query    OperationName       operationFile.query.gql
+Type     Operation       File
+query    OperationName   operationFile.gql
 ```
-
-## Customization
-
-To exclude additional folders from the search, simply update the `excludedFolders` list in the `gqlPrune.config.yaml` file.
