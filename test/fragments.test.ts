@@ -9,12 +9,16 @@ import { FragmentInfo } from '../src/types/FragmentInfo';
 jest.mock('fs');
 
 let originalConsoleError: typeof console.error;
+let originalConsoleWarn: typeof console.warn;
 beforeAll(() => {
   originalConsoleError = console.error;
+  originalConsoleWarn = console.warn;
   console.error = jest.fn();
+  console.warn = jest.fn();
 });
 afterAll(() => {
   console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
 });
 
 const frag = (name: string, filePath = 'x.gql'): FragmentInfo => ({
@@ -129,6 +133,30 @@ describe('fragments', () => {
     it('returns [] when there are no fragments', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('query Q { id }');
       expect(findUnusedFragmentsInCorpus(['ops.gql'], [], [])).toEqual([]);
+    });
+
+    it('warns on duplicate fragment names and merges their spread edges', () => {
+      // a.gql's Dupe spreads OnlyInA; b.gql's Dupe (same name) spreads nothing.
+      // Without merging, the later definition would drop the edge to OnlyInA and
+      // wrongly flag it as unused. Merging keeps it reachable (conservative).
+      (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'a.gql') {
+          return 'fragment Dupe on T { ...OnlyInA }\nfragment OnlyInA on T { id }';
+        }
+        return 'query Q { ...Dupe }\nfragment Dupe on T { id }';
+      });
+      (console.warn as jest.Mock).mockClear();
+
+      const unused = findUnusedFragmentsInCorpus(
+        ['a.gql', 'b.gql'],
+        [],
+        ['{Name}FragmentDoc'],
+      );
+
+      expect(unused.map((f) => f.name)).not.toContain('OnlyInA');
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('duplicate fragment name "Dupe"'),
+      );
     });
   });
 });

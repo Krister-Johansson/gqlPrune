@@ -47,12 +47,12 @@ export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
 }
 
 /**
- * Returns the configured fragment usage patterns, falling back to the defaults
- * when none are provided.
+ * Returns the configured fragment usage patterns. Falls back to the defaults
+ * only when the option is omitted; an explicit empty array is respected (it
+ * disables source-reference detection, leaving spread-graph reachability only).
  */
 export function resolveFragmentUsagePatterns(config: GqlPruneConfig): string[] {
-  return Array.isArray(config.fragmentUsagePatterns) &&
-    config.fragmentUsagePatterns.length > 0
+  return Array.isArray(config.fragmentUsagePatterns)
     ? config.fragmentUsagePatterns
     : DEFAULT_FRAGMENT_USAGE_PATTERNS;
 }

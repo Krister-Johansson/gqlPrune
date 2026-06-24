@@ -11,7 +11,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Krister-Johansson/gqlPrune/badge)](https://scorecard.dev/viewer/?uri=github.com/Krister-Johansson/gqlPrune)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 
-`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) **and unused fragments** in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by a used document — all without needing a running server or schema.
+`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) **and unused fragments** in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by an operation or referenced in source — all without needing a running server or schema.
 
 ## Migrating from 1.x to 2.0
 

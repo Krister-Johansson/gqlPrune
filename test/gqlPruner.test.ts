@@ -115,6 +115,16 @@ describe('gqlPruner', () => {
         }),
       ).toEqual(['{Name}FragmentDoc', '{Name}']);
     });
+
+    it('respects an explicit empty array (disables source detection)', () => {
+      expect(
+        resolveFragmentUsagePatterns({
+          graphqlDir: 'g',
+          srcDir: 's',
+          fragmentUsagePatterns: [],
+        }),
+      ).toEqual([]);
+    });
   });
 
   describe('findUnusedOperations', () => {

@@ -74,15 +74,27 @@ export function findUnusedFragmentsInCorpus(
   const allFragments: FragmentInfo[] = [];
   const fragmentSpreads = new Map<string, string[]>();
   const roots = new Set<string>();
+  const seenFragmentNames = new Set<string>();
 
   for (const file of gqlFiles) {
     const entities = extractGraphqlEntities(file);
     entities.operationSpreads.forEach((spread) => roots.add(spread));
     for (const fragment of entities.fragments) {
+      // Fragment names should be unique across the corpus. If they aren't, the
+      // graph is keyed by name, so warn rather than silently conflate them.
+      if (seenFragmentNames.has(fragment.name)) {
+        console.warn(
+          `Warning: duplicate fragment name "${fragment.name}" defined in multiple files; usage results may be approximate.`,
+        );
+      }
+      seenFragmentNames.add(fragment.name);
       allFragments.push(fragment);
     }
     for (const { name, spreads } of entities.fragmentSpreads) {
-      fragmentSpreads.set(name, spreads);
+      // Merge (not overwrite) so a duplicate definition cannot drop spread
+      // edges — over-approximating reachability keeps results conservative.
+      const existing = fragmentSpreads.get(name) ?? [];
+      fragmentSpreads.set(name, [...new Set([...existing, ...spreads])]);
     }
   }
 
