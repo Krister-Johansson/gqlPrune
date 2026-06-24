@@ -1,6 +1,11 @@
 import inquirer from 'inquirer';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import fs from 'fs';
+
+/** Splits a comma-separated input into a trimmed list of folder names. */
+export function splitFolders(input: string): string[] {
+  return input.split(',').map((folder) => folder.trim());
+}
 
 export async function generateConfig() {
   const questions = [
@@ -21,8 +26,7 @@ export async function generateConfig() {
       name: 'excludedFolders',
       message: 'Enter the folders to exclude (comma separated if multiple):',
       default: 'node_modules',
-      filter: (input: string) =>
-        input.split(',').map((folder) => folder.trim()),
+      filter: splitFolders,
     },
   ];
 

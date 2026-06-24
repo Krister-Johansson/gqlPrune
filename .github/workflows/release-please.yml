@@ -1,0 +1,61 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  # Manual re-publish of the current version on main — e.g. when an auto-publish failed AFTER
+  # the GitHub release was already created (so release_created is no longer true on a re-run).
+  # Safe to re-trigger: npm publish fails harmlessly if the version is already on the registry.
+  workflow_dispatch:
+
+# Least-privilege at the top level (satisfies Scorecard's Token-Permissions check); each job
+# elevates only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # release commits, tags, and the GitHub release
+      pull-requests: write # maintain the release PR
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Manifest mode: config in release-please-config.json + .release-please-manifest.json.
+          # Maintains a release PR that bumps the version and updates CHANGELOG.md from
+          # Conventional Commits; merging that PR creates the git tag + GitHub release.
+
+  # ── npm publish via Trusted Publishing (OIDC) — no NPM_TOKEN secret required, provenance is
+  # automatic. Runs after a release is created, or on a manual dispatch on main to re-publish.
+  #
+  # One-time setup on npmjs.com (Package → Settings → Trusted Publisher):
+  #   Provider: GitHub Actions · Organization: Krister-Johansson · Repository: gqlPrune
+  #   Workflow filename: release-please.yml
+  # Until that exists the publish fails (the tag + GitHub release are already made); just
+  # re-run this workflow via "Run workflow" once the Trusted Publisher is configured.
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24 # Trusted Publishing requires Node >= 22.14
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false # never cache in release builds
+      # Trusted Publishing requires npm >= 11.5.1; upgrade regardless of the bundled version.
+      - run: npm install -g npm@latest
+      - run: npm ci
+      # prepublishOnly (build + test) runs as the pre-publish gate.
+      - run: npm publish --access public

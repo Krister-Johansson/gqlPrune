@@ -1,0 +1,13 @@
+# Codecov configuration — https://docs.codecov.com/docs/codecov-yaml
+# Coverage is a signal here, not a merge gate.
+coverage:
+  status:
+    project:
+      default:
+        informational: true # report, never fail the check
+    patch:
+      default:
+        informational: true
+
+# Keep PRs uncluttered; the badge + Codecov dashboard are enough.
+comment: false

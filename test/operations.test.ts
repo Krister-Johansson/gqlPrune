@@ -4,7 +4,7 @@ import { extractOperations } from '../src/utils/operations';
 jest.mock('fs');
 
 // Suppress console.error logs for the entire test suite
-let originalConsoleError: any;
+let originalConsoleError: typeof console.error;
 
 beforeAll(() => {
   originalConsoleError = console.error;

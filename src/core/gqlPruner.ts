@@ -1,16 +1,63 @@
 import fs from 'fs';
 import kleur from 'kleur';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import path from 'path';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   directoryExists,
   findFilesWithExtension,
-  isOperationUsed,
+  isOperationUsedInContents,
+  readFileContents,
 } from '../utils/fileUtils.js';
-import { capitalizeFirstLetter } from '../utils/stringHelpers.js';
+import {
+  buildUsagePatterns,
+  DEFAULT_USAGE_PATTERNS,
+} from '../utils/usagePatterns.js';
 import { extractOperations } from '../utils/operations.js';
+
+// Folders that are always excluded from traversal, regardless of config.
+export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
+
+/**
+ * Normalizes `excludedFolders` (string | string[] | undefined) and adds the
+ * folders that are always excluded (`node_modules`, `.git`).
+ */
+export function resolveExcludedFolders(config: GqlPruneConfig): string[] {
+  let excludedFolders: string[] = [];
+  if (Array.isArray(config.excludedFolders)) {
+    excludedFolders = config.excludedFolders;
+  } else if (typeof config.excludedFolders === 'string') {
+    excludedFolders = [config.excludedFolders];
+  }
+  return [...new Set([...excludedFolders, ...DEFAULT_EXCLUDED_FOLDERS])];
+}
+
+/**
+ * Returns the configured usage patterns, falling back to the defaults when none
+ * are provided.
+ */
+export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
+  return Array.isArray(config.usagePatterns) && config.usagePatterns.length > 0
+    ? config.usagePatterns
+    : DEFAULT_USAGE_PATTERNS;
+}
+
+/**
+ * Returns the operations that are not referenced by any of the file contents,
+ * using the given usage patterns.
+ */
+export function findUnusedOperations(
+  operations: OperationInfo[],
+  fileContents: string[],
+  usagePatterns: string[],
+): OperationInfo[] {
+  return operations.filter((op) => {
+    const patterns = buildUsagePatterns(op, usagePatterns);
+    return !isOperationUsedInContents(patterns, fileContents);
+  });
+}
+
 export function mainFunction() {
   let config: GqlPruneConfig;
 
@@ -18,38 +65,38 @@ export function mainFunction() {
     const configFile = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
     config = yaml.load(configFile) as GqlPruneConfig;
   } catch (e) {
-    console.error('Error reading the config file:', e);
+    console.error(
+      kleur.red(
+        'Error reading the config file (gqlPrune.config.yaml). Run "gqlPrune init" to create one.',
+      ),
+    );
+    console.error(e);
     process.exit(1);
   }
 
   if (!config || !directoryExists(config.graphqlDir || '')) {
     console.error(
       kleur.red(
-        `Provided GraphQL directory "${config.graphqlDir}" does not exist.`,
+        `Provided GraphQL directory "${config?.graphqlDir}" does not exist.`,
       ),
     );
     process.exit(1);
   }
 
-  if (!config || !directoryExists(config.srcDir || '')) {
+  if (!directoryExists(config.srcDir || '')) {
     console.error(
       kleur.red(`Provided source directory "${config.srcDir}" does not exist.`),
     );
     process.exit(1);
   }
 
-  let excludedFolders: string[] = [];
-
-  if (Array.isArray(config.excludedFolders)) {
-    excludedFolders = config.excludedFolders;
-  } else if (typeof config.excludedFolders === 'string') {
-    excludedFolders = [config.excludedFolders];
-  }
+  const excludedFolders = resolveExcludedFolders(config);
+  const usagePatterns = resolveUsagePatterns(config);
 
   // ---------------- Main Logic ----------------
 
   const gqlFiles = findFilesWithExtension(
-    config.graphqlDir || '',
+    config.graphqlDir,
     ['.gql', '.graphql'],
     excludedFolders,
   );
@@ -65,37 +112,40 @@ export function mainFunction() {
   );
 
   const tsFiles = findFilesWithExtension(
-    config.srcDir || '',
+    config.srcDir,
     ['.ts', '.tsx', '.js', '.jsx'],
     excludedFolders,
   );
-  console.log(
-    `Found ${kleur.yellow(tsFiles.length.toString())} TypeScript files.`,
+  console.log(`Found ${kleur.yellow(tsFiles.length.toString())} source files.`);
+
+  // Read every source file once, then test all operations against the cache
+  // instead of re-reading each file for every operation.
+  const fileContents = readFileContents(tsFiles);
+
+  const unusedOperations = findUnusedOperations(
+    allOperations,
+    fileContents,
+    usagePatterns,
   );
-  const unusedOperations: OperationInfo[] = [];
 
-  allOperations.forEach((op) => {
-    const usagePattern = `use${capitalizeFirstLetter(
-      op.name,
-    )}${capitalizeFirstLetter(op.type)}`;
-    const isUsed = tsFiles.some((file) => isOperationUsed(usagePattern, file));
+  if (unusedOperations.length === 0) {
+    console.log(kleur.green('\n✓ No unused GraphQL operations found.'));
+    return;
+  }
 
-    if (!isUsed) {
-      unusedOperations.push(op);
-    }
-  });
-
-  // Determine the maximum lengths for alignment
+  // Determine the maximum lengths for alignment (header labels included).
   const maxTypeLength = Math.max(
+    'Type'.length,
     ...unusedOperations.map((op) => op.type.length),
   );
   const maxNameLength = Math.max(
+    'Operation'.length,
     ...unusedOperations.map((op) => op.name.length),
   );
 
   console.log(kleur.blue('\n--- Unused GraphQL Operations ---\n'));
   console.log(
-    'Typ'.padEnd(maxTypeLength),
+    'Type'.padEnd(maxTypeLength),
     'Operation'.padEnd(maxNameLength),
     'File',
   );
@@ -110,13 +160,10 @@ export function mainFunction() {
   });
 
   console.log(kleur.blue('---------------------------------'));
-
-  if (unusedOperations.length > 0) {
-    console.log(
-      kleur.red(
-        `Found ${unusedOperations.length} unused GraphQL operations. Please remove them.`,
-      ),
-    );
-    process.exit(1);
-  }
+  console.log(
+    kleur.red(
+      `Found ${unusedOperations.length} unused GraphQL operations. Please remove them.`,
+    ),
+  );
+  process.exit(1);
 }
