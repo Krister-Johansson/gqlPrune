@@ -17,7 +17,46 @@ import {
 import { extractOperations } from '../utils/operations.js';
 
 // Folders that are always excluded from traversal, regardless of config.
-const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
+export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
+
+/**
+ * Normalizes `excludedFolders` (string | string[] | undefined) and adds the
+ * folders that are always excluded (`node_modules`, `.git`).
+ */
+export function resolveExcludedFolders(config: GqlPruneConfig): string[] {
+  let excludedFolders: string[] = [];
+  if (Array.isArray(config.excludedFolders)) {
+    excludedFolders = config.excludedFolders;
+  } else if (typeof config.excludedFolders === 'string') {
+    excludedFolders = [config.excludedFolders];
+  }
+  return [...new Set([...excludedFolders, ...DEFAULT_EXCLUDED_FOLDERS])];
+}
+
+/**
+ * Returns the configured usage patterns, falling back to the defaults when none
+ * are provided.
+ */
+export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
+  return Array.isArray(config.usagePatterns) && config.usagePatterns.length > 0
+    ? config.usagePatterns
+    : DEFAULT_USAGE_PATTERNS;
+}
+
+/**
+ * Returns the operations that are not referenced by any of the file contents,
+ * using the given usage patterns.
+ */
+export function findUnusedOperations(
+  operations: OperationInfo[],
+  fileContents: string[],
+  usagePatterns: string[],
+): OperationInfo[] {
+  return operations.filter((op) => {
+    const patterns = buildUsagePatterns(op, usagePatterns);
+    return !isOperationUsedInContents(patterns, fileContents);
+  });
+}
 
 export function mainFunction() {
   let config: GqlPruneConfig;
@@ -51,21 +90,8 @@ export function mainFunction() {
     process.exit(1);
   }
 
-  // Normalize excludedFolders (string | string[]) and add the safe defaults.
-  let excludedFolders: string[] = [];
-  if (Array.isArray(config.excludedFolders)) {
-    excludedFolders = config.excludedFolders;
-  } else if (typeof config.excludedFolders === 'string') {
-    excludedFolders = [config.excludedFolders];
-  }
-  excludedFolders = [
-    ...new Set([...excludedFolders, ...DEFAULT_EXCLUDED_FOLDERS]),
-  ];
-
-  const usagePatterns =
-    Array.isArray(config.usagePatterns) && config.usagePatterns.length > 0
-      ? config.usagePatterns
-      : DEFAULT_USAGE_PATTERNS;
+  const excludedFolders = resolveExcludedFolders(config);
+  const usagePatterns = resolveUsagePatterns(config);
 
   // ---------------- Main Logic ----------------
 
@@ -96,10 +122,11 @@ export function mainFunction() {
   // instead of re-reading each file for every operation.
   const fileContents = readFileContents(tsFiles);
 
-  const unusedOperations: OperationInfo[] = allOperations.filter((op) => {
-    const patterns = buildUsagePatterns(op, usagePatterns);
-    return !isOperationUsedInContents(patterns, fileContents);
-  });
+  const unusedOperations = findUnusedOperations(
+    allOperations,
+    fileContents,
+    usagePatterns,
+  );
 
   if (unusedOperations.length === 0) {
     console.log(kleur.green('\n✓ No unused GraphQL operations found.'));

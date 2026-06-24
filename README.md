@@ -31,6 +31,8 @@ If your project uses a different convention (urql, react-query, graphql-request,
 
 ### Installation
 
+Requires **Node.js ≥ 20**.
+
 ```bash
 npm install --save-dev gqlprune
 ```
@@ -71,6 +73,18 @@ This prints any unused GraphQL operations. The command exits with:
 - **0** when no unused operations are found (suitable for CI gates).
 - **1** when unused operations are found (or on configuration errors).
 
+### In CI
+
+Add a script and run it in your pipeline; the non-zero exit fails the job when unused operations are found:
+
+```json
+{
+  "scripts": {
+    "gql:prune": "gqlprune"
+  }
+}
+```
+
 ## Output
 
 The utility outputs the operation type, name, and the file where it is defined:
@@ -79,3 +93,19 @@ The utility outputs the operation type, name, and the file where it is defined:
 Type     Operation       File
 query    OperationName   operationFile.gql
 ```
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). This project uses [Conventional Commits](https://www.conventionalcommits.org/); releases and the changelog are automated with release-please.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for how to report a vulnerability.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
+## License
+
+[MIT](./LICENSE)
