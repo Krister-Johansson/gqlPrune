@@ -12,6 +12,13 @@
 
 `gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans `.gql`/`.graphql` files for named operations and checks whether they are referenced anywhere in your TypeScript/JavaScript source.
 
+## Migrating from 1.x to 2.0
+
+- **Node.js ≥ 20** is now required.
+- **The CLI command is `gqlprune`** (lowercase), matching the package name — `npx gqlprune` and a global `gqlprune` both work.
+- **Usage detection is broader and configurable.** It now also matches lazy/suspense hooks and the generated `<Name>Document` constant, not just `use<Name><Type>`. If you use a different client (urql, react-query, raw documents, …), set [`usagePatterns`](#configuration) so your operations aren't reported as unused.
+- **Folder exclusion now works as documented.** `excludedFolders` matches by folder name or root-relative path, and `node_modules`/`.git` are always excluded. (In 1.x the documented `node_modules` entry silently did nothing.)
+
 ## How it detects usage
 
 An operation is considered **used** if any of a set of search strings derived from its name appears in your source files. By default `gqlPrune` looks for the conventions emitted by [GraphQL Code Generator](https://the-guild.dev/graphql/codegen) (the `typescript-react-apollo` / near-operation-file presets):
