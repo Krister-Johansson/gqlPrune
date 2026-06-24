@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.1.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.0.1...gqlprune-v2.1.0) (2026-06-24)
+
+
+### Features
+
+* detect unused fragments across files ([#30](https://github.com/Krister-Johansson/gqlPrune/issues/30)) ([30a37ff](https://github.com/Krister-Johansson/gqlPrune/commit/30a37ff739e1eed2817e588f213bfbf50d3baa25)), closes [#26](https://github.com/Krister-Johansson/gqlPrune/issues/26)
+
 ## [2.0.1](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.0.0...gqlprune-v2.0.1) (2026-06-24)
 
 
