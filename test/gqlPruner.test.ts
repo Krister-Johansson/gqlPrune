@@ -1,14 +1,19 @@
 import * as fs from 'fs';
 import * as fileUtils from '../src/utils/fileUtils';
 import { extractOperations } from '../src/utils/operations';
+import * as fragments from '../src/utils/fragments';
 import {
   DEFAULT_EXCLUDED_FOLDERS,
   findUnusedOperations,
   mainFunction,
   resolveExcludedFolders,
+  resolveFragmentUsagePatterns,
   resolveUsagePatterns,
 } from '../src/core/gqlPruner';
-import { DEFAULT_USAGE_PATTERNS } from '../src/utils/usagePatterns';
+import {
+  DEFAULT_FRAGMENT_USAGE_PATTERNS,
+  DEFAULT_USAGE_PATTERNS,
+} from '../src/utils/usagePatterns';
 import { OperationInfo } from '../src/types/OperationInfo';
 
 jest.mock('fs');
@@ -26,11 +31,16 @@ jest.mock('../src/utils/fileUtils', () => {
 jest.mock('../src/utils/operations', () => ({
   extractOperations: jest.fn(),
 }));
+jest.mock('../src/utils/fragments', () => ({
+  findUnusedFragmentsInCorpus: jest.fn(() => []),
+}));
 
 const mockedDirExists = fileUtils.directoryExists as jest.Mock;
 const mockedFind = fileUtils.findFilesWithExtension as jest.Mock;
 const mockedRead = fileUtils.readFileContents as jest.Mock;
 const mockedExtract = extractOperations as jest.Mock;
+const mockedUnusedFragments =
+  fragments.findUnusedFragmentsInCorpus as jest.Mock;
 
 describe('gqlPruner', () => {
   describe('resolveExcludedFolders', () => {
@@ -86,6 +96,24 @@ describe('gqlPruner', () => {
           usagePatterns: ['{Name}'],
         }),
       ).toEqual(['{Name}']);
+    });
+  });
+
+  describe('resolveFragmentUsagePatterns', () => {
+    it('defaults when not provided', () => {
+      expect(
+        resolveFragmentUsagePatterns({ graphqlDir: 'g', srcDir: 's' }),
+      ).toEqual(DEFAULT_FRAGMENT_USAGE_PATTERNS);
+    });
+
+    it('uses configured patterns when provided', () => {
+      expect(
+        resolveFragmentUsagePatterns({
+          graphqlDir: 'g',
+          srcDir: 's',
+          fragmentUsagePatterns: ['{Name}FragmentDoc', '{Name}'],
+        }),
+      ).toEqual(['{Name}FragmentDoc', '{Name}']);
     });
   });
 
@@ -205,6 +233,44 @@ describe('gqlPruner', () => {
       expect(() => mainFunction()).not.toThrow();
       expect(exitSpy).not.toHaveBeenCalled();
       expect(logged()).toContain('No unused');
+    });
+
+    it('exits 1 and lists unused fragments even when operations are clean', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([]); // no operations at all
+      mockedRead.mockReturnValue(['']);
+      mockedUnusedFragments.mockReturnValueOnce([
+        { name: 'DeadFragment', filePath: 'a.gql' },
+      ]);
+
+      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(logged()).toContain('DeadFragment');
+      expect(logged()).toContain('unused GraphQL fragments');
+    });
+
+    it('passes gqlFiles, source contents, and fragment patterns to the corpus scan', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\nfragmentUsagePatterns:\n  - "{Name}FragmentDoc"\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([]);
+      mockedRead.mockReturnValue(['source']);
+
+      expect(() => mainFunction()).not.toThrow();
+      expect(mockedUnusedFragments).toHaveBeenCalledWith(
+        ['a.gql'],
+        ['source'],
+        ['{Name}FragmentDoc'],
+      );
     });
   });
 });

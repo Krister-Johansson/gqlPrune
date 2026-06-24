@@ -1,5 +1,6 @@
 import {
   DEFAULT_USAGE_PATTERNS,
+  buildFragmentPatterns,
   buildUsagePatterns,
   expandPattern,
 } from '../src/utils/usagePatterns';
@@ -45,6 +46,24 @@ describe('usagePatterns', () => {
       expect(buildUsagePatterns(op)).toEqual(
         buildUsagePatterns(op, DEFAULT_USAGE_PATTERNS),
       );
+    });
+  });
+
+  describe('buildFragmentPatterns', () => {
+    it('expands {Name} and {name} placeholders', () => {
+      expect(
+        buildFragmentPatterns('userFields', ['{Name}FragmentDoc', '{name}']),
+      ).toEqual(['UserFieldsFragmentDoc', 'userFields']);
+    });
+
+    it('defaults to {Name}FragmentDoc', () => {
+      expect(buildFragmentPatterns('userFields')).toEqual([
+        'UserFieldsFragmentDoc',
+      ]);
+    });
+
+    it('de-duplicates expanded patterns', () => {
+      expect(buildFragmentPatterns('x', ['{Name}', '{Name}'])).toEqual(['X']);
     });
   });
 });

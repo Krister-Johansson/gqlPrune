@@ -50,3 +50,31 @@ export function buildUsagePatterns(
 ): string[] {
   return [...new Set(patterns.map((pattern) => expandPattern(pattern, op)))];
 }
+
+/**
+ * Default patterns used to detect whether a fragment is referenced directly in
+ * source code — e.g. GraphQL Code Generator's `<Name>FragmentDoc` constant under
+ * fragment masking. Only `{name}` / `{Name}` placeholders apply (fragments have
+ * no operation type). Override via `fragmentUsagePatterns` in the config.
+ */
+export const DEFAULT_FRAGMENT_USAGE_PATTERNS = ['{Name}FragmentDoc'];
+
+/**
+ * Builds the de-duplicated list of concrete search strings used to determine
+ * whether a fragment is referenced in source code.
+ */
+export function buildFragmentPatterns(
+  fragmentName: string,
+  patterns: string[] = DEFAULT_FRAGMENT_USAGE_PATTERNS,
+): string[] {
+  const capitalized = capitalizeFirstLetter(fragmentName);
+  return [
+    ...new Set(
+      patterns.map((pattern) =>
+        pattern
+          .replace(/\{Name\}/g, capitalized)
+          .replace(/\{name\}/g, fragmentName),
+      ),
+    ),
+  ];
+}
