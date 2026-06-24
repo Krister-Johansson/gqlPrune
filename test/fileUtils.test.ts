@@ -146,6 +146,11 @@ describe('fileUtils', () => {
       expect(isExcludedFolder('src/generated', ['src/generated'])).toBe(true);
     });
 
+    it('should match entries written with Windows backslashes', () => {
+      // path.relative emits backslashes on Windows; config uses forward slashes.
+      expect(isExcludedFolder('src/generated', ['src\\generated'])).toBe(true);
+    });
+
     it('should not exclude unrelated folders', () => {
       expect(isExcludedFolder('src', ['node_modules'])).toBe(false);
       expect(isExcludedFolder('src/components', [])).toBe(false);

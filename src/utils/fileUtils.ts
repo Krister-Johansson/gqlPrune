@@ -3,14 +3,16 @@ import * as path from 'path';
 const baseDir = path.resolve('./');
 
 /**
- * Normalizes a folder entry from the config so it can be matched reliably:
- * trims whitespace, strips a leading `./` and any trailing slashes.
+ * Normalizes a folder entry so it can be matched reliably across platforms:
+ * converts backslashes to forward slashes (Windows `path.relative` output),
+ * trims whitespace, and strips a leading `./` and any trailing slashes.
  */
 function normalizeFolder(folder: string): string {
   return folder
     .trim()
+    .replace(/\\/g, '/')
     .replace(/^\.\//, '')
-    .replace(/[/\\]+$/, '');
+    .replace(/\/+$/, '');
 }
 
 /**
