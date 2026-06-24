@@ -8,6 +8,9 @@ on:
     - cron: "27 7 * * 1"
   push:
     branches: [main]
+  # Allow re-scanning on demand (Actions tab → Run workflow) instead of
+  # waiting for the weekly cron.
+  workflow_dispatch:
 
 # Least-privilege by default; the analysis job elevates only what it needs.
 permissions: read-all
