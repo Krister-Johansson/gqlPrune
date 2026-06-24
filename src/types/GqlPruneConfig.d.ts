@@ -13,4 +13,12 @@ export interface GqlPruneConfig {
    * GraphQL Code Generator hook/document conventions when omitted.
    */
   usagePatterns?: string[];
+  /**
+   * Templates used to detect whether a fragment is referenced directly in source
+   * code (e.g. a `<Name>FragmentDoc` constant under fragment masking). Supports
+   * `{name}` / `{Name}` placeholders. Defaults to `{Name}FragmentDoc` when
+   * omitted; pass an empty array `[]` to disable source-reference detection and
+   * rely only on fragment-spread reachability.
+   */
+  fragmentUsagePatterns?: string[];
 }

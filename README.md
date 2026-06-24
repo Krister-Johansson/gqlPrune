@@ -11,7 +11,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Krister-Johansson/gqlPrune/badge)](https://scorecard.dev/viewer/?uri=github.com/Krister-Johansson/gqlPrune)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 
-`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans `.gql`/`.graphql` files for named operations and checks whether they are referenced anywhere in your TypeScript/JavaScript source.
+`gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) **and unused fragments** in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by an operation or referenced in source — all without needing a running server or schema.
 
 ## Migrating from 1.x to 2.0
 
@@ -34,6 +34,15 @@ For an operation `query GetUser`, the defaults match:
 | `{Name}Document`         | `GetUserDocument`        |
 
 If your project uses a different convention (urql, react-query, graphql-request, Vue, raw documents, etc.), override the patterns via `usagePatterns` in the config — see below. Without that, operations may be incorrectly reported as unused.
+
+### Unused fragments
+
+`gqlPrune` also reports **fragments that are never used**, across files and without a schema. A fragment is considered **used** when it is either:
+
+- spread (directly or transitively) by **any** operation in your `.gql` corpus, or
+- referenced in your source via a fragment pattern — by default the codegen `<Name>FragmentDoc` constant (e.g. under fragment masking). Override with `fragmentUsagePatterns`.
+
+A fragment spread only by another _unused_ fragment is reported too. Note: a fragment is kept alive by any operation that spreads it, even an unused one — that operation is reported separately, so the fragment surfaces on the next run once you remove the operation.
 
 ## Setup
 
@@ -58,17 +67,22 @@ graphqlDir: ./path/to/graphql
 srcDir: ./src
 excludedFolders:
   - __generated__
-# Optional — override how usage is detected.
+# Optional — override how operation usage is detected.
 # Supports {name}, {Name}, {type}, {Type} placeholders.
 usagePatterns:
   - use{Name}{Type}
   - '{Name}Document'
+# Optional — override how fragments are matched in source (e.g. masking).
+# Supports {name}, {Name} placeholders.
+fragmentUsagePatterns:
+  - '{Name}FragmentDoc'
 ```
 
 - `graphqlDir`: directory containing your `.gql`/`.graphql` files.
 - `srcDir`: directory containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
 - `excludedFolders` _(optional)_: folder **names** (e.g. `__generated__`, matched anywhere in the tree) or **paths relative to the project root** (e.g. `src/legacy`). `node_modules` and `.git` are always excluded.
-- `usagePatterns` _(optional)_: templates used to detect usage. Defaults to the table above when omitted.
+- `usagePatterns` _(optional)_: templates used to detect operation usage. Defaults to the table above when omitted.
+- `fragmentUsagePatterns` _(optional)_: templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 
 ## Usage
 
@@ -76,10 +90,10 @@ usagePatterns:
 npx gqlprune
 ```
 
-This prints any unused GraphQL operations. The command exits with:
+This prints any unused GraphQL operations and fragments. The command exits with:
 
-- **0** when no unused operations are found (suitable for CI gates).
-- **1** when unused operations are found (or on configuration errors).
+- **0** when nothing unused is found (suitable for CI gates).
+- **1** when unused operations or fragments are found (or on configuration errors).
 
 ### In CI
 
@@ -95,11 +109,16 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 
 ## Output
 
-The utility outputs the operation type, name, and the file where it is defined:
+Unused operations and fragments are listed in separate sections — operations by type, name, and file; fragments by name and file:
 
 ```bash
+--- Unused GraphQL Operations ---
 Type     Operation       File
 query    OperationName   operationFile.gql
+
+--- Unused GraphQL Fragments ---
+Fragment        File
+FragmentName    fragmentFile.gql
 ```
 
 ## Contributing
