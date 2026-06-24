@@ -1,6 +1,6 @@
 import fs from 'fs';
 import kleur from 'kleur';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import path from 'path';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
