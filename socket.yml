@@ -1,0 +1,27 @@
+# Socket.dev configuration — https://docs.socket.dev/docs/socket-yml
+# Takes effect once the Socket GitHub App is installed on this repo.
+#
+# Context: the published surface is `dist/` + `CHANGELOG.md` only. The runtime
+# dependencies are graphql, inquirer, js-yaml and kleur. Any dependency alerts on
+# socket.dev that trace to dev/test tooling (jest, ts-jest, eslint, typescript)
+# never ship to consumers.
+version: 2
+
+# Only run pull-request alert scans when a dependency manifest actually changes.
+# Socket only ever ingests manifest files (never application source), so
+# docs- or source-only PRs don't need a scan.
+triggerPaths:
+  - "package.json"
+  - "package-lock.json"
+
+githubApp:
+  enabled: true
+  pullRequestAlertsEnabled: true
+  dependencyOverviewEnabled: true
+  projectReportsEnabled: true
+
+# We deliberately do NOT blanket-disable supply-chain issue types via
+# `issueRules`: that is global per-type and would also hide a genuinely malicious
+# future dependency. Known false positives should be triaged per-alert with a
+# `@SocketSecurity ignore` pull-request comment:
+#   https://docs.socket.dev/docs/ignoring-pull-request-alerts

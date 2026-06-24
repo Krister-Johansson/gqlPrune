@@ -5,21 +5,36 @@ on:
     branches: [main]
   pull_request:
 
+# Least-privilege default token; no job here needs write access.
+permissions:
+  contents: read
+
 jobs:
-  build:
+  build-test:
+    name: build + lint + test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [20.x, 22.x]
+        node: [20, 22]
     steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
       - run: npm run build
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run coverage
+      - name: Upload coverage to Codecov
+        if: matrix.node == 20
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # Best-effort: never fail CI on an upload hiccup or a not-yet-set token.
+          fail_ci_if_error: false

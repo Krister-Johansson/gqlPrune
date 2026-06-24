@@ -1,5 +1,15 @@
 # gqlPrune: GraphQL Unused Operations Checker
 
+[![npm](https://img.shields.io/npm/v/gqlprune)](https://www.npmjs.com/package/gqlprune)
+[![npm downloads](https://img.shields.io/npm/dm/gqlprune)](https://www.npmjs.com/package/gqlprune)
+[![node](https://img.shields.io/node/v/gqlprune)](https://www.npmjs.com/package/gqlprune)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
+[![CI](https://github.com/Krister-Johansson/gqlPrune/actions/workflows/ci.yml/badge.svg)](https://github.com/Krister-Johansson/gqlPrune/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Krister-Johansson/gqlPrune/branch/main/graph/badge.svg)](https://codecov.io/gh/Krister-Johansson/gqlPrune)
+[![Socket Badge](https://socket.dev/api/badge/npm/package/gqlprune)](https://socket.dev/npm/package/gqlprune)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Krister-Johansson/gqlPrune/badge)](https://scorecard.dev/viewer/?uri=github.com/Krister-Johansson/gqlPrune)
+
 `gqlPrune` is a utility that identifies unused GraphQL operations (queries, mutations, subscriptions) in your project. It scans `.gql`/`.graphql` files for named operations and checks whether they are referenced anywhere in your TypeScript/JavaScript source.
 
 ## How it detects usage

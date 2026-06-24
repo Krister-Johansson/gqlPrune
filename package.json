@@ -6,7 +6,8 @@
     "gqlPrune": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "main": "./dist/cli.js",
   "type": "module",
@@ -17,11 +18,12 @@
     "start": "node ./dist/cli.js",
     "dev": "npm run build && npm run start",
     "test": "jest",
+    "coverage": "jest --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.{js,ts,tsx}' 'test/**/*.{js,ts,tsx}'",
     "lint:fix": "eslint 'src/**/*.{js,ts,tsx}' 'test/**/*.{js,ts,tsx}' --fix",
     "format": "prettier --write 'src/**/*.{js,ts,tsx}'",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -61,7 +63,6 @@
     "jest": "^30.4.2",
     "prettier": "^3.8.4",
     "rimraf": "^6.1.3",
-    "standard-version": "^9.5.0",
     "ts-jest": "^29.4.11",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.0"
