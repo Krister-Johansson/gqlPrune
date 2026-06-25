@@ -207,6 +207,7 @@ describe('gqlPruner', () => {
       exitSpy.mockRestore();
       logSpy.mockRestore();
       errorSpy.mockRestore();
+      process.exitCode = 0; // report paths set exitCode; don't leak to the runner
     });
 
     it('exits 1 when the config file cannot be read', () => {
@@ -248,7 +249,8 @@ describe('gqlPruner', () => {
       ]);
       mockedRead.mockReturnValue(['const r = useGetUserQuery()']);
 
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      mainFunction();
+      expect(process.exitCode).toBe(1);
       expect(logged()).toContain('Unused');
       expect(logged()).toContain('unused GraphQL operations');
     });
@@ -285,7 +287,8 @@ describe('gqlPruner', () => {
         { name: 'DeadFragment', filePath: 'a.gql' },
       ]);
 
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      mainFunction();
+      expect(process.exitCode).toBe(1);
       expect(logged()).toContain('DeadFragment');
       expect(logged()).toContain('unused GraphQL fragments');
     });
@@ -326,7 +329,8 @@ describe('gqlPruner', () => {
         { name: 'DeadFrag', filePath: 'a.gql', line: 5 },
       ]);
 
-      expect(() => mainFunction({ json: true })).toThrow('process.exit:1');
+      mainFunction({ json: true });
+      expect(process.exitCode).toBe(1);
       const out = logged();
       expect(out).not.toContain('Found ');
       const report = JSON.parse(out);

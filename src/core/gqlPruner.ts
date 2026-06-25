@@ -255,8 +255,9 @@ export function mainFunction(options: { json?: boolean } = {}) {
         2,
       ),
     );
+    // Use exitCode (not process.exit) so the piped JSON fully flushes first.
     if (unusedOperations.length > 0 || unusedFragments.length > 0) {
-      process.exit(1);
+      process.exitCode = 1;
     }
     return;
   }
@@ -275,5 +276,6 @@ export function mainFunction(options: { json?: boolean } = {}) {
     reportUnusedFragments(unusedFragments);
   }
 
-  process.exit(1);
+  // Use exitCode (not process.exit) so all report output flushes before exit.
+  process.exitCode = 1;
 }
