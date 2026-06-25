@@ -100,19 +100,25 @@ export function findFilesWithExtension(
   return files;
 }
 
+/** A source file path paired with its contents. */
+export type SourceFile = { file: string; content: string };
+
 /**
- * Reads the contents of multiple files once, skipping any that cannot be read.
+ * Reads multiple files once, keeping each path paired with its contents and
+ * skipping any that cannot be read. Pairing (rather than returning a bare
+ * content array aligned by index) keeps a file's identity intact even when an
+ * earlier file in the list fails to read.
  *
  * @param {string[]} filePaths - The files to read.
- * @returns {string[]} - The contents of the readable files.
+ * @returns {SourceFile[]} - One entry per readable file.
  */
-export function readFileContents(filePaths: string[]): string[] {
-  const contents: string[] = [];
-  for (const filePath of filePaths) {
+export function readSourceFiles(filePaths: string[]): SourceFile[] {
+  const sources: SourceFile[] = [];
+  for (const file of filePaths) {
     try {
-      contents.push(fs.readFileSync(filePath, 'utf-8'));
+      sources.push({ file, content: fs.readFileSync(file, 'utf-8') });
     } catch (error) {
-      console.error(`Error reading file: ${filePath}`);
+      console.error(`Error reading file: ${file}`);
       if (error instanceof Error) {
         console.error(error.message);
       } else {
@@ -120,7 +126,17 @@ export function readFileContents(filePaths: string[]): string[] {
       }
     }
   }
-  return contents;
+  return sources;
+}
+
+/**
+ * Reads the contents of multiple files once, skipping any that cannot be read.
+ *
+ * @param {string[]} filePaths - The files to read.
+ * @returns {string[]} - The contents of the readable files.
+ */
+export function readFileContents(filePaths: string[]): string[] {
+  return readSourceFiles(filePaths).map((source) => source.content);
 }
 
 /**
