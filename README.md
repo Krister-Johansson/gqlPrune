@@ -94,6 +94,24 @@ fragmentUsagePatterns:
 - `usagePatterns` _(optional)_: templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` _(optional)_: templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 
+### Without a config file (CLI flags)
+
+Every config field has a matching flag, so you can run gqlPrune with **no `gqlPrune.config.yaml`** — handy for a one-off `npx` try with zero setup:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --ignore __generated__
+```
+
+| Flag | Config field |
+| ---- | ------------ |
+| `--graphql <dir>` | `graphqlDir` |
+| `--src <dir>` | `srcDir` |
+| `--ignore <folder>` _(repeatable)_ | `excludedFolders` |
+| `--pattern <template>` _(repeatable)_ | `usagePatterns` |
+| `--fragment-pattern <template>` _(repeatable)_ | `fragmentUsagePatterns` |
+
+Both `--flag value` and `--flag=value` work, in any order. **Precedence:** a flag overrides the same field in the YAML; flags alone work with no YAML; YAML alone works exactly as before. A list flag (e.g. `--ignore`) _replaces_ that list from the YAML rather than appending to it.
+
 ## Usage
 
 ```bash

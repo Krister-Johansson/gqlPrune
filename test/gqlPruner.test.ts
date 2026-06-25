@@ -10,6 +10,7 @@ import {
   formatAnnotations,
   formatGeneratedFileWarnings,
   mainFunction,
+  resolveConfig,
   resolveExcludedFolders,
   resolveFragmentUsagePatterns,
   resolveUsagePatterns,
@@ -383,6 +384,70 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('resolveConfig', () => {
+    const enoent = () => {
+      const err = new Error('missing') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      throw err;
+    };
+
+    it('reads the YAML file when present', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      expect(resolveConfig()).toEqual({ graphqlDir: './g', srcDir: './s' });
+    });
+
+    it('treats an empty config file as no config (CLI flags still apply)', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('');
+      expect(resolveConfig({ graphqlDir: './g', srcDir: './s' })).toEqual({
+        graphqlDir: './g',
+        srcDir: './s',
+      });
+    });
+
+    it('uses CLI config alone when the file is missing (ENOENT)', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation(enoent);
+      expect(resolveConfig({ graphqlDir: './g', srcDir: './s' })).toEqual({
+        graphqlDir: './g',
+        srcDir: './s',
+      });
+    });
+
+    it('lets CLI flags override YAML values per field', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./yaml-g\nsrcDir: ./yaml-s\n',
+      );
+      expect(resolveConfig({ srcDir: './cli-s' })).toEqual({
+        graphqlDir: './yaml-g',
+        srcDir: './cli-s',
+      });
+    });
+
+    it('replaces (not merges) a YAML list when a list flag is given', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'excludedFolders:\n  - yaml-only\n',
+      );
+      expect(resolveConfig({ excludedFolders: ['cli-only'] })).toEqual({
+        excludedFolders: ['cli-only'],
+      });
+    });
+
+    it('throws on a malformed config file', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('graphqlDir: [');
+      expect(() => resolveConfig()).toThrow();
+    });
+
+    it('rethrows a non-ENOENT read error', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation(() => {
+        const err = new Error('eacces') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      });
+      expect(() => resolveConfig()).toThrow('eacces');
+    });
+  });
+
   describe('mainFunction', () => {
     let exitSpy: jest.SpyInstance;
     let logSpy: jest.SpyInstance;
@@ -659,6 +724,42 @@ describe('gqlPruner', () => {
       expect(errs).toContain('::warning::Suspected generated file');
       // The "%" in "100%" is escaped for the workflow command.
       expect(errs).toContain('100%25');
+    });
+
+    it('runs from CLI config when no config file exists', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation(() => {
+        const err = new Error('missing') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      expect(() =>
+        mainFunction({ config: { graphqlDir: './g', srcDir: './s' } }),
+      ).not.toThrow();
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(logged()).toContain('No unused');
+    });
+
+    it('exits 1 with guidance when neither a config file nor flags supply dirs', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation(() => {
+        const err = new Error('missing') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
+
+      expect(() => mainFunction()).toThrow('process.exit:1');
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('--graphql');
     });
   });
 });

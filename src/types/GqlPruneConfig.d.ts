@@ -22,3 +22,15 @@ export interface GqlPruneConfig {
    */
   fragmentUsagePatterns?: string[];
 }
+
+/**
+ * Configuration that can be supplied as CLI flags instead of (or on top of)
+ * `gqlPrune.config.yaml`. The list fields come from repeatable flags and
+ * replace — rather than merge with — their YAML counterparts.
+ */
+export type CliConfig = Partial<
+  Pick<
+    GqlPruneConfig,
+    'graphqlDir' | 'srcDir' | 'usagePatterns' | 'fragmentUsagePatterns'
+  >
+> & { excludedFolders?: string[] };
