@@ -3,7 +3,7 @@ import * as yaml from 'js-yaml';
 import fs from 'fs';
 import * as path from 'path';
 import { directoryExists, findFilesWithExtension } from '../utils/fileUtils.js';
-import { scanProject } from './gqlPruner.js';
+import { resolveDirs, scanProject } from './gqlPruner.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
 // Folders never worth scanning when auto-detecting the project layout.
@@ -63,7 +63,11 @@ export function detectSrcDir(): string | undefined {
 
 /** Prints a one-line preview of what a real run would find, when the dirs exist. */
 function printPreview(config: GqlPruneConfig): void {
-  if (!directoryExists(config.graphqlDir) || !directoryExists(config.srcDir)) {
+  const dirs = [
+    ...resolveDirs(config.graphqlDir),
+    ...resolveDirs(config.srcDir),
+  ];
+  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
     console.log('Run "gqlprune" to scan for unused GraphQL operations.');
     return;
   }

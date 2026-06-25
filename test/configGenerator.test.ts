@@ -14,7 +14,11 @@ jest.mock('inquirer', () => ({
   __esModule: true,
   default: { prompt: jest.fn() },
 }));
-jest.mock('../src/core/gqlPruner', () => ({ scanProject: jest.fn() }));
+jest.mock('../src/core/gqlPruner', () => ({
+  scanProject: jest.fn(),
+  resolveDirs: (value: unknown) =>
+    Array.isArray(value) ? value : value ? [value] : [],
+}));
 
 const mockedScan = scanProject as jest.Mock;
 

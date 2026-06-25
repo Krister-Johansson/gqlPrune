@@ -92,11 +92,22 @@ fragmentUsagePatterns:
   - '{Name}FragmentDoc'
 ```
 
-- `graphqlDir`: directory containing your `.gql`/`.graphql` files.
-- `srcDir`: directory containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
+- `graphqlDir`: directory **— or an array of directories —** containing your `.gql`/`.graphql` files.
+- `srcDir`: directory **— or an array of directories —** containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
 - `excludedFolders` _(optional)_: folder **names** (e.g. `__generated__`, matched anywhere in the tree) or **paths relative to the project root** (e.g. `src/legacy`). `node_modules` and `.git` are always excluded.
 - `usagePatterns` _(optional)_: templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` _(optional)_: templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
+
+For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a **list of directories**:
+
+```yaml
+graphqlDir:
+  - ./packages/web/graphql
+  - ./packages/admin/graphql
+srcDir:
+  - ./packages/web/src
+  - ./packages/admin/src
+```
 
 ### Without a config file (CLI flags)
 

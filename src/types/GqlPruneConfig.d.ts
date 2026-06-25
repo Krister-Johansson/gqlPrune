@@ -1,6 +1,8 @@
 export interface GqlPruneConfig {
-  graphqlDir: string;
-  srcDir: string;
+  /** Directory (or directories) containing your `.gql`/`.graphql` files. */
+  graphqlDir: string | string[];
+  /** Directory (or directories) containing your source files. */
+  srcDir: string | string[];
   /**
    * Folder names (e.g. `__generated__`) or paths relative to the project root
    * (e.g. `src/generated`) to exclude from traversal. `node_modules` and `.git`
