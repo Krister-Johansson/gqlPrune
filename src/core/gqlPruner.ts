@@ -392,6 +392,67 @@ export function resolveConfig(
   return { ...fileConfig, ...cliConfig };
 }
 
+/** The result of a single project scan, free of any console output. */
+export type ScanResult = {
+  gqlFileCount: number;
+  sourceFileCount: number;
+  operationCount: number;
+  unusedOperations: OperationInfo[];
+  unusedFragments: FragmentInfo[];
+  generatedWarnings: string[];
+};
+
+/**
+ * Runs one full scan for the given config and returns the results without
+ * printing anything. Shared by `mainFunction` (which presents the results) and
+ * `gqlprune init`'s preview, so the preview always reflects the real run.
+ */
+export function scanProject(config: GqlPruneConfig): ScanResult {
+  const excludedFolders = resolveExcludedFolders(config);
+  const usagePatterns = resolveUsagePatterns(config);
+  const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
+
+  const gqlFiles = findFilesWithExtension(
+    config.graphqlDir,
+    ['.gql', '.graphql'],
+    excludedFolders,
+  );
+  const operations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
+
+  const tsFiles = findFilesWithExtension(
+    config.srcDir,
+    ['.ts', '.tsx', '.js', '.jsx'],
+    excludedFolders,
+  );
+  // Read every source file once (paired with its path), then test all operations
+  // against the cache instead of re-reading each file for every operation.
+  const sources = readSourceFiles(tsFiles);
+  const fileContents = sources.map((source) => source.content);
+
+  const unusedOperations = findUnusedOperations(
+    operations,
+    fileContents,
+    usagePatterns,
+  );
+  const unusedFragments = findUnusedFragmentsInCorpus(
+    gqlFiles,
+    fileContents,
+    fragmentUsagePatterns,
+  );
+  const generatedWarnings = formatGeneratedFileWarnings(
+    detectGeneratedFiles(sources, operations, usagePatterns),
+  );
+
+  return {
+    gqlFileCount: gqlFiles.length,
+    sourceFileCount: tsFiles.length,
+    operationCount: operations.length,
+    unusedOperations,
+    unusedFragments,
+    generatedWarnings,
+  };
+}
+
 export function mainFunction(
   options: { json?: boolean; annotate?: boolean; config?: CliConfig } = {},
 ) {
@@ -439,64 +500,33 @@ export function mainFunction(
     process.exit(1);
   }
 
-  const excludedFolders = resolveExcludedFolders(config);
-  const usagePatterns = resolveUsagePatterns(config);
-  const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
-
   // ---------------- Main Logic ----------------
 
-  const gqlFiles = findFilesWithExtension(
-    config.graphqlDir,
-    ['.gql', '.graphql'],
-    excludedFolders,
-  );
-  const allOperations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
+  const {
+    gqlFileCount,
+    sourceFileCount,
+    operationCount,
+    unusedOperations,
+    unusedFragments,
+    generatedWarnings,
+  } = scanProject(config);
 
   if (!json) {
     console.log(
-      `Found ${kleur.yellow(gqlFiles.length.toString())} GraphQL files.`,
+      `Found ${kleur.yellow(gqlFileCount.toString())} GraphQL files.`,
     );
     console.log(
-      `Found ${kleur.yellow(
-        allOperations.length.toString(),
-      )} GraphQL operations.`,
+      `Found ${kleur.yellow(operationCount.toString())} GraphQL operations.`,
     );
-  }
-
-  const tsFiles = findFilesWithExtension(
-    config.srcDir,
-    ['.ts', '.tsx', '.js', '.jsx'],
-    excludedFolders,
-  );
-  if (!json) {
     console.log(
-      `Found ${kleur.yellow(tsFiles.length.toString())} source files.`,
+      `Found ${kleur.yellow(sourceFileCount.toString())} source files.`,
     );
   }
-
-  // Read every source file once (paired with its path), then test all operations
-  // against the cache instead of re-reading each file for every operation.
-  const sources = readSourceFiles(tsFiles);
-  const fileContents = sources.map((source) => source.content);
-
-  const unusedOperations = findUnusedOperations(
-    allOperations,
-    fileContents,
-    usagePatterns,
-  );
-  const unusedFragments = findUnusedFragmentsInCorpus(
-    gqlFiles,
-    fileContents,
-    fragmentUsagePatterns,
-  );
 
   // Warn when a single file references most operations (e.g. un-excluded codegen
   // output): it would silently make every operation look "used" and report
   // nothing unused. Emit to stderr so it surfaces in --json mode too without
   // corrupting the JSON on stdout.
-  const generatedWarnings = formatGeneratedFileWarnings(
-    detectGeneratedFiles(sources, allOperations, usagePatterns),
-  );
   for (const line of generatedWarnings) {
     // In CI, surface it as an (escaped) ::warning workflow command like the other
     // annotations; otherwise a coloured stderr line for humans.
