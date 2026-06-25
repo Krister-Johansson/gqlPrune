@@ -13,9 +13,31 @@ import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 // Folders never worth scanning when auto-detecting the project layout.
 const isDetectExcluded = createExcludeMatcher(['node_modules', '.git', 'dist']);
 
-/** Splits a comma-separated input into a trimmed list of folder names. */
+/** Splits a comma-separated input into a trimmed list, dropping empty entries. */
 export function splitFolders(input: string): string[] {
-  return input.split(',').map((folder) => folder.trim());
+  return input
+    .split(',')
+    .map((folder) => folder.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Detects source files that would mask unused results (a generated file inside
+ * `srcDir` referencing most operations — see {@link detectGeneratedFiles}) so
+ * `init` can pre-fill them into `exclude`. Returns their project-root-relative
+ * paths, or `[]` when a directory is missing (nothing to scan yet).
+ */
+export function detectGeneratedExcludes(
+  graphqlDir: string,
+  srcDir: string,
+): string[] {
+  const dirs = [...resolveDirs(graphqlDir), ...resolveDirs(srcDir)];
+  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
+    return [];
+  }
+  return scanProject({ graphqlDir, srcDir }).generatedFiles.map((warning) =>
+    warning.file.replace(/\\/g, '/'),
+  );
 }
 
 /**
@@ -84,24 +106,39 @@ function printPreview(config: GqlPruneConfig): void {
 }
 
 export async function generateConfig() {
+  const graphqlDefault = detectGraphqlDir() ?? './path/to/graphql';
+  const srcDefault = detectSrcDir() ?? './path/to/src';
+
+  // Reuse the generated-file detector so a fresh config excludes any file that
+  // would otherwise reference every operation and mask all unused results.
+  const detectedExcludes = detectGeneratedExcludes(graphqlDefault, srcDefault);
+  if (detectedExcludes.length > 0) {
+    console.log(
+      `⚠ Detected a likely generated file that references most operations: ${detectedExcludes.join(
+        ', ',
+      )}\n  Pre-filling it into "exclude" so results aren't masked — edit or clear it if that's not right.`,
+    );
+  }
+
   const questions = [
     {
       type: 'input',
       name: 'graphqlDir',
       message: 'Enter the path to your GraphQL directory:',
-      default: detectGraphqlDir() ?? './path/to/graphql',
+      default: graphqlDefault,
     },
     {
       type: 'input',
       name: 'srcDir',
       message: 'Enter the path to your source directory:',
-      default: detectSrcDir() ?? './path/to/src',
+      default: srcDefault,
     },
     {
       type: 'input',
-      name: 'excludedFolders',
-      message: 'Enter the folders to exclude (comma separated if multiple):',
-      default: 'node_modules',
+      name: 'exclude',
+      message:
+        'Files or folders to exclude (comma separated; gitignore-style globs allowed):',
+      default: detectedExcludes.join(', '),
       filter: splitFolders,
     },
   ];
@@ -112,6 +149,6 @@ export async function generateConfig() {
   fs.writeFileSync('./gqlPrune.config.yaml', yaml.dump(answers));
   console.log('Configuration generated successfully!');
 
-  // Level 3: show an instant preview of what a real run would find.
+  // Show an instant preview of what a real run would find.
   printPreview(answers as GqlPruneConfig);
 }

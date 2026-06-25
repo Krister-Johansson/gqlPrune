@@ -420,6 +420,9 @@ export type ScanResult = {
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
   generatedWarnings: string[];
+  /** Raw suspected-generated files, so callers can act on the paths (e.g.
+   * `gqlprune init` pre-filling them into `exclude`), not just the messages. */
+  generatedFiles: GeneratedFileWarning[];
 };
 
 /**
@@ -464,8 +467,10 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     fileContents,
     fragmentUsagePatterns,
   );
-  const generatedWarnings = formatGeneratedFileWarnings(
-    detectGeneratedFiles(sources, operations, usagePatterns),
+  const generatedFiles = detectGeneratedFiles(
+    sources,
+    operations,
+    usagePatterns,
   );
 
   return {
@@ -474,7 +479,8 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationCount: operations.length,
     unusedOperations,
     unusedFragments,
-    generatedWarnings,
+    generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
+    generatedFiles,
   };
 }
 

@@ -52,7 +52,7 @@ gqlPrune guards against this. When one source file alone references most of your
 
 > ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.
 
-Add it to `exclude` (e.g. `'**/*.generated.ts'`) and re-run. The warning goes to **stderr** (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
+Add it to `exclude` (e.g. `'**/*.generated.ts'`) and re-run — or just run `gqlprune init`, which detects such a file and pre-fills it into `exclude` for you. The warning goes to **stderr** (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
 
 ## Setup
 
@@ -66,7 +66,7 @@ npm install --save-dev gqlprune
 
 ### Configuration
 
-Run the `init` command to launch a configurator that generates `gqlPrune.config.yaml` at the root of your project. It **auto-detects** your GraphQL and source directories (scanning the project, excluding `node_modules`/`.git`/`dist`) and offers them as defaults you can accept or override. After writing the file it prints a quick **preview** of what a real run would find:
+Run the `init` command to launch a configurator that generates `gqlPrune.config.yaml` at the root of your project. It **auto-detects** your GraphQL and source directories (scanning the project, excluding `node_modules`/`.git`/`dist`) and offers them as defaults you can accept or override. It also **detects a generated file that would mask your results** (the [false "all clear"](#avoiding-false-all-clear-results) trap) and **pre-fills it into `exclude`**, so your first run is truthful. After writing the file it prints a quick **preview** of what a real run would find:
 
 ```bash
 npx gqlprune init
@@ -79,10 +79,11 @@ npx gqlprune init
 ```yaml
 graphqlDir: ./path/to/graphql
 srcDir: ./src
-# Glob patterns (gitignore-flavored) for files/folders to skip.
+# Files/folders to skip (gitignore-flavored globs). `init` pre-fills any
+# generated file it detects (it would otherwise mask all results); add more.
 exclude:
+  - src/gql/graphql.ts
   - '**/__generated__'
-  - '**/*.generated.ts'
 # Optional — override how operation usage is detected.
 # Supports {name}, {Name}, {type}, {Type} placeholders.
 usagePatterns:
