@@ -47,7 +47,12 @@ export function resolveDirs(value: string | string[] | undefined): string[] {
     : value === undefined
       ? []
       : [value];
-  return list.map((dir) => dir.trim()).filter((dir) => dir.length > 0);
+  // YAML can yield non-string entries (e.g. `- 8080`); drop them rather than
+  // crash on `.trim()`.
+  return (list as unknown[])
+    .filter((dir): dir is string => typeof dir === 'string')
+    .map((dir) => dir.trim())
+    .filter((dir) => dir.length > 0);
 }
 
 /**

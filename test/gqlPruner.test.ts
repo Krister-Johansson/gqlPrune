@@ -466,6 +466,11 @@ describe('gqlPruner', () => {
     it('returns [] for a blank string', () => {
       expect(resolveDirs('   ')).toEqual([]);
     });
+
+    it('drops non-string entries (defensive against malformed YAML)', () => {
+      const value = ['./a', 8080, null, './b'] as unknown as string[];
+      expect(resolveDirs(value)).toEqual(['./a', './b']);
+    });
   });
 
   describe('scanProject', () => {
