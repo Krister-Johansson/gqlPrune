@@ -630,5 +630,35 @@ describe('gqlPruner', () => {
       // Every operation looks "used" because of the generated file → none reported.
       expect(report.summary.unusedOperations).toBe(0);
     });
+
+    it('emits the masking warning as an escaped ::warning annotation in annotate mode', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      const ops = ['A', 'B', 'C', 'D', 'E'].map((name) => ({
+        name,
+        type: 'query',
+        filePath: 'a.gql',
+        line: 1,
+      }));
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['src/gql/graphql.ts']);
+      mockedExtract.mockReturnValue(ops);
+      mockedReadSources.mockReturnValue([
+        {
+          file: 'src/gql/graphql.ts',
+          content: ops.map((op) => `${op.name}Document`).join('\n'),
+        },
+      ]);
+
+      mainFunction({ annotate: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('::warning::Suspected generated file');
+      // The "%" in "100%" is escaped for the workflow command.
+      expect(errs).toContain('100%25');
+    });
   });
 });

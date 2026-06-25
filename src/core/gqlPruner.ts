@@ -459,7 +459,13 @@ export function mainFunction(
     detectGeneratedFiles(sources, allOperations, usagePatterns),
   );
   for (const line of generatedWarnings) {
-    console.error(kleur.yellow(`⚠ ${line}`));
+    // In CI, surface it as an (escaped) ::warning workflow command like the other
+    // annotations; otherwise a coloured stderr line for humans.
+    console.error(
+      annotate
+        ? `::warning::${escapeAnnotationMessage(line)}`
+        : kleur.yellow(`⚠ ${line}`),
+    );
   }
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.

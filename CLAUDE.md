@@ -16,7 +16,7 @@ output). Keep that framing in user-facing text.
 
 ## Architecture
 
-```
+```text
 src/
   cli.ts                  Entry point: parses args, dispatches init | scan
   core/
@@ -40,11 +40,13 @@ the suite easy to test — mirror it for new work.
 
 ### I/O discipline
 
-- In **`--json` mode, stdout carries only the JSON document.** Every diagnostic
-  (info lines, warnings, GitHub annotations) goes to **stderr** so it never
-  corrupts machine-readable output.
-- Use `kleur` for colour. GitHub Actions annotations use the `::warning` /
-  `::error` workflow-command format (see `formatAnnotations`).
+- In **`--json` mode, stdout carries only the JSON document.** Human-readable
+  diagnostics (info lines, warnings, GitHub annotations) go to **stderr** so they
+  never corrupt it; advisory warnings are _also_ serialized into the JSON
+  `warnings` array as data.
+- Use `kleur` for colour. In CI (`--annotate` / `GITHUB_ACTIONS`), warnings and
+  per-finding annotations use the GitHub `::warning` / `::error` workflow-command
+  format, escaped via `escapeAnnotationMessage` (see `formatAnnotations`).
 - Prefer `process.exitCode = 1` over `process.exit(1)` on the reporting paths so
   buffered stdout flushes before the process ends.
 
