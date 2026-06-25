@@ -129,6 +129,16 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 }
 ```
 
+### GitHub Actions annotations
+
+Under GitHub Actions, gqlPrune emits inline **`::warning`** annotations pointing at each unused operation/fragment (file + line), so they show up on the PR's **Files changed** tab. It's enabled automatically when `GITHUB_ACTIONS` is set, or force it anywhere with `--annotate`:
+
+```bash
+npx gqlprune --annotate
+```
+
+Annotations go to **stderr**, so they don't interfere with `--json` output on stdout (the two can be combined).
+
 ## Output
 
 Unused operations and fragments are listed in separate sections — operations by type, name, and file; fragments by name and file:

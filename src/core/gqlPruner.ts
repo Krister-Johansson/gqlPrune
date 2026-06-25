@@ -164,8 +164,66 @@ export function buildJsonReport(
   };
 }
 
-export function mainFunction(options: { json?: boolean } = {}) {
+/** Escapes a workflow-command message (data after `::`) per GitHub rules. */
+function escapeAnnotationMessage(message: string): string {
+  return message
+    .replace(/%/g, '%25')
+    .replace(/\r/g, '%0D')
+    .replace(/\n/g, '%0A');
+}
+
+/**
+ * Escapes a workflow-command property value (e.g. `file=`), which additionally
+ * requires `:` and `,` to be encoded (e.g. Windows paths like `C:\...`).
+ */
+function escapeAnnotationProperty(value: string): string {
+  return escapeAnnotationMessage(value)
+    .replace(/:/g, '%3A')
+    .replace(/,/g, '%2C');
+}
+
+/**
+ * Formats GitHub Actions `::warning` annotations for the unused operations and
+ * fragments, so they surface inline on a PR. Omits the line when unknown.
+ */
+export function formatAnnotations(
+  unusedOperations: OperationInfo[],
+  unusedFragments: FragmentInfo[],
+): string[] {
+  const annotate = (
+    file: string,
+    line: number | undefined,
+    message: string,
+  ): string => {
+    const escapedFile = escapeAnnotationProperty(file);
+    const location = line
+      ? `file=${escapedFile},line=${line}`
+      : `file=${escapedFile}`;
+    return `::warning ${location}::${escapeAnnotationMessage(message)}`;
+  };
+  return [
+    ...unusedOperations.map((op) =>
+      annotate(
+        op.filePath,
+        op.line,
+        `Unused GraphQL operation "${op.name}" (${op.type})`,
+      ),
+    ),
+    ...unusedFragments.map((fragment) =>
+      annotate(
+        fragment.filePath,
+        fragment.line,
+        `Unused GraphQL fragment "${fragment.name}"`,
+      ),
+    ),
+  ];
+}
+
+export function mainFunction(
+  options: { json?: boolean; annotate?: boolean } = {},
+) {
   const json = options.json ?? false;
+  const annotate = options.annotate ?? false;
   let config: GqlPruneConfig;
 
   try {
@@ -246,6 +304,13 @@ export function mainFunction(options: { json?: boolean } = {}) {
     fileContents,
     fragmentUsagePatterns,
   );
+
+  // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
+  if (annotate) {
+    for (const line of formatAnnotations(unusedOperations, unusedFragments)) {
+      console.error(line);
+    }
+  }
 
   if (json) {
     console.log(
