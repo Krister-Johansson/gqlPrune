@@ -216,6 +216,17 @@ describe('gqlPruner', () => {
       ).toEqual(['::warning file=a.gql::Unused GraphQL operation "X" (query)']);
     });
 
+    it('escapes : and , in the file property (e.g. Windows paths)', () => {
+      expect(
+        formatAnnotations(
+          [{ name: 'X', type: 'query', filePath: 'C:\\a,b\\q.gql', line: 1 }],
+          [],
+        ),
+      ).toEqual([
+        '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query)',
+      ]);
+    });
+
     it('returns [] when nothing is unused', () => {
       expect(formatAnnotations([], [])).toEqual([]);
     });

@@ -164,12 +164,22 @@ export function buildJsonReport(
   };
 }
 
-/** Escapes a workflow-command message per GitHub Actions rules. */
+/** Escapes a workflow-command message (data after `::`) per GitHub rules. */
 function escapeAnnotationMessage(message: string): string {
   return message
     .replace(/%/g, '%25')
     .replace(/\r/g, '%0D')
     .replace(/\n/g, '%0A');
+}
+
+/**
+ * Escapes a workflow-command property value (e.g. `file=`), which additionally
+ * requires `:` and `,` to be encoded (e.g. Windows paths like `C:\...`).
+ */
+function escapeAnnotationProperty(value: string): string {
+  return escapeAnnotationMessage(value)
+    .replace(/:/g, '%3A')
+    .replace(/,/g, '%2C');
 }
 
 /**
@@ -185,7 +195,10 @@ export function formatAnnotations(
     line: number | undefined,
     message: string,
   ): string => {
-    const location = line ? `file=${file},line=${line}` : `file=${file}`;
+    const escapedFile = escapeAnnotationProperty(file);
+    const location = line
+      ? `file=${escapedFile},line=${line}`
+      : `file=${escapedFile}`;
     return `::warning ${location}::${escapeAnnotationMessage(message)}`;
   };
   return [
