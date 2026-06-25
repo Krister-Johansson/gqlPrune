@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.10.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.9.0...gqlprune-v2.10.0) (2026-06-25)
+
+
+### Features
+
+* **init:** auto-detect a generated file and pre-fill it into `exclude` ([#58](https://github.com/Krister-Johansson/gqlPrune/issues/58)) ([d648d6a](https://github.com/Krister-Johansson/gqlPrune/commit/d648d6a40ebceb584b04765afbff3911cb260d89)), closes [#57](https://github.com/Krister-Johansson/gqlPrune/issues/57)
+
 ## [2.9.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.8.0...gqlprune-v2.9.0) (2026-06-25)
 
 
