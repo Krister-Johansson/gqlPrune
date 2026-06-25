@@ -6,6 +6,7 @@ import {
   isOperationUsed,
   isOperationUsedInContents,
   readFileContents,
+  readSourceFiles,
 } from '../src/utils/fileUtils';
 import { buildUsagePatterns } from '../src/utils/usagePatterns';
 
@@ -178,6 +179,31 @@ describe('fileUtils', () => {
         .mockReturnValueOnce('content-b');
 
       expect(readFileContents(['bad.ts', 'b.ts'])).toEqual(['content-b']);
+    });
+  });
+
+  describe('readSourceFiles', () => {
+    it('pairs each readable file with its contents', () => {
+      (fs.readFileSync as jest.Mock)
+        .mockReturnValueOnce('content-a')
+        .mockReturnValueOnce('content-b');
+
+      expect(readSourceFiles(['a.ts', 'b.ts'])).toEqual([
+        { file: 'a.ts', content: 'content-a' },
+        { file: 'b.ts', content: 'content-b' },
+      ]);
+    });
+
+    it('skips an unreadable file without misaligning the rest', () => {
+      (fs.readFileSync as jest.Mock)
+        .mockImplementationOnce(() => {
+          throw new Error('nope');
+        })
+        .mockReturnValueOnce('content-b');
+
+      expect(readSourceFiles(['bad.ts', 'b.ts'])).toEqual([
+        { file: 'b.ts', content: 'content-b' },
+      ]);
     });
   });
 

@@ -44,6 +44,16 @@ If your project uses a different convention (urql, react-query, graphql-request,
 
 A fragment spread only by another _unused_ fragment is reported too. Note: a fragment is kept alive by any operation that spreads it, even an unused one — that operation is reported separately, so the fragment surfaces on the next run once you remove the operation.
 
+### Avoiding false "all clear" results
+
+Because usage is detected by string-matching `srcDir`, **GraphQL Code Generator output that lives inside `srcDir`** is a trap: a single generated file (e.g. `src/gql/graphql.ts`) references _every_ operation, so everything looks used and nothing is ever reported unused — silently.
+
+gqlPrune guards against this. When one source file alone references most of your operations, it prints a warning naming the file and pointing you at `excludedFolders`:
+
+> ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — exclude it via "excludedFolders" in gqlPrune.config.yaml or unused results will be unreliable.
+
+Add that file's folder to `excludedFolders` and re-run. The warning goes to **stderr** (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
+
 ## Setup
 
 ### Installation
@@ -111,11 +121,12 @@ npx gqlprune --json
   "unusedFragments": [
     { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
   ],
+  "warnings": [],
   "summary": { "unusedOperations": 1, "unusedFragments": 1 }
 }
 ```
 
-Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused), so it pipes cleanly into `jq` and CI gates.
+Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages — currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results) — and is empty when there are none.
 
 ### In CI
 
