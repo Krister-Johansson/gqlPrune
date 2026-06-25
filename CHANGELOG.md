@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.8.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.7.0...gqlprune-v2.8.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** add --version / -v flag ([#52](https://github.com/Krister-Johansson/gqlPrune/issues/52)) ([1746399](https://github.com/Krister-Johansson/gqlPrune/commit/174639911d9d1e64af3f78e0d3d98ac847cb508e)), closes [#51](https://github.com/Krister-Johansson/gqlPrune/issues/51)
+
 ## [2.7.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.6.0...gqlprune-v2.7.0) (2026-06-25)
 
 
