@@ -116,10 +116,19 @@ CodeRabbit auto-reviews the PR. When its comments land:
     change just to silence the bot.
 - Re-run the local gate after addressing comments. CI must be green before merge.
 
-### 6. After merge
-- Move the issue's card on the project board
-  (`Krister-Johansson/projects/3`) to **Done**, and keep board status honest
-  (in-progress items that have actually shipped should be moved).
+### 6. Keep the board up to date
+Treat the [project board](https://github.com/users/Krister-Johansson/projects/3)
+as the source of truth for status — update it as work moves, not only at the end.
+- **Starting:** move the issue's card to **In Progress**.
+- **PR open:** the description must link the issue with `Closes #N`, so the
+  **issue** auto-closes when the PR merges (visible in the PR's *Development*
+  section).
+- **Merged / finished:** make sure the card is **Done**. If the project's
+  *Item closed → Done* workflow is enabled (Project ▸ ⋯ ▸ Workflows), closing the
+  issue moves it automatically; otherwise move it by hand. Never leave shipped
+  work sitting in Todo / In Progress.
+- Keep statuses honest: if you spot an item that has shipped but still shows
+  In Progress (or vice versa), fix it.
 
 ## Coding standards
 - **TypeScript `strict: true`.** Must typecheck and lint clean.
