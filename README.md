@@ -183,6 +183,10 @@ npx gqlprune --annotate
 
 Annotations go to **stderr**, so they don't interfere with `--json` output on stdout (the two can be combined).
 
+### Update notifications
+
+gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to **stderr** when a newer version is available. It stays silent in CI and when stdout isn't a TTY, never writes to stdout (so `--json` stays clean), and never affects the exit code. Opt out with `NO_UPDATE_NOTIFIER=1` (it's also skipped whenever `CI` is set).
+
 ## Output
 
 Unused operations and fragments are listed in separate sections — operations by type, name, and file; fragments by name and file:

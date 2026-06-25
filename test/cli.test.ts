@@ -21,18 +21,32 @@ describe('cli dispatch', () => {
     if (env.GITHUB_ACTIONS !== undefined) {
       process.env.GITHUB_ACTIONS = env.GITHUB_ACTIONS;
     }
-    let mocks: { generateConfig: jest.Mock; mainFunction: jest.Mock };
+    let mocks: {
+      generateConfig: jest.Mock;
+      mainFunction: jest.Mock;
+      notifyUpdate: jest.Mock;
+    };
     jest.isolateModules(() => {
       jest.doMock('../src/core/configGenerator', () => ({
         generateConfig: jest.fn(),
       }));
       jest.doMock('../src/core/gqlPruner', () => ({ mainFunction: jest.fn() }));
+      jest.doMock('../src/utils/updateNotifier', () => ({
+        notifyUpdate: jest.fn(),
+      }));
+      // pkgInfo reads package.json via import.meta (ESM-only); stub it so the
+      // CommonJS test transform never touches it.
+      jest.doMock('../src/utils/pkgInfo', () => ({
+        pkg: { name: 'gqlprune', version: '0.0.0-test' },
+      }));
       const cfg = require('../src/core/configGenerator');
       const pruner = require('../src/core/gqlPruner');
+      const notifier = require('../src/utils/updateNotifier');
       require('../src/cli');
       mocks = {
         generateConfig: cfg.generateConfig,
         mainFunction: pruner.mainFunction,
+        notifyUpdate: notifier.notifyUpdate,
       };
     });
     // @ts-expect-error assigned synchronously inside isolateModules
@@ -53,6 +67,14 @@ describe('cli dispatch', () => {
       config: {},
     });
     expect(generateConfig).not.toHaveBeenCalled();
+  });
+
+  it('checks for updates after running', () => {
+    const { notifyUpdate } = runCli([]);
+    expect(notifyUpdate).toHaveBeenCalledWith(
+      { name: 'gqlprune', version: '0.0.0-test' },
+      { json: false },
+    );
   });
 
   it('passes --json through to the pruner', () => {
