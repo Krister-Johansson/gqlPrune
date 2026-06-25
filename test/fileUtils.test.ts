@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import {
+  createExcludeMatcher,
   directoryExists,
   findFilesWithExtension,
-  isExcludedFolder,
   isOperationUsed,
   isOperationUsedInContents,
   readFileContents,
@@ -45,7 +45,7 @@ describe('fileUtils', () => {
         .mockReturnValueOnce({ isDirectory: () => false })
         .mockReturnValueOnce({ isDirectory: () => true });
 
-      const files = findFilesWithExtension('./', ['.ts'], []);
+      const files = findFilesWithExtension('./', ['.ts'], () => false);
       expect(files).toEqual(['file1.ts']); // Adjusted the expected value
     });
 
@@ -54,7 +54,7 @@ describe('fileUtils', () => {
         throw new Error('Failed to read directory');
       });
 
-      const files = findFilesWithExtension('./', ['.ts'], []);
+      const files = findFilesWithExtension('./', ['.ts'], () => false);
       expect(files).toEqual([]); // Expect an empty array since the directory read failed
     });
 
@@ -64,7 +64,7 @@ describe('fileUtils', () => {
         throw new Error('Failed to read file stats');
       });
 
-      const files = findFilesWithExtension('./', ['.ts'], []);
+      const files = findFilesWithExtension('./', ['.ts'], () => false);
       expect(files).toEqual([]); // Expect an empty array since the file stats read failed
     });
 
@@ -74,8 +74,23 @@ describe('fileUtils', () => {
         throw new Error('Failed to read folder stats');
       });
 
-      const files = findFilesWithExtension('./', ['.ts'], []);
+      const files = findFilesWithExtension('./', ['.ts'], () => false);
       expect(files).toEqual([]); // Expect an empty array since the folder stats read failed
+    });
+
+    it('skips excluded directories and files via the matcher', () => {
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        'keep.ts',
+        'node_modules',
+        'skip.gen.ts',
+      ]);
+      (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
+        isDirectory: () => p.endsWith('node_modules'),
+      }));
+      const matcher = createExcludeMatcher(['node_modules', '*.gen.ts']);
+      expect(findFilesWithExtension('./', ['.ts'], matcher)).toEqual([
+        'keep.ts',
+      ]);
     });
   });
 
@@ -131,30 +146,40 @@ describe('fileUtils', () => {
     });
   });
 
-  describe('isExcludedFolder', () => {
-    it('should exclude by folder basename anywhere in the tree', () => {
-      expect(isExcludedFolder('node_modules', ['node_modules'])).toBe(true);
-      expect(isExcludedFolder('src/api/__generated__', ['__generated__'])).toBe(
-        true,
-      );
+  describe('createExcludeMatcher', () => {
+    it('matches a bare name anywhere by basename', () => {
+      const ex = createExcludeMatcher(['__generated__']);
+      expect(ex('src/api/__generated__')).toBe(true);
+      expect(ex('__generated__')).toBe(true);
+      expect(ex('src/components')).toBe(false);
     });
 
-    it('should accept entries with a leading "./"', () => {
-      expect(isExcludedFolder('node_modules', ['./node_modules'])).toBe(true);
+    it('anchors a pattern that contains a slash to the project root', () => {
+      const ex = createExcludeMatcher(['src/legacy']);
+      expect(ex('src/legacy')).toBe(true);
+      expect(ex('app/src/legacy')).toBe(false);
     });
 
-    it('should exclude by path relative to the project root', () => {
-      expect(isExcludedFolder('src/generated', ['src/generated'])).toBe(true);
+    it('supports ** for any depth and basename globs for files', () => {
+      const ex = createExcludeMatcher(['**/dist', '*.generated.ts']);
+      expect(ex('a/b/dist')).toBe(true);
+      expect(ex('src/x/foo.generated.ts')).toBe(true);
+      expect(ex('src/x/foo.ts')).toBe(false);
     });
 
-    it('should match entries written with Windows backslashes', () => {
-      // path.relative emits backslashes on Windows; config uses forward slashes.
-      expect(isExcludedFolder('src/generated', ['src\\generated'])).toBe(true);
+    it('matches dotfolders like .git', () => {
+      expect(createExcludeMatcher(['.git'])('proj/.git')).toBe(true);
     });
 
-    it('should not exclude unrelated folders', () => {
-      expect(isExcludedFolder('src', ['node_modules'])).toBe(false);
-      expect(isExcludedFolder('src/components', [])).toBe(false);
+    it('re-includes paths matched by a leading "!"', () => {
+      const ex = createExcludeMatcher(['*.generated.ts', '!keep.generated.ts']);
+      expect(ex('src/other.generated.ts')).toBe(true);
+      expect(ex('src/keep.generated.ts')).toBe(false);
+    });
+
+    it('excludes nothing when there are no positive patterns', () => {
+      expect(createExcludeMatcher([])('anything')).toBe(false);
+      expect(createExcludeMatcher(['  ', '!only-neg'])('anything')).toBe(false);
     });
   });
 

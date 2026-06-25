@@ -4,9 +4,17 @@ export interface GqlPruneConfig {
   /** Directory (or directories) containing your source files. */
   srcDir: string | string[];
   /**
-   * Folder names (e.g. `__generated__`) or paths relative to the project root
-   * (e.g. `src/generated`) to exclude from traversal. `node_modules` and `.git`
-   * are always excluded.
+   * Glob patterns (gitignore-flavored) for files and folders to skip during
+   * traversal. A name without a slash matches anywhere by basename; a path with
+   * a slash is anchored to the project root; a leading `!` re-includes.
+   * Examples: `__generated__`, `*.generated.ts`, `src/legacy`, `!keep`.
+   * `node_modules` and `.git` are always excluded.
+   */
+  exclude?: string | string[];
+  /**
+   * @deprecated Use `exclude` instead. Folder names (e.g. `__generated__`) or
+   * paths relative to the project root (e.g. `src/generated`) to exclude. Still
+   * honored — merged into the same matcher as `exclude`.
    */
   excludedFolders?: string[] | string;
   /**

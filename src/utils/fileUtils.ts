@@ -1,61 +1,56 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import picomatch from 'picomatch';
+
 const baseDir = path.resolve('./');
 
-/**
- * Normalizes a folder entry so it can be matched reliably across platforms:
- * converts backslashes to forward slashes (Windows `path.relative` output),
- * trims whitespace, and strips a leading `./` and any trailing slashes.
- */
-function normalizeFolder(folder: string): string {
-  return folder
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '')
-    .replace(/\/+$/, '');
+/** Tests a project-root-relative path against the configured exclude patterns. */
+export type ExcludeMatcher = (relativePath: string) => boolean;
+
+/** The path of `itemPath` relative to the project root, as a posix string. */
+function toRelativePosix(itemPath: string): string {
+  return path.relative(baseDir, path.resolve(itemPath)).replace(/\\/g, '/');
 }
 
 /**
- * Determines whether a directory should be skipped during traversal.
- *
- * A directory is excluded when either its basename (e.g. `node_modules`,
- * `__generated__`) or its path relative to the project root (e.g.
- * `src/generated`) matches an entry in `excludedFolders`. Entries may be given
- * with or without a leading `./`.
- *
- * @param {string} itemPath - The path to the directory being considered.
- * @param {string[]} excludedFolders - Folder names or relative paths to exclude.
- * @returns {boolean} - True if the directory should be skipped.
+ * Builds a matcher from gitignore-flavored glob patterns. A pattern without a
+ * slash matches anywhere (by basename); one with a slash is anchored to the
+ * project root; `**` matches any depth; a leading `!` re-includes. Returns a
+ * predicate over project-root-relative paths; never excludes when no positive
+ * patterns are given.
  */
-export function isExcludedFolder(
-  itemPath: string,
-  excludedFolders: string[],
-): boolean {
-  const excluded = new Set(
-    excludedFolders.map(normalizeFolder).filter(Boolean),
-  );
-  if (excluded.size === 0) {
-    return false;
+export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
+  const cleaned = patterns.map((p) => p.trim()).filter(Boolean);
+  const positives = cleaned.filter((p) => !p.startsWith('!'));
+  const negatives = cleaned
+    .filter((p) => p.startsWith('!'))
+    .map((p) => p.slice(1));
+  if (positives.length === 0) {
+    return () => false;
   }
-  const name = path.basename(itemPath);
-  const relativePath = normalizeFolder(
-    path.relative(baseDir, path.resolve(itemPath)),
-  );
-  return excluded.has(name) || excluded.has(relativePath);
+  const options = { dot: true, basename: true };
+  const matchPositive = picomatch(positives, options);
+  const matchNegative: ExcludeMatcher = negatives.length
+    ? picomatch(negatives, options)
+    : () => false;
+  return (relativePath) =>
+    matchPositive(relativePath) && !matchNegative(relativePath);
 }
 
 /**
- * Recursively finds all files in a directory with the specified extensions.
+ * Recursively finds all files with the given extensions under `dir`, skipping
+ * any directory or file whose project-root-relative path is excluded by
+ * `isExcluded`.
  *
  * @param {string} dir - The directory to start searching from.
  * @param {string[]} extensions - The list of file extensions to match.
- * @param {string[]} excludedFolders - Folder names or relative paths to exclude.
- * @returns {string[]} - An array of file paths that match the given extensions.
+ * @param {ExcludeMatcher} isExcluded - Predicate marking paths to skip.
+ * @returns {string[]} - The matching file paths.
  */
 export function findFilesWithExtension(
   dir: string,
   extensions: string[],
-  excludedFolders: string[],
+  isExcluded: ExcludeMatcher,
 ): string[] {
   let files: string[] = [];
 
@@ -78,12 +73,14 @@ export function findFilesWithExtension(
         return; // Skip this item and continue with the next one
       }
 
+      if (isExcluded(toRelativePosix(itemPath))) {
+        return; // Skip excluded directories and files
+      }
+
       if (stat.isDirectory()) {
-        if (!isExcludedFolder(itemPath, excludedFolders)) {
-          files = files.concat(
-            findFilesWithExtension(itemPath, extensions, excludedFolders),
-          );
-        }
+        files = files.concat(
+          findFilesWithExtension(itemPath, extensions, isExcluded),
+        );
       } else if (extensions.includes(path.extname(item))) {
         files.push(itemPath);
       }

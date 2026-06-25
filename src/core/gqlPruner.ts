@@ -6,6 +6,7 @@ import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
+  createExcludeMatcher,
   directoryExists,
   findFilesWithExtension,
   isOperationUsedInContents,
@@ -24,17 +25,18 @@ import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
 
 /**
- * Normalizes `excludedFolders` (string | string[] | undefined) and adds the
- * folders that are always excluded (`node_modules`, `.git`).
+ * Collects every exclude pattern: the `exclude` globs, the deprecated
+ * `excludedFolders` (folded into the same matcher), and the always-excluded
+ * `node_modules` / `.git`.
  */
-export function resolveExcludedFolders(config: GqlPruneConfig): string[] {
-  let excludedFolders: string[] = [];
-  if (Array.isArray(config.excludedFolders)) {
-    excludedFolders = config.excludedFolders;
-  } else if (typeof config.excludedFolders === 'string') {
-    excludedFolders = [config.excludedFolders];
-  }
-  return [...new Set([...excludedFolders, ...DEFAULT_EXCLUDED_FOLDERS])];
+export function resolveExcludePatterns(config: GqlPruneConfig): string[] {
+  return [
+    ...new Set([
+      ...resolveDirs(config.exclude),
+      ...resolveDirs(config.excludedFolders),
+      ...DEFAULT_EXCLUDED_FOLDERS,
+    ]),
+  ];
 }
 
 /**
@@ -377,7 +379,7 @@ export function formatGeneratedFileWarnings(
     return (
       `Suspected generated file "${warning.file}" references ${percent}% of all ` +
       `operations (${warning.matchedOperations}/${warning.totalOperations})${generated} — ` +
-      `exclude it via "excludedFolders" in gqlPrune.config.yaml or unused results will be unreliable.`
+      `add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.`
     );
   });
 }
@@ -426,7 +428,7 @@ export type ScanResult = {
  * `gqlprune init`'s preview, so the preview always reflects the real run.
  */
 export function scanProject(config: GqlPruneConfig): ScanResult {
-  const excludedFolders = resolveExcludedFolders(config);
+  const isExcluded = createExcludeMatcher(resolveExcludePatterns(config));
   const usagePatterns = resolveUsagePatterns(config);
   const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
 
@@ -434,7 +436,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
   const gqlFiles = [
     ...new Set(
       resolveDirs(config.graphqlDir).flatMap((dir) =>
-        findFilesWithExtension(dir, ['.gql', '.graphql'], excludedFolders),
+        findFilesWithExtension(dir, ['.gql', '.graphql'], isExcluded),
       ),
     ),
   ];
@@ -443,11 +445,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
   const tsFiles = [
     ...new Set(
       resolveDirs(config.srcDir).flatMap((dir) =>
-        findFilesWithExtension(
-          dir,
-          ['.ts', '.tsx', '.js', '.jsx'],
-          excludedFolders,
-        ),
+        findFilesWithExtension(dir, ['.ts', '.tsx', '.js', '.jsx'], isExcluded),
       ),
     ),
   ];

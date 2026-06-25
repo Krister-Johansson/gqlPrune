@@ -12,7 +12,7 @@ import {
   mainFunction,
   resolveConfig,
   resolveDirs,
-  resolveExcludedFolders,
+  resolveExcludePatterns,
   resolveFragmentUsagePatterns,
   resolveUsagePatterns,
   scanProject,
@@ -50,26 +50,27 @@ const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
 
 describe('gqlPruner', () => {
-  describe('resolveExcludedFolders', () => {
+  describe('resolveExcludePatterns', () => {
     it('always includes node_modules and .git', () => {
-      expect(resolveExcludedFolders({ graphqlDir: 'g', srcDir: 's' })).toEqual(
+      expect(resolveExcludePatterns({ graphqlDir: 'g', srcDir: 's' })).toEqual(
         DEFAULT_EXCLUDED_FOLDERS,
       );
     });
 
-    it('accepts a single string', () => {
+    it('combines exclude globs with the deprecated excludedFolders', () => {
       expect(
-        resolveExcludedFolders({
+        resolveExcludePatterns({
           graphqlDir: 'g',
           srcDir: 's',
-          excludedFolders: 'legacy',
+          exclude: '**/dist',
+          excludedFolders: ['legacy'],
         }),
-      ).toEqual(['legacy', 'node_modules', '.git']);
+      ).toEqual(['**/dist', 'legacy', 'node_modules', '.git']);
     });
 
-    it('accepts an array and de-dupes the defaults', () => {
+    it('de-dupes against the defaults', () => {
       expect(
-        resolveExcludedFolders({
+        resolveExcludePatterns({
           graphqlDir: 'g',
           srcDir: 's',
           excludedFolders: ['a', 'node_modules'],
@@ -366,7 +367,7 @@ describe('gqlPruner', () => {
   });
 
   describe('formatGeneratedFileWarnings', () => {
-    it('renders a readable line with file, percentage and an excludedFolders hint', () => {
+    it('renders a readable line with file, percentage and an exclude hint', () => {
       const [line] = formatGeneratedFileWarnings([
         {
           file: 'src/gql/graphql.ts',
@@ -378,7 +379,7 @@ describe('gqlPruner', () => {
       ]);
       expect(line).toContain('src/gql/graphql.ts');
       expect(line).toContain('98%');
-      expect(line).toContain('excludedFolders');
+      expect(line).toContain('exclude');
     });
 
     it('returns [] when there are no warnings', () => {
@@ -761,7 +762,7 @@ describe('gqlPruner', () => {
 
       const errs = errorSpy.mock.calls.flat().join('\n');
       expect(errs).toContain('Suspected generated file "src/gql/graphql.ts"');
-      expect(errs).toContain('excludedFolders');
+      expect(errs).toContain('exclude');
 
       const report = JSON.parse(logged());
       expect(report.warnings).toHaveLength(1);

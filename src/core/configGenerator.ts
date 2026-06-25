@@ -2,12 +2,16 @@ import inquirer from 'inquirer';
 import * as yaml from 'js-yaml';
 import fs from 'fs';
 import * as path from 'path';
-import { directoryExists, findFilesWithExtension } from '../utils/fileUtils.js';
+import {
+  createExcludeMatcher,
+  directoryExists,
+  findFilesWithExtension,
+} from '../utils/fileUtils.js';
 import { resolveDirs, scanProject } from './gqlPruner.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
 // Folders never worth scanning when auto-detecting the project layout.
-const DETECT_EXCLUDES = ['node_modules', '.git', 'dist'];
+const isDetectExcluded = createExcludeMatcher(['node_modules', '.git', 'dist']);
 
 /** Splits a comma-separated input into a trimmed list of folder names. */
 export function splitFolders(input: string): string[] {
@@ -43,7 +47,7 @@ function formatDir(dir: string): string {
 /** Suggests a `graphqlDir` from where the `.gql`/`.graphql` files live. */
 export function detectGraphqlDir(): string | undefined {
   const dir = commonParentDir(
-    findFilesWithExtension('.', ['.gql', '.graphql'], DETECT_EXCLUDES),
+    findFilesWithExtension('.', ['.gql', '.graphql'], isDetectExcluded),
   );
   return dir === undefined ? undefined : formatDir(dir);
 }
@@ -55,7 +59,7 @@ export function detectSrcDir(): string | undefined {
     findFilesWithExtension(
       '.',
       ['.ts', '.tsx', '.js', '.jsx'],
-      DETECT_EXCLUDES,
+      isDetectExcluded,
     ),
   );
   return dir === undefined ? undefined : formatDir(dir);
