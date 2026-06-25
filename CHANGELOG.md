@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.6.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.5.0...gqlprune-v2.6.0) (2026-06-25)
+
+
+### Features
+
+* **config:** support multiple (array) graphqlDir and srcDir ([#47](https://github.com/Krister-Johansson/gqlPrune/issues/47)) ([19ef10a](https://github.com/Krister-Johansson/gqlPrune/commit/19ef10a021997677661adb8b490d62d3d597a25f))
+
 ## [2.5.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.4.0...gqlprune-v2.5.0) (2026-06-25)
 
 
