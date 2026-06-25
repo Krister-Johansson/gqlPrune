@@ -28,6 +28,7 @@ describe('isNewerVersion', () => {
 describe('notifyUpdate', () => {
   const realEnv = process.env;
   const realIsTTY = process.stdout.isTTY;
+  const realFetch = global.fetch;
   const fetchMock = jest.fn();
   let errorSpy: jest.SpyInstance;
 
@@ -59,6 +60,7 @@ describe('notifyUpdate', () => {
 
   afterAll(() => {
     process.env = realEnv;
+    global.fetch = realFetch;
     setTTY(realIsTTY);
   });
 

@@ -106,7 +106,7 @@ export async function notifyUpdate(
     if (latest && isNewerVersion(latest, pkg.version)) {
       console.error(
         kleur.yellow(
-          `\nUpdate available for ${pkg.name}: ${pkg.version} → ${latest}\n` +
+          `Update available for ${pkg.name}: ${pkg.version} → ${latest}. ` +
             `Run \`npm i -D ${pkg.name}@latest\` to update.`,
         ),
       );
