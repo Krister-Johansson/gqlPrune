@@ -1,15 +1,4 @@
-import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
-
-/**
- * Configuration that can be supplied as CLI flags instead of (or on top of)
- * `gqlPrune.config.yaml`. The list fields come from repeatable flags.
- */
-export type CliConfig = Partial<
-  Pick<
-    GqlPruneConfig,
-    'graphqlDir' | 'srcDir' | 'usagePatterns' | 'fragmentUsagePatterns'
-  >
-> & { excludedFolders?: string[] };
+import { CliConfig } from '../types/GqlPruneConfig.js';
 
 export type CliOptions = {
   command?: string;

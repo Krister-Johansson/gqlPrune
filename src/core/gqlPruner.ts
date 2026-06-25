@@ -4,7 +4,7 @@ import * as yaml from 'js-yaml';
 import path from 'path';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
-import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
+import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   directoryExists,
   findFilesWithExtension,
@@ -19,7 +19,6 @@ import {
 } from '../utils/usagePatterns.js';
 import { extractOperations } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
-import { CliConfig } from '../utils/args.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -371,7 +370,9 @@ export function formatGeneratedFileWarnings(
  * fine — the CLI flags may supply everything. Throws on a malformed or
  * otherwise unreadable file so the problem isn't silently ignored.
  */
-export function resolveConfig(cliConfig: CliConfig = {}): GqlPruneConfig {
+export function resolveConfig(
+  cliConfig: CliConfig = {},
+): Partial<GqlPruneConfig> {
   let fileConfig: Partial<GqlPruneConfig> = {};
   let raw: string | undefined;
   try {
@@ -387,8 +388,8 @@ export function resolveConfig(cliConfig: CliConfig = {}): GqlPruneConfig {
   if (raw !== undefined && raw.trim() !== '') {
     fileConfig = (yaml.load(raw) as GqlPruneConfig) ?? {};
   }
-  // Required fields may still be absent here; mainFunction validates presence.
-  return { ...fileConfig, ...cliConfig } as GqlPruneConfig;
+  // Required fields may still be absent; mainFunction validates and narrows.
+  return { ...fileConfig, ...cliConfig };
 }
 
 export function mainFunction(
@@ -397,16 +398,16 @@ export function mainFunction(
   const json = options.json ?? false;
   const annotate = options.annotate ?? false;
 
-  let config: GqlPruneConfig;
+  let resolved: Partial<GqlPruneConfig>;
   try {
-    config = resolveConfig(options.config);
+    resolved = resolveConfig(options.config);
   } catch (e) {
     console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
     process.exit(1);
   }
 
-  if (!config.graphqlDir || !config.srcDir) {
+  if (!resolved.graphqlDir || !resolved.srcDir) {
     console.error(
       kleur.red(
         'No configuration found. Create gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> and --src <dir>.',
@@ -414,6 +415,13 @@ export function mainFunction(
     );
     process.exit(1);
   }
+
+  // Required fields are present from here; widen to the full config type.
+  const config: GqlPruneConfig = {
+    ...resolved,
+    graphqlDir: resolved.graphqlDir,
+    srcDir: resolved.srcDir,
+  };
 
   if (!directoryExists(config.graphqlDir)) {
     console.error(

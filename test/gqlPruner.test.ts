@@ -424,6 +424,15 @@ describe('gqlPruner', () => {
       });
     });
 
+    it('replaces (not merges) a YAML list when a list flag is given', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'excludedFolders:\n  - yaml-only\n',
+      );
+      expect(resolveConfig({ excludedFolders: ['cli-only'] })).toEqual({
+        excludedFolders: ['cli-only'],
+      });
+    });
+
     it('throws on a malformed config file', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('graphqlDir: [');
       expect(() => resolveConfig()).toThrow();
