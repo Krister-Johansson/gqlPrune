@@ -5,9 +5,16 @@ import { parseArgs } from './utils/args.js';
 import { notifyUpdate } from './utils/updateNotifier.js';
 import { pkg } from './utils/pkgInfo.js';
 
-const { command, json, annotate, config } = parseArgs(process.argv.slice(2));
+const { command, json, annotate, version, config } = parseArgs(
+  process.argv.slice(2),
+);
 
 async function run(): Promise<void> {
+  if (version) {
+    console.log(pkg.version);
+    return;
+  }
+
   if (command === 'init') {
     await generateConfig();
   } else {

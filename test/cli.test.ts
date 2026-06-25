@@ -59,6 +59,20 @@ describe('cli dispatch', () => {
     expect(mainFunction).not.toHaveBeenCalled();
   });
 
+  it('prints the version and exits on --version', () => {
+    const logSpy = jest
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    const { mainFunction, generateConfig, notifyUpdate } = runCli([
+      '--version',
+    ]);
+    expect(logSpy).toHaveBeenCalledWith('0.0.0-test');
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(generateConfig).not.toHaveBeenCalled();
+    expect(notifyUpdate).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
   it('runs the pruner by default', () => {
     const { generateConfig, mainFunction } = runCli([]);
     expect(mainFunction).toHaveBeenCalledWith({
