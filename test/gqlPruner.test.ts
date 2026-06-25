@@ -6,6 +6,7 @@ import {
   buildJsonReport,
   DEFAULT_EXCLUDED_FOLDERS,
   findUnusedOperations,
+  formatAnnotations,
   mainFunction,
   resolveExcludedFolders,
   resolveFragmentUsagePatterns,
@@ -183,6 +184,40 @@ describe('gqlPruner', () => {
         unusedFragments: [],
         summary: { unusedOperations: 0, unusedFragments: 0 },
       });
+    });
+  });
+
+  describe('formatAnnotations', () => {
+    it('formats ::warning lines with file and line for ops and fragments', () => {
+      expect(
+        formatAnnotations(
+          [
+            {
+              name: 'GetUser',
+              type: 'query',
+              filePath: 'graphql/user.gql',
+              line: 3,
+            },
+          ],
+          [{ name: 'UserFields', filePath: 'graphql/user.gql', line: 8 }],
+        ),
+      ).toEqual([
+        '::warning file=graphql/user.gql,line=3::Unused GraphQL operation "GetUser" (query)',
+        '::warning file=graphql/user.gql,line=8::Unused GraphQL fragment "UserFields"',
+      ]);
+    });
+
+    it('omits the line property when no line is available', () => {
+      expect(
+        formatAnnotations(
+          [{ name: 'X', type: 'query', filePath: 'a.gql' }],
+          [],
+        ),
+      ).toEqual(['::warning file=a.gql::Unused GraphQL operation "X" (query)']);
+    });
+
+    it('returns [] when nothing is unused', () => {
+      expect(formatAnnotations([], [])).toEqual([]);
     });
   });
 
@@ -366,6 +401,27 @@ describe('gqlPruner', () => {
         unusedOperations: 0,
         unusedFragments: 0,
       });
+    });
+
+    it('emits GitHub annotations to stderr when annotate is set', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'Dead', type: 'query', filePath: 'a.gql', line: 4 },
+      ]);
+      mockedRead.mockReturnValue(['']);
+
+      mainFunction({ annotate: true });
+      expect(process.exitCode).toBe(1);
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain(
+        '::warning file=a.gql,line=4::Unused GraphQL operation "Dead" (query)',
+      );
     });
   });
 });
