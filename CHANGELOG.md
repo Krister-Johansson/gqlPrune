@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.4.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.3.0...gqlprune-v2.4.0) (2026-06-25)
+
+
+### Features
+
+* **cli:** run without a config file via CLI flags ([#42](https://github.com/Krister-Johansson/gqlPrune/issues/42)) ([36f3d06](https://github.com/Krister-Johansson/gqlPrune/commit/36f3d065ec6027456a5381afdb89b36c39948228))
+* **scan:** warn when a source file masks unused results ([#40](https://github.com/Krister-Johansson/gqlPrune/issues/40)) ([5b24904](https://github.com/Krister-Johansson/gqlPrune/commit/5b2490435208fb588446282e0030b557f11d57c9))
+
 ## [2.3.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.2.0...gqlprune-v2.3.0) (2026-06-25)
 
 
