@@ -95,6 +95,28 @@ This prints any unused GraphQL operations and fragments. The command exits with:
 - **0** when nothing unused is found (suitable for CI gates).
 - **1** when unused operations or fragments are found (or on configuration errors).
 
+### JSON output
+
+Pass `--json` for a machine-readable report (CI, dashboards, scripting) instead of the human-readable tables:
+
+```bash
+npx gqlprune --json
+```
+
+```json
+{
+  "unusedOperations": [
+    { "name": "GetUser", "type": "query", "file": "graphql/user.gql", "line": 1 }
+  ],
+  "unusedFragments": [
+    { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
+  ],
+  "summary": { "unusedOperations": 1, "unusedFragments": 1 }
+}
+```
+
+Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused), so it pipes cleanly into `jq` and CI gates.
+
 ### In CI
 
 Add a script and run it in your pipeline; the non-zero exit fails the job when unused operations are found:

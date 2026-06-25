@@ -38,9 +38,15 @@ describe('cli dispatch', () => {
     expect(mainFunction).not.toHaveBeenCalled();
   });
 
-  it('runs the pruner by default', () => {
+  it('runs the pruner by default (json=false)', () => {
     const { generateConfig, mainFunction } = runCli([]);
-    expect(mainFunction).toHaveBeenCalledTimes(1);
+    expect(mainFunction).toHaveBeenCalledWith({ json: false });
+    expect(generateConfig).not.toHaveBeenCalled();
+  });
+
+  it('passes --json through to the pruner', () => {
+    const { generateConfig, mainFunction } = runCli(['--json']);
+    expect(mainFunction).toHaveBeenCalledWith({ json: true });
     expect(generateConfig).not.toHaveBeenCalled();
   });
 });
