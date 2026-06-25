@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import inquirer from 'inquirer';
 import {
   commonParentDir,
+  detectGeneratedExcludes,
   detectGraphqlDir,
   detectSrcDir,
   generateConfig,
@@ -49,6 +50,39 @@ describe('configGenerator', () => {
 
     it('returns a single-element list for one folder', () => {
       expect(splitFolders('node_modules')).toEqual(['node_modules']);
+    });
+
+    it('drops empty entries (e.g. an empty default)', () => {
+      expect(splitFolders('')).toEqual([]);
+      expect(splitFolders('a, , b')).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('detectGeneratedExcludes', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it('returns the detected generated file paths when the dirs exist', () => {
+      mockFsTree({}, new Set(['./graphql', './src']));
+      mockedScan.mockReturnValue({
+        generatedFiles: [
+          {
+            file: 'src/gql/graphql.ts',
+            coverage: 1,
+            matchedOperations: 5,
+            totalOperations: 5,
+            reasons: ['coverage', 'filename'],
+          },
+        ],
+      });
+      expect(detectGeneratedExcludes('./graphql', './src')).toEqual([
+        'src/gql/graphql.ts',
+      ]);
+    });
+
+    it('returns [] without scanning when a directory is missing', () => {
+      mockFsTree({}, new Set(['./graphql'])); // ./src does not exist
+      expect(detectGeneratedExcludes('./graphql', './src')).toEqual([]);
+      expect(mockedScan).not.toHaveBeenCalled();
     });
   });
 
@@ -130,7 +164,7 @@ describe('configGenerator', () => {
       (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
         graphqlDir: './graphql',
         srcDir: './src',
-        excludedFolders: ['node_modules'],
+        exclude: ['node_modules'],
       });
 
       await generateConfig();
@@ -141,6 +175,9 @@ describe('configGenerator', () => {
       expect(file).toBe('./gqlPrune.config.yaml');
       expect(contents).toContain('graphqlDir: ./graphql');
       expect(contents).toContain('srcDir: ./src');
+      // init now writes the new `exclude` field, not the deprecated alias.
+      expect(contents).toContain('exclude:');
+      expect(contents).not.toContain('excludedFolders');
       expect(logSpy.mock.calls.flat().join('\n')).toContain(
         'Configuration generated',
       );
@@ -154,7 +191,7 @@ describe('configGenerator', () => {
       (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
         graphqlDir: './graphql',
         srcDir: './src',
-        excludedFolders: ['node_modules'],
+        exclude: [],
       });
 
       await generateConfig();
@@ -173,7 +210,7 @@ describe('configGenerator', () => {
       (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
         graphqlDir: './graphql',
         srcDir: './src',
-        excludedFolders: ['node_modules'],
+        exclude: [],
       });
       mockedScan.mockReturnValue({
         gqlFileCount: 12,
@@ -186,6 +223,7 @@ describe('configGenerator', () => {
         }),
         unusedFragments: [],
         generatedWarnings: [],
+        generatedFiles: [],
       });
 
       await generateConfig();
@@ -194,6 +232,47 @@ describe('configGenerator', () => {
       expect(out).toContain('42');
       expect(out).toContain('12');
       expect(out).toContain('5');
+    });
+
+    it('pre-fills the exclude prompt with a detected generated file and warns', async () => {
+      mockFsTree(
+        { '.': ['graphql'], graphql: ['ops.gql'] },
+        new Set(['graphql', 'src', './graphql', './src']),
+      );
+      mockedScan.mockReturnValue({
+        gqlFileCount: 1,
+        sourceFileCount: 1,
+        operationCount: 5,
+        unusedOperations: [],
+        unusedFragments: [],
+        generatedWarnings: [],
+        generatedFiles: [
+          {
+            file: 'src/gql/graphql.ts',
+            coverage: 1,
+            matchedOperations: 5,
+            totalOperations: 5,
+            reasons: ['coverage', 'filename'],
+          },
+        ],
+      });
+      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
+        graphqlDir: './graphql',
+        srcDir: './src',
+        exclude: ['src/gql/graphql.ts'],
+      });
+
+      await generateConfig();
+
+      const questions = (inquirer.prompt as unknown as jest.Mock).mock
+        .calls[0][0];
+      const byName = Object.fromEntries(
+        questions.map((q: { name: string }) => [q.name, q]),
+      );
+      expect(byName.exclude.default).toBe('src/gql/graphql.ts');
+      expect(logSpy.mock.calls.flat().join('\n')).toContain(
+        'src/gql/graphql.ts',
+      );
     });
   });
 });

@@ -524,6 +524,33 @@ describe('gqlPruner', () => {
       expect(result.unusedOperations.map((op) => op.name)).toEqual(['Unused']);
       expect(result.unusedFragments).toEqual([]);
       expect(result.generatedWarnings).toEqual([]);
+      expect(result.generatedFiles).toEqual([]);
+    });
+
+    it('exposes the raw detected generated files (for init auto-exclude)', () => {
+      const ops = ['A', 'B', 'C', 'D', 'E'].map((name) => ({
+        name,
+        type: 'query' as const,
+        filePath: 'a.gql',
+      }));
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // gql files
+        .mockReturnValueOnce(['graphql.ts']); // source files
+      mockedExtract.mockReturnValue(ops);
+      // One file references every operation (via {Name}Document) → coverage 1.0.
+      mockedReadSources.mockReturnValue([
+        {
+          file: 'src/gql/graphql.ts',
+          content: 'ADocument BDocument CDocument DDocument EDocument',
+        },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.generatedFiles.map((w) => w.file)).toEqual([
+        'src/gql/graphql.ts',
+      ]);
+      expect(result.generatedWarnings).toHaveLength(1);
     });
   });
 
