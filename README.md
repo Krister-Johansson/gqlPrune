@@ -48,11 +48,11 @@ A fragment spread only by another _unused_ fragment is reported too. Note: a fra
 
 Because usage is detected by string-matching `srcDir`, **GraphQL Code Generator output that lives inside `srcDir`** is a trap: a single generated file (e.g. `src/gql/graphql.ts`) references _every_ operation, so everything looks used and nothing is ever reported unused — silently.
 
-gqlPrune guards against this. When one source file alone references most of your operations, it prints a warning naming the file and pointing you at `excludedFolders`:
+gqlPrune guards against this. When one source file alone references most of your operations, it prints a warning naming the file and pointing you at `exclude`:
 
-> ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — exclude it via "excludedFolders" in gqlPrune.config.yaml or unused results will be unreliable.
+> ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.
 
-Add that file's folder to `excludedFolders` and re-run. The warning goes to **stderr** (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
+Add it to `exclude` (e.g. `'**/*.generated.ts'`) and re-run. The warning goes to **stderr** (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
 
 ## Setup
 
@@ -79,8 +79,10 @@ npx gqlprune init
 ```yaml
 graphqlDir: ./path/to/graphql
 srcDir: ./src
-excludedFolders:
-  - __generated__
+# Glob patterns (gitignore-flavored) for files/folders to skip.
+exclude:
+  - '**/__generated__'
+  - '**/*.generated.ts'
 # Optional — override how operation usage is detected.
 # Supports {name}, {Name}, {type}, {Type} placeholders.
 usagePatterns:
@@ -94,7 +96,8 @@ fragmentUsagePatterns:
 
 - `graphqlDir`: directory **— or an array of directories —** containing your `.gql`/`.graphql` files.
 - `srcDir`: directory **— or an array of directories —** containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
-- `excludedFolders` _(optional)_: folder **names** (e.g. `__generated__`, matched anywhere in the tree) or **paths relative to the project root** (e.g. `src/legacy`). `node_modules` and `.git` are always excluded.
+- `exclude` _(optional)_: gitignore-flavored glob patterns for **files and folders** to skip. A name without a slash matches anywhere by basename (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. A `!` re-include always wins (order-independent), but — as in gitignore — it **can't** re-include a path whose parent directory is excluded (excluded directories aren't traversed). `node_modules` and `.git` are always excluded.
+- `excludedFolders` _(optional, **deprecated** — use `exclude`)_: folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` _(optional)_: templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` _(optional)_: templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 
