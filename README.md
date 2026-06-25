@@ -66,10 +66,14 @@ npm install --save-dev gqlprune
 
 ### Configuration
 
-Run the `init` command to launch a configurator that generates `gqlPrune.config.yaml` at the root of your project:
+Run the `init` command to launch a configurator that generates `gqlPrune.config.yaml` at the root of your project. It **auto-detects** your GraphQL and source directories (scanning the project, excluding `node_modules`/`.git`/`dist`) and offers them as defaults you can accept or override. After writing the file it prints a quick **preview** of what a real run would find:
 
 ```bash
 npx gqlprune init
+```
+
+```text
+✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.
 ```
 
 ```yaml

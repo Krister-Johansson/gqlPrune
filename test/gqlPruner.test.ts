@@ -14,6 +14,7 @@ import {
   resolveExcludedFolders,
   resolveFragmentUsagePatterns,
   resolveUsagePatterns,
+  scanProject,
 } from '../src/core/gqlPruner';
 import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
@@ -445,6 +446,32 @@ describe('gqlPruner', () => {
         throw err;
       });
       expect(() => resolveConfig()).toThrow('eacces');
+    });
+  });
+
+  describe('scanProject', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it('aggregates files, operations, unused results and warnings', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        { name: 'Unused', type: 'query', filePath: 'a.gql' },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.gqlFileCount).toBe(1);
+      expect(result.sourceFileCount).toBe(1);
+      expect(result.operationCount).toBe(2);
+      expect(result.unusedOperations.map((op) => op.name)).toEqual(['Unused']);
+      expect(result.unusedFragments).toEqual([]);
+      expect(result.generatedWarnings).toEqual([]);
     });
   });
 
