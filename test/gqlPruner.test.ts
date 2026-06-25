@@ -11,6 +11,7 @@ import {
   formatGeneratedFileWarnings,
   mainFunction,
   resolveConfig,
+  resolveDirs,
   resolveExcludedFolders,
   resolveFragmentUsagePatterns,
   resolveUsagePatterns,
@@ -449,8 +450,40 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('resolveDirs', () => {
+    it('wraps a single string', () => {
+      expect(resolveDirs('./graphql')).toEqual(['./graphql']);
+    });
+
+    it('trims entries and drops blanks from an array', () => {
+      expect(resolveDirs(['./a', '  ./b  ', ''])).toEqual(['./a', './b']);
+    });
+
+    it('returns [] for undefined', () => {
+      expect(resolveDirs(undefined)).toEqual([]);
+    });
+
+    it('returns [] for a blank string', () => {
+      expect(resolveDirs('   ')).toEqual([]);
+    });
+  });
+
   describe('scanProject', () => {
     beforeEach(() => jest.clearAllMocks());
+
+    it('scans multiple graphql/src directories and de-duplicates files', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // graphqlDir[0]
+        .mockReturnValueOnce(['a.gql', 'b.gql']) // graphqlDir[1] (a.gql overlaps)
+        .mockReturnValueOnce(['App.tsx']); // srcDir
+      mockedExtract.mockReturnValue([]);
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      const result = scanProject({ graphqlDir: ['g1', 'g2'], srcDir: 's' });
+
+      expect(result.gqlFileCount).toBe(2); // a.gql counted once
+      expect(result.sourceFileCount).toBe(1);
+    });
 
     it('aggregates files, operations, unused results and warnings', () => {
       mockedFind
@@ -522,6 +555,15 @@ describe('gqlPruner', () => {
       );
       mockedDirExists.mockReturnValueOnce(true).mockReturnValueOnce(false);
       expect(() => mainFunction()).toThrow('process.exit:1');
+    });
+
+    it('exits 1 and names a missing directory in an array config', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir:\n  - ./g1\n  - ./g2\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockImplementation((dir: string) => dir !== './g2');
+      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain('./g2');
     });
 
     it('exits 1 and lists unused operations', () => {

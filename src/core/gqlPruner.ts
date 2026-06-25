@@ -38,6 +38,19 @@ export function resolveExcludedFolders(config: GqlPruneConfig): string[] {
 }
 
 /**
+ * Normalizes a `graphqlDir`/`srcDir` value (`string | string[]`) into a clean
+ * list of directories, dropping empty/whitespace entries.
+ */
+export function resolveDirs(value: string | string[] | undefined): string[] {
+  const list = Array.isArray(value)
+    ? value
+    : value === undefined
+      ? []
+      : [value];
+  return list.map((dir) => dir.trim()).filter((dir) => dir.length > 0);
+}
+
+/**
  * Returns the configured usage patterns, falling back to the defaults when none
  * are provided.
  */
@@ -412,18 +425,27 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
   const usagePatterns = resolveUsagePatterns(config);
   const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
 
-  const gqlFiles = findFilesWithExtension(
-    config.graphqlDir,
-    ['.gql', '.graphql'],
-    excludedFolders,
-  );
+  // Scan every configured directory and de-duplicate (dirs may overlap/nest).
+  const gqlFiles = [
+    ...new Set(
+      resolveDirs(config.graphqlDir).flatMap((dir) =>
+        findFilesWithExtension(dir, ['.gql', '.graphql'], excludedFolders),
+      ),
+    ),
+  ];
   const operations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
 
-  const tsFiles = findFilesWithExtension(
-    config.srcDir,
-    ['.ts', '.tsx', '.js', '.jsx'],
-    excludedFolders,
-  );
+  const tsFiles = [
+    ...new Set(
+      resolveDirs(config.srcDir).flatMap((dir) =>
+        findFilesWithExtension(
+          dir,
+          ['.ts', '.tsx', '.js', '.jsx'],
+          excludedFolders,
+        ),
+      ),
+    ),
+  ];
   // Read every source file once (paired with its path), then test all operations
   // against the cache instead of re-reading each file for every operation.
   const sources = readSourceFiles(tsFiles);
@@ -468,7 +490,10 @@ export function mainFunction(
     process.exit(1);
   }
 
-  if (!resolved.graphqlDir || !resolved.srcDir) {
+  const graphqlDirs = resolveDirs(resolved.graphqlDir);
+  const srcDirs = resolveDirs(resolved.srcDir);
+
+  if (graphqlDirs.length === 0 || srcDirs.length === 0) {
     console.error(
       kleur.red(
         'No configuration found. Create gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> and --src <dir>.',
@@ -477,28 +502,24 @@ export function mainFunction(
     process.exit(1);
   }
 
-  // Required fields are present from here; widen to the full config type.
-  const config: GqlPruneConfig = {
-    ...resolved,
-    graphqlDir: resolved.graphqlDir,
-    srcDir: resolved.srcDir,
-  };
-
-  if (!directoryExists(config.graphqlDir)) {
+  const missingDirs = [...graphqlDirs, ...srcDirs].filter(
+    (dir) => !directoryExists(dir),
+  );
+  if (missingDirs.length > 0) {
     console.error(
       kleur.red(
-        `Provided GraphQL directory "${config.graphqlDir}" does not exist.`,
+        `These configured directories do not exist: ${missingDirs.join(', ')}.`,
       ),
     );
     process.exit(1);
   }
 
-  if (!directoryExists(config.srcDir)) {
-    console.error(
-      kleur.red(`Provided source directory "${config.srcDir}" does not exist.`),
-    );
-    process.exit(1);
-  }
+  // All directories exist; carry the normalized lists forward.
+  const config: GqlPruneConfig = {
+    ...resolved,
+    graphqlDir: graphqlDirs,
+    srcDir: srcDirs,
+  };
 
   // ---------------- Main Logic ----------------
 
