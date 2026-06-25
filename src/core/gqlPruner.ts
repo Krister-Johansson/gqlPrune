@@ -128,7 +128,44 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
-export function mainFunction() {
+/** The machine-readable report emitted by `--json`. */
+export type JsonReport = {
+  unusedOperations: {
+    name: string;
+    type: string;
+    file: string;
+    line?: number;
+  }[];
+  unusedFragments: { name: string; file: string; line?: number }[];
+  summary: { unusedOperations: number; unusedFragments: number };
+};
+
+/** Builds the structured report for `--json` output. */
+export function buildJsonReport(
+  unusedOperations: OperationInfo[],
+  unusedFragments: FragmentInfo[],
+): JsonReport {
+  return {
+    unusedOperations: unusedOperations.map((op) => ({
+      name: op.name,
+      type: op.type,
+      file: op.filePath,
+      line: op.line,
+    })),
+    unusedFragments: unusedFragments.map((fragment) => ({
+      name: fragment.name,
+      file: fragment.filePath,
+      line: fragment.line,
+    })),
+    summary: {
+      unusedOperations: unusedOperations.length,
+      unusedFragments: unusedFragments.length,
+    },
+  };
+}
+
+export function mainFunction(options: { json?: boolean } = {}) {
+  const json = options.json ?? false;
   let config: GqlPruneConfig;
 
   try {
@@ -173,21 +210,27 @@ export function mainFunction() {
   );
   const allOperations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
 
-  console.log(
-    `Found ${kleur.yellow(gqlFiles.length.toString())} GraphQL files.`,
-  );
-  console.log(
-    `Found ${kleur.yellow(
-      allOperations.length.toString(),
-    )} GraphQL operations.`,
-  );
+  if (!json) {
+    console.log(
+      `Found ${kleur.yellow(gqlFiles.length.toString())} GraphQL files.`,
+    );
+    console.log(
+      `Found ${kleur.yellow(
+        allOperations.length.toString(),
+      )} GraphQL operations.`,
+    );
+  }
 
   const tsFiles = findFilesWithExtension(
     config.srcDir,
     ['.ts', '.tsx', '.js', '.jsx'],
     excludedFolders,
   );
-  console.log(`Found ${kleur.yellow(tsFiles.length.toString())} source files.`);
+  if (!json) {
+    console.log(
+      `Found ${kleur.yellow(tsFiles.length.toString())} source files.`,
+    );
+  }
 
   // Read every source file once, then test all operations against the cache
   // instead of re-reading each file for every operation.
@@ -203,6 +246,20 @@ export function mainFunction() {
     fileContents,
     fragmentUsagePatterns,
   );
+
+  if (json) {
+    console.log(
+      JSON.stringify(
+        buildJsonReport(unusedOperations, unusedFragments),
+        null,
+        2,
+      ),
+    );
+    if (unusedOperations.length > 0 || unusedFragments.length > 0) {
+      process.exit(1);
+    }
+    return;
+  }
 
   if (unusedOperations.length === 0 && unusedFragments.length === 0) {
     console.log(

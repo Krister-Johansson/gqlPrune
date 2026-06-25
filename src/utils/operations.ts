@@ -52,13 +52,18 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
             name: definition.name.value,
             type: definition.operation,
             filePath,
+            line: definition.loc?.startToken.line,
           });
         }
         // Spreads from every operation (named or anonymous) keep their
         // fragments alive, so they all count as reachability roots.
         getFragmentSpreads(definition).forEach((s) => operationSpreads.add(s));
       } else if (definition.kind === 'FragmentDefinition') {
-        fragments.push({ name: definition.name.value, filePath });
+        fragments.push({
+          name: definition.name.value,
+          filePath,
+          line: definition.loc?.startToken.line,
+        });
         fragmentSpreads.push({
           name: definition.name.value,
           spreads: getFragmentSpreads(definition),

@@ -27,12 +27,9 @@ describe('operationUtils', () => {
 
   describe('extractOperations', () => {
     it('should extract operations from a valid GraphQL file', () => {
-      const mockContent = `
-        query MyQuery {
-          someField
-        }
-      `;
-      (fs.readFileSync as jest.Mock).mockReturnValue(mockContent);
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'query MyQuery { someField }',
+      );
 
       const operations = extractOperations('./mockFile.gql');
       expect(operations).toEqual([
@@ -40,6 +37,7 @@ describe('operationUtils', () => {
           name: 'MyQuery',
           type: 'query',
           filePath: './mockFile.gql',
+          line: 1,
         },
       ]);
     });
@@ -87,11 +85,11 @@ describe('operationUtils', () => {
       );
       const r = extractGraphqlEntities('f.gql');
       expect(r.operations).toEqual([
-        { name: 'GetUser', type: 'query', filePath: 'f.gql' },
+        { name: 'GetUser', type: 'query', filePath: 'f.gql', line: 1 },
       ]);
-      expect(r.fragments.map((f) => f.name).sort()).toEqual([
-        'Inner',
-        'UserFields',
+      expect(r.fragments).toEqual([
+        { name: 'UserFields', filePath: 'f.gql', line: 2 },
+        { name: 'Inner', filePath: 'f.gql', line: 3 },
       ]);
       expect(r.operationSpreads).toEqual(['UserFields']);
       expect(r.fragmentSpreads).toEqual(

@@ -3,6 +3,7 @@ import * as fileUtils from '../src/utils/fileUtils';
 import { extractOperations } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import {
+  buildJsonReport,
   DEFAULT_EXCLUDED_FOLDERS,
   findUnusedOperations,
   mainFunction,
@@ -160,6 +161,31 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('buildJsonReport', () => {
+    it('serializes unused operations and fragments with a summary', () => {
+      expect(
+        buildJsonReport(
+          [{ name: 'A', type: 'query', filePath: 'a.gql', line: 3 }],
+          [{ name: 'F', filePath: 'b.gql', line: 7 }],
+        ),
+      ).toEqual({
+        unusedOperations: [
+          { name: 'A', type: 'query', file: 'a.gql', line: 3 },
+        ],
+        unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        summary: { unusedOperations: 1, unusedFragments: 1 },
+      });
+    });
+
+    it('produces empty arrays and a zeroed summary when nothing is unused', () => {
+      expect(buildJsonReport([], [])).toEqual({
+        unusedOperations: [],
+        unusedFragments: [],
+        summary: { unusedOperations: 0, unusedFragments: 0 },
+      });
+    });
+  });
+
   describe('mainFunction', () => {
     let exitSpy: jest.SpyInstance;
     let logSpy: jest.SpyInstance;
@@ -281,6 +307,61 @@ describe('gqlPruner', () => {
         ['source'],
         ['{Name}FragmentDoc'],
       );
+    });
+
+    it('outputs a JSON report and suppresses info logs in --json mode', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+        { name: 'Unused', type: 'query', filePath: 'a.gql', line: 2 },
+      ]);
+      mockedRead.mockReturnValue(['useGetUserQuery()']);
+      mockedUnusedFragments.mockReturnValueOnce([
+        { name: 'DeadFrag', filePath: 'a.gql', line: 5 },
+      ]);
+
+      expect(() => mainFunction({ json: true })).toThrow('process.exit:1');
+      const out = logged();
+      expect(out).not.toContain('Found ');
+      const report = JSON.parse(out);
+      expect(report.unusedOperations).toEqual([
+        { name: 'Unused', type: 'query', file: 'a.gql', line: 2 },
+      ]);
+      expect(report.unusedFragments).toEqual([
+        { name: 'DeadFrag', file: 'a.gql', line: 5 },
+      ]);
+      expect(report.summary).toEqual({
+        unusedOperations: 1,
+        unusedFragments: 1,
+      });
+    });
+
+    it('emits an empty JSON report and exits 0 when nothing is unused (--json)', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+      ]);
+      mockedRead.mockReturnValue(['useGetUserQuery()']);
+
+      expect(() => mainFunction({ json: true })).not.toThrow();
+      expect(exitSpy).not.toHaveBeenCalled();
+      const report = JSON.parse(logged());
+      expect(report.summary).toEqual({
+        unusedOperations: 0,
+        unusedFragments: 0,
+      });
     });
   });
 });
