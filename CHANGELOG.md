@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.5.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.4.0...gqlprune-v2.5.0) (2026-06-25)
+
+
+### Features
+
+* **init:** auto-detect project layout and preview results ([#43](https://github.com/Krister-Johansson/gqlPrune/issues/43)) ([ab94881](https://github.com/Krister-Johansson/gqlPrune/commit/ab94881501e1b294377dec5c41d3cbb6919f504b)), closes [#21](https://github.com/Krister-Johansson/gqlPrune/issues/21)
+
 ## [2.4.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.3.0...gqlprune-v2.4.0) (2026-06-25)
 
 
