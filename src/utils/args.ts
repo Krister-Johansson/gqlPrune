@@ -4,6 +4,7 @@ export type CliOptions = {
   command?: string;
   json: boolean;
   annotate: boolean;
+  version: boolean;
   config: CliConfig;
 };
 
@@ -27,6 +28,7 @@ export function parseArgs(argv: string[]): CliOptions {
   let command: string | undefined;
   let json = false;
   let annotate = false;
+  let version = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -60,6 +62,10 @@ export function parseArgs(argv: string[]): CliOptions {
         break;
       case '--annotate':
         annotate = true;
+        break;
+      case '--version':
+      case '-v':
+        version = true;
         break;
       case '--graphql': {
         const value = takeValue();
@@ -97,5 +103,5 @@ export function parseArgs(argv: string[]): CliOptions {
     config.fragmentUsagePatterns = fragmentUsagePatterns;
   }
 
-  return { command, json, annotate, config };
+  return { command, json, annotate, version, config };
 }

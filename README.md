@@ -138,6 +138,8 @@ This prints any unused GraphQL operations and fragments. The command exits with:
 - **0** when nothing unused is found (suitable for CI gates).
 - **1** when unused operations or fragments are found (or on configuration errors).
 
+Print the installed version with `gqlprune --version` (or `-v`).
+
 ### JSON output
 
 Pass `--json` for a machine-readable report (CI, dashboards, scripting) instead of the human-readable tables:

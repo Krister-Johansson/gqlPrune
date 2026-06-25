@@ -1,11 +1,12 @@
 import { parseArgs } from '../src/utils/args';
 
 describe('parseArgs', () => {
-  it('defaults to no command, json=false, annotate=false, empty config', () => {
+  it('defaults to no command, all flags false, empty config', () => {
     expect(parseArgs([])).toEqual({
       command: undefined,
       json: false,
       annotate: false,
+      version: false,
       config: {},
     });
   });
@@ -15,6 +16,7 @@ describe('parseArgs', () => {
       command: 'init',
       json: false,
       annotate: false,
+      version: false,
       config: {},
     });
   });
@@ -24,6 +26,7 @@ describe('parseArgs', () => {
       command: undefined,
       json: true,
       annotate: false,
+      version: false,
       config: {},
     });
   });
@@ -33,8 +36,15 @@ describe('parseArgs', () => {
       command: undefined,
       json: false,
       annotate: true,
+      version: false,
       config: {},
     });
+  });
+
+  it('parses --version and the -v short flag', () => {
+    expect(parseArgs(['--version']).version).toBe(true);
+    expect(parseArgs(['-v']).version).toBe(true);
+    expect(parseArgs([]).version).toBe(false);
   });
 
   it('parses a command together with flags in any order', () => {
@@ -42,6 +52,7 @@ describe('parseArgs', () => {
       command: 'init',
       json: true,
       annotate: true,
+      version: false,
       config: {},
     });
   });
@@ -99,6 +110,7 @@ describe('parseArgs', () => {
       command: undefined,
       json: true,
       annotate: false,
+      version: false,
       config: { graphqlDir: './g', srcDir: './s', excludedFolders: ['x'] },
     });
   });
