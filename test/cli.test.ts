@@ -47,22 +47,47 @@ describe('cli dispatch', () => {
 
   it('runs the pruner by default', () => {
     const { generateConfig, mainFunction } = runCli([]);
-    expect(mainFunction).toHaveBeenCalledWith({ json: false, annotate: false });
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: false,
+      annotate: false,
+      config: {},
+    });
     expect(generateConfig).not.toHaveBeenCalled();
   });
 
   it('passes --json through to the pruner', () => {
     const { mainFunction } = runCli(['--json']);
-    expect(mainFunction).toHaveBeenCalledWith({ json: true, annotate: false });
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: true,
+      annotate: false,
+      config: {},
+    });
   });
 
   it('passes --annotate through to the pruner', () => {
     const { mainFunction } = runCli(['--annotate']);
-    expect(mainFunction).toHaveBeenCalledWith({ json: false, annotate: true });
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: false,
+      annotate: true,
+      config: {},
+    });
   });
 
   it('auto-enables annotations under GitHub Actions', () => {
     const { mainFunction } = runCli([], { GITHUB_ACTIONS: 'true' });
-    expect(mainFunction).toHaveBeenCalledWith({ json: false, annotate: true });
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: false,
+      annotate: true,
+      config: {},
+    });
+  });
+
+  it('passes config flags through to the pruner', () => {
+    const { mainFunction } = runCli(['--graphql', './g', '--src', './s']);
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: false,
+      annotate: false,
+      config: { graphqlDir: './g', srcDir: './s' },
+    });
   });
 });

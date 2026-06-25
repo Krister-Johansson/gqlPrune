@@ -1,11 +1,12 @@
 import { parseArgs } from '../src/utils/args';
 
 describe('parseArgs', () => {
-  it('defaults to no command, json=false, annotate=false', () => {
+  it('defaults to no command, json=false, annotate=false, empty config', () => {
     expect(parseArgs([])).toEqual({
       command: undefined,
       json: false,
       annotate: false,
+      config: {},
     });
   });
 
@@ -14,6 +15,7 @@ describe('parseArgs', () => {
       command: 'init',
       json: false,
       annotate: false,
+      config: {},
     });
   });
 
@@ -22,6 +24,7 @@ describe('parseArgs', () => {
       command: undefined,
       json: true,
       annotate: false,
+      config: {},
     });
   });
 
@@ -30,6 +33,7 @@ describe('parseArgs', () => {
       command: undefined,
       json: false,
       annotate: true,
+      config: {},
     });
   });
 
@@ -38,6 +42,71 @@ describe('parseArgs', () => {
       command: 'init',
       json: true,
       annotate: true,
+      config: {},
     });
+  });
+
+  it('parses --graphql and --src as config paths', () => {
+    expect(
+      parseArgs(['--graphql', './graphql', '--src', './src']).config,
+    ).toEqual({ graphqlDir: './graphql', srcDir: './src' });
+  });
+
+  it('does not mistake a flag value for the command', () => {
+    // './graphql' is the value of --graphql, not a positional command.
+    expect(parseArgs(['--graphql', './graphql']).command).toBeUndefined();
+  });
+
+  it('supports the --flag=value form', () => {
+    expect(parseArgs(['--graphql=./g', '--src=./s']).config).toEqual({
+      graphqlDir: './g',
+      srcDir: './s',
+    });
+  });
+
+  it('collects repeatable --ignore into excludedFolders', () => {
+    expect(
+      parseArgs(['--ignore', '__generated__', '--ignore', 'dist']).config,
+    ).toEqual({ excludedFolders: ['__generated__', 'dist'] });
+  });
+
+  it('collects repeatable --pattern and --fragment-pattern', () => {
+    expect(
+      parseArgs([
+        '--pattern',
+        'use{Name}{Type}',
+        '--fragment-pattern',
+        '{Name}FragmentDoc',
+      ]).config,
+    ).toEqual({
+      usagePatterns: ['use{Name}{Type}'],
+      fragmentUsagePatterns: ['{Name}FragmentDoc'],
+    });
+  });
+
+  it('combines a command, boolean flags and config flags', () => {
+    expect(
+      parseArgs([
+        '--json',
+        '--graphql',
+        './g',
+        '--src',
+        './s',
+        '--ignore',
+        'x',
+      ]),
+    ).toEqual({
+      command: undefined,
+      json: true,
+      annotate: false,
+      config: { graphqlDir: './g', srcDir: './s', excludedFolders: ['x'] },
+    });
+  });
+
+  it('ignores a value flag given no value', () => {
+    // `--graphql` with no following value (the next token is another flag).
+    const result = parseArgs(['--graphql', '--json']);
+    expect(result.config).toEqual({});
+    expect(result.json).toBe(true);
   });
 });

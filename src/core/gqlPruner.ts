@@ -19,6 +19,7 @@ import {
 } from '../utils/usagePatterns.js';
 import { extractOperations } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { CliConfig } from '../utils/args.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -364,36 +365,66 @@ export function formatGeneratedFileWarnings(
   });
 }
 
+/**
+ * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
+ * values provided as CLI flags, which win per field. A missing config file is
+ * fine — the CLI flags may supply everything. Throws on a malformed or
+ * otherwise unreadable file so the problem isn't silently ignored.
+ */
+export function resolveConfig(cliConfig: CliConfig = {}): GqlPruneConfig {
+  let fileConfig: Partial<GqlPruneConfig> = {};
+  let raw: string | undefined;
+  try {
+    raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error; // permissions or similar — surface it rather than hide it
+    }
+    // No config file: rely entirely on CLI flags.
+  }
+  // An empty/whitespace-only file is treated as no config (parsing it throws),
+  // so CLI flags alone can still drive the run.
+  if (raw !== undefined && raw.trim() !== '') {
+    fileConfig = (yaml.load(raw) as GqlPruneConfig) ?? {};
+  }
+  // Required fields may still be absent here; mainFunction validates presence.
+  return { ...fileConfig, ...cliConfig } as GqlPruneConfig;
+}
+
 export function mainFunction(
-  options: { json?: boolean; annotate?: boolean } = {},
+  options: { json?: boolean; annotate?: boolean; config?: CliConfig } = {},
 ) {
   const json = options.json ?? false;
   const annotate = options.annotate ?? false;
-  let config: GqlPruneConfig;
 
+  let config: GqlPruneConfig;
   try {
-    const configFile = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
-    config = yaml.load(configFile) as GqlPruneConfig;
+    config = resolveConfig(options.config);
   } catch (e) {
-    console.error(
-      kleur.red(
-        'Error reading the config file (gqlPrune.config.yaml). Run "gqlPrune init" to create one.',
-      ),
-    );
+    console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
     process.exit(1);
   }
 
-  if (!config || !directoryExists(config.graphqlDir || '')) {
+  if (!config.graphqlDir || !config.srcDir) {
     console.error(
       kleur.red(
-        `Provided GraphQL directory "${config?.graphqlDir}" does not exist.`,
+        'No configuration found. Create gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> and --src <dir>.',
       ),
     );
     process.exit(1);
   }
 
-  if (!directoryExists(config.srcDir || '')) {
+  if (!directoryExists(config.graphqlDir)) {
+    console.error(
+      kleur.red(
+        `Provided GraphQL directory "${config.graphqlDir}" does not exist.`,
+      ),
+    );
+    process.exit(1);
+  }
+
+  if (!directoryExists(config.srcDir)) {
     console.error(
       kleur.red(`Provided source directory "${config.srcDir}" does not exist.`),
     );
