@@ -77,6 +77,19 @@ describe('gqlPruner', () => {
         }),
       ).toEqual(['a', 'node_modules', '.git']);
     });
+
+    it('carries exclude negations alongside the deprecated excludedFolders', () => {
+      // The matcher is order-insensitive (negatives always win — see
+      // createExcludeMatcher), so this just confirms both fields reach it.
+      expect(
+        resolveExcludePatterns({
+          graphqlDir: 'g',
+          srcDir: 's',
+          excludedFolders: ['legacy'],
+          exclude: ['!legacy/keep.ts'],
+        }),
+      ).toEqual(['!legacy/keep.ts', 'legacy', 'node_modules', '.git']);
+    });
   });
 
   describe('resolveUsagePatterns', () => {

@@ -92,6 +92,32 @@ describe('fileUtils', () => {
         'keep.ts',
       ]);
     });
+
+    it('honors file-level "!" re-includes during the walk', () => {
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        'foo.gen.ts',
+        'keep.gen.ts',
+        'app.ts',
+      ]);
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => false });
+      const matcher = createExcludeMatcher(['*.gen.ts', '!keep.gen.ts']);
+      expect(findFilesWithExtension('./', ['.ts'], matcher).sort()).toEqual([
+        'app.ts',
+        'keep.gen.ts',
+      ]);
+    });
+
+    it('cannot re-include under an excluded directory (gitignore limitation)', () => {
+      (fs.readdirSync as jest.Mock).mockReturnValue(['gen', 'app.ts']);
+      (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
+        isDirectory: () => p.endsWith('gen'),
+      }));
+      // `gen` is pruned before traversal, so `!gen/keep.ts` can't reach inside.
+      const matcher = createExcludeMatcher(['gen', '!gen/keep.ts']);
+      expect(findFilesWithExtension('./', ['.ts'], matcher)).toEqual([
+        'app.ts',
+      ]);
+    });
   });
 
   describe('isOperationUsed', () => {
@@ -175,6 +201,17 @@ describe('fileUtils', () => {
       const ex = createExcludeMatcher(['*.generated.ts', '!keep.generated.ts']);
       expect(ex('src/other.generated.ts')).toBe(true);
       expect(ex('src/keep.generated.ts')).toBe(false);
+    });
+
+    it('lets a negative win regardless of order or which field it came from', () => {
+      // Order-insensitive: a `!` re-include always overrides a positive,
+      // including a positive from the deprecated excludedFolders.
+      expect(createExcludeMatcher(['keep.ts', '!keep.ts'])('src/keep.ts')).toBe(
+        false,
+      );
+      expect(createExcludeMatcher(['!keep.ts', 'keep.ts'])('src/keep.ts')).toBe(
+        false,
+      );
     });
 
     it('excludes nothing when there are no positive patterns', () => {
