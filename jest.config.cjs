@@ -12,7 +12,13 @@ module.exports = {
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.d.ts',
+    // ESM-only runtime shim (uses import.meta); not exercisable under the
+    // CommonJS ts-jest transform, so it's mocked in tests and excluded here.
+    '!src/utils/pkgInfo.ts',
+  ],
   coverageReporters: ['text', 'lcov'],
   // Floor below current coverage (~97% stmts / 81% branches) so CI catches
   // regressions without failing on minor branch changes.
