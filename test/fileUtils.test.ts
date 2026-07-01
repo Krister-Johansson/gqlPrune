@@ -32,19 +32,36 @@ describe('fileUtils', () => {
       jest.resetAllMocks();
     });
 
+    // A minimal fs.Dirent stand-in, as returned by readdirSync withFileTypes.
+    const dirent = (
+      name: string,
+      opts: { dir?: boolean; link?: boolean } = {},
+    ) => ({
+      name,
+      isDirectory: () => opts.dir === true,
+      isSymbolicLink: () => opts.link === true,
+    });
+
+    // Unless a test says otherwise, every path is its own real path.
+    beforeEach(() => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+    });
+
     it('should find files with the given extensions', () => {
-      (fs.readdirSync as jest.Mock).mockReturnValue([
-        'file1.ts',
-        'file2.js',
-        'folder1',
-      ]);
-      (fs.statSync as jest.Mock)
-        .mockReturnValueOnce({ isDirectory: () => false })
-        .mockReturnValueOnce({ isDirectory: () => false })
-        .mockReturnValueOnce({ isDirectory: () => true });
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === './'
+          ? [
+              dirent('file1.ts'),
+              dirent('file2.js'),
+              dirent('folder1', { dir: true }),
+            ]
+          : [],
+      );
 
       const files = findFilesWithExtension('./', ['.ts'], () => false);
-      expect(files).toEqual(['file1.ts']); // Adjusted the expected value
+      expect(files).toEqual(['file1.ts']);
     });
 
     it('should handle error when reading a directory', () => {
@@ -56,35 +73,93 @@ describe('fileUtils', () => {
       expect(files).toEqual([]); // Expect an empty array since the directory read failed
     });
 
-    it('should handle error when reading stats for a file', () => {
-      (fs.readdirSync as jest.Mock).mockReturnValue(['file1.ts']);
-      (fs.statSync as jest.Mock).mockImplementation(() => {
-        throw new Error('Failed to read file stats');
-      });
+    it('follows a symlink to a directory outside the walked tree', () => {
+      (fs.readdirSync as jest.Mock).mockImplementation(
+        (p: string) =>
+          p === './' ? [dirent('alias', { link: true })] : [dirent('a.ts')], // contents behind the link
+      );
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => (p === 'alias' ? '/real/target' : p),
+      );
 
-      const files = findFilesWithExtension('./', ['.ts'], () => false);
-      expect(files).toEqual([]); // Expect an empty array since the file stats read failed
+      expect(findFilesWithExtension('./', ['.ts'], () => false)).toEqual([
+        'alias/a.ts',
+      ]);
     });
 
-    it('should handle error when reading stats for a folder', () => {
-      (fs.readdirSync as jest.Mock).mockReturnValue(['folder1']);
+    it('follows a symlink directly to a matching file', () => {
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        dirent('linked.ts', { link: true }),
+      ]);
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => false });
+
+      expect(findFilesWithExtension('./', ['.ts'], () => false)).toEqual([
+        'linked.ts',
+      ]);
+    });
+
+    it('skips a broken symlink and keeps walking', () => {
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        dirent('broken.ts', { link: true }),
+        dirent('good.ts'),
+      ]);
       (fs.statSync as jest.Mock).mockImplementation(() => {
-        throw new Error('Failed to read folder stats');
+        throw new Error('ENOENT: dangling link');
       });
 
-      const files = findFilesWithExtension('./', ['.ts'], () => false);
-      expect(files).toEqual([]); // Expect an empty array since the folder stats read failed
+      expect(findFilesWithExtension('./', ['.ts'], () => false)).toEqual([
+        'good.ts',
+      ]);
+    });
+
+    it('terminates on a symlink cycle instead of recursing forever', () => {
+      // `loop` points back at the directory being walked.
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        dirent('loop', { link: true }),
+        dirent('a.ts'),
+      ]);
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      (fs.realpathSync as unknown as jest.Mock).mockReturnValue(
+        '/the/same/dir',
+      );
+
+      expect(findFilesWithExtension('./', ['.ts'], () => false)).toEqual([
+        'a.ts',
+      ]);
+      // The cycle is pruned before re-reading: one readdir for the root only.
+      expect(fs.readdirSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not scan the same real directory twice via an alias symlink', () => {
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === './'
+          ? [dirent('real', { dir: true }), dirent('alias', { link: true })]
+          : p === 'real'
+            ? [dirent('a.ts')]
+            : [dirent('a.ts')],
+      );
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => (p === 'real' || p === 'alias' ? '/canonical' : p),
+      );
+
+      // a.ts is reported once (under the path walked first), not twice.
+      expect(findFilesWithExtension('./', ['.ts'], () => false)).toEqual([
+        'real/a.ts',
+      ]);
     });
 
     it('skips excluded directories and files via the matcher', () => {
-      (fs.readdirSync as jest.Mock).mockReturnValue([
-        'keep.ts',
-        'node_modules',
-        'skip.gen.ts',
-      ]);
-      (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-        isDirectory: () => p.endsWith('node_modules'),
-      }));
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === './'
+          ? [
+              dirent('keep.ts'),
+              dirent('node_modules', { dir: true }),
+              dirent('skip.gen.ts'),
+            ]
+          : [],
+      );
       const matcher = createExcludeMatcher(['node_modules', '*.gen.ts']);
       expect(findFilesWithExtension('./', ['.ts'], matcher)).toEqual([
         'keep.ts',
@@ -93,11 +168,10 @@ describe('fileUtils', () => {
 
     it('honors file-level "!" re-includes during the walk', () => {
       (fs.readdirSync as jest.Mock).mockReturnValue([
-        'foo.gen.ts',
-        'keep.gen.ts',
-        'app.ts',
+        dirent('foo.gen.ts'),
+        dirent('keep.gen.ts'),
+        dirent('app.ts'),
       ]);
-      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => false });
       const matcher = createExcludeMatcher(['*.gen.ts', '!keep.gen.ts']);
       expect(findFilesWithExtension('./', ['.ts'], matcher).sort()).toEqual([
         'app.ts',
@@ -106,10 +180,9 @@ describe('fileUtils', () => {
     });
 
     it('cannot re-include under an excluded directory (gitignore limitation)', () => {
-      (fs.readdirSync as jest.Mock).mockReturnValue(['gen', 'app.ts']);
-      (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-        isDirectory: () => p.endsWith('gen'),
-      }));
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === './' ? [dirent('gen', { dir: true }), dirent('app.ts')] : [],
+      );
       // `gen` is pruned before traversal, so `!gen/keep.ts` can't reach inside.
       const matcher = createExcludeMatcher(['gen', '!gen/keep.ts']);
       expect(findFilesWithExtension('./', ['.ts'], matcher)).toEqual([
