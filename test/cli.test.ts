@@ -248,7 +248,7 @@ describe('cli dispatch', () => {
     errorSpy.mockRestore();
   });
 
-  it('reports an unexpected init failure and exits 1', async () => {
+  it('reports an unexpected init failure and exits 2', async () => {
     const errorSpy = jest
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
