@@ -5,6 +5,7 @@ export type CliOptions = {
   json: boolean;
   annotate: boolean;
   version: boolean;
+  verbose: boolean;
   config: CliConfig;
 };
 
@@ -12,10 +13,11 @@ export type CliOptions = {
  * Parses CLI arguments (everything after the node binary and script path).
  *
  * Recognizes the optional `init` command, the boolean `--json` / `--annotate`
- * flags, and value flags that mirror the config file: `--graphql`, `--src`,
- * and the repeatable `--ignore`, `--pattern`, `--fragment-pattern`. Value flags
- * accept both `--flag value` and `--flag=value`, in any order. A value is never
- * mistaken for the positional command.
+ * / `--verbose` flags, and value flags that mirror the config file:
+ * `--graphql`, `--src`, and the repeatable `--ignore`, `--pattern`,
+ * `--fragment-pattern`. Value flags accept both `--flag value` and
+ * `--flag=value`, in any order. A value is never mistaken for the positional
+ * command.
  *
  * @param {string[]} argv - Arguments, e.g. `process.argv.slice(2)`.
  * @returns {CliOptions} - The resolved command, flags, and CLI config overrides.
@@ -29,6 +31,7 @@ export function parseArgs(argv: string[]): CliOptions {
   let json = false;
   let annotate = false;
   let version = false;
+  let verbose = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -62,6 +65,9 @@ export function parseArgs(argv: string[]): CliOptions {
         break;
       case '--annotate':
         annotate = true;
+        break;
+      case '--verbose':
+        verbose = true;
         break;
       case '--version':
       case '-v':
@@ -103,5 +109,5 @@ export function parseArgs(argv: string[]): CliOptions {
     config.fragmentUsagePatterns = fragmentUsagePatterns;
   }
 
-  return { command, json, annotate, version, config };
+  return { command, json, annotate, version, verbose, config };
 }
