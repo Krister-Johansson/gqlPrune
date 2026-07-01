@@ -167,6 +167,28 @@ npx gqlprune --json
 
 Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages — currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results) — and is empty when there are none.
 
+### Verbose output
+
+Pass `--verbose` to see *why* each operation was judged used or unused — the resolved configuration, the files scanned, and per operation the exact search string that matched and the file it matched in:
+
+```bash
+npx gqlprune --verbose
+```
+
+```text
+[verbose] graphqlDir: ./graphql
+[verbose] srcDir: ./src
+[verbose] exclude: node_modules, .git
+[verbose] usagePatterns: use{Name}{Type}, use{Name}Lazy{Type}, use{Name}Suspense{Type}, {Name}Document
+[verbose] fragmentUsagePatterns: {Name}FragmentDoc
+[verbose] GraphQL files (1): graphql/user.gql
+[verbose] Source files scanned: 42
+[verbose] used:   GetUser (query) — "useGetUserQuery" found in src/App.tsx
+[verbose] unused: OldQuery (query) — no match for useOldQueryQuery, useOldQueryLazyQuery, useOldQuerySuspenseQuery, OldQueryDocument
+```
+
+This is the fastest way to debug a surprising result: an operation you believe is used shows exactly which patterns were searched, and if *every* operation matches in the same file, that file is almost certainly [generated output masking your results](#avoiding-false-all-clear-results). Verbose lines go to **stderr**, so `--verbose --json` still emits pure JSON on stdout.
+
 ### In CI
 
 Add a script and run it in your pipeline; the non-zero exit fails the job when unused operations are found:

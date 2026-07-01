@@ -5,7 +5,7 @@ import { parseArgs } from './utils/args.js';
 import { notifyUpdate } from './utils/updateNotifier.js';
 import { pkg } from './utils/pkgInfo.js';
 
-const { command, json, annotate, version, config } = parseArgs(
+const { command, json, annotate, version, verbose, config } = parseArgs(
   process.argv.slice(2),
 );
 
@@ -21,6 +21,7 @@ async function run(): Promise<void> {
     mainFunction({
       json,
       annotate: annotate || process.env.GITHUB_ACTIONS === 'true',
+      verbose,
       config,
     });
   }
