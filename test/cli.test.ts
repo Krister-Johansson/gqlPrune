@@ -31,7 +31,11 @@ describe('cli dispatch', () => {
       jest.doMock('../src/core/configGenerator', () => ({
         generateConfig: jest.fn(),
       }));
-      jest.doMock('../src/core/gqlPruner', () => ({ mainFunction: jest.fn() }));
+      // Partial mock: cli.ts also imports the real escapeAnnotationMessage.
+      jest.doMock('../src/core/gqlPruner', () => ({
+        ...jest.requireActual('../src/core/gqlPruner'),
+        mainFunction: jest.fn(),
+      }));
       jest.doMock('../src/utils/updateNotifier', () => ({
         notifyUpdate: jest.fn(),
       }));
@@ -180,6 +184,42 @@ describe('cli dispatch', () => {
     );
     expect(mainFunction).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('emits usage errors as ::error annotations in --annotate mode', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction } = runCli(['--jsn', '--annotate']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --jsn',
+    );
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('emits usage errors as ::error annotations under GitHub Actions', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    runCli(['--jsn'], { GITHUB_ACTIONS: 'true' });
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --jsn',
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('escapes usage-error annotations per workflow-command rules', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    // A stray flag containing "%" must be %25-escaped inside ::error data.
+    runCli(['--50%off', '--annotate']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --50%25off',
+    );
     errorSpy.mockRestore();
   });
 

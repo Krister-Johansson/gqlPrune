@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 import kleur from 'kleur';
 import { generateConfig } from './core/configGenerator.js';
-import { mainFunction } from './core/gqlPruner.js';
+import { escapeAnnotationMessage, mainFunction } from './core/gqlPruner.js';
 import { formatHelp, parseArgs } from './utils/args.js';
 import { notifyUpdate } from './utils/updateNotifier.js';
 import { pkg } from './utils/pkgInfo.js';
 
 const { command, json, annotate, version, verbose, help, errors, config } =
   parseArgs(process.argv.slice(2));
+const annotateMode = annotate || process.env.GITHUB_ACTIONS === 'true';
 
-/** Prints usage errors and the --help pointer; the run is aborted. */
+/**
+ * Prints usage errors and the --help pointer; the run is aborted. In CI /
+ * --annotate mode each error is an (escaped) ::error workflow command so it
+ * surfaces in the Actions UI instead of only in the raw log.
+ */
 function reportUsageErrors(lines: string[]): void {
   for (const line of lines) {
-    console.error(kleur.red(line));
+    console.error(
+      annotateMode
+        ? `::error::${escapeAnnotationMessage(line)}`
+        : kleur.red(line),
+    );
   }
   console.error('Run "gqlprune --help" for usage.');
   process.exitCode = 1;
@@ -44,7 +53,7 @@ async function run(): Promise<void> {
   } else {
     mainFunction({
       json,
-      annotate: annotate || process.env.GITHUB_ACTIONS === 'true',
+      annotate: annotateMode,
       verbose,
       config,
     });
