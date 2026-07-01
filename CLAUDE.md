@@ -118,6 +118,20 @@ CodeRabbit auto-reviews the PR. When its comments land:
     change just to silence the bot.
 - Re-run the local gate after addressing comments. CI must be green before merge.
 
+**Mind the hourly review rate limit.** Reviews are budgeted per rolling hour, and
+`.coderabbit.yaml` is configured to spend them only where they matter:
+
+- **Incremental auto-reviews are off** — pushing fixes for review comments does
+  *not* trigger a re-review. When the fixes are ready for a re-check, request one
+  explicitly by commenting `@coderabbitai review`.
+- Prefer `@coderabbitai review` (incremental) over `@coderabbitai full review` —
+  a full review re-reads the entire diff and costs accordingly. Never manually
+  trigger a review when an auto review of the same commits already ran.
+- release-please PRs (`chore(main): release`) and dependabot PRs are excluded
+  from auto-review — don't request reviews on them either.
+- When working through a queue of PRs, space them out; several PRs opened within
+  the same hour can still exhaust the budget.
+
 ### 6. Keep the board up to date
 Treat the [project board](https://github.com/users/Krister-Johansson/projects/3)
 as the source of truth for status — update it as work moves, not only at the end.
