@@ -588,7 +588,7 @@ export function mainFunction(
   } catch (e) {
     console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
-    process.exit(1);
+    process.exit(2);
   }
 
   const graphqlDirs = resolveDirs(resolved.graphqlDir);
@@ -600,7 +600,7 @@ export function mainFunction(
         'No configuration found. Create gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> and --src <dir>.',
       ),
     );
-    process.exit(1);
+    process.exit(2);
   }
 
   const missingDirs = [...graphqlDirs, ...srcDirs].filter(
@@ -612,7 +612,7 @@ export function mainFunction(
         `These configured directories do not exist: ${missingDirs.join(', ')}.`,
       ),
     );
-    process.exit(1);
+    process.exit(2);
   }
 
   // All directories exist; carry the normalized lists forward.
