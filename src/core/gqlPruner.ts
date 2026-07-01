@@ -223,7 +223,7 @@ export function buildJsonReport(
 }
 
 /** Escapes a workflow-command message (data after `::`) per GitHub rules. */
-function escapeAnnotationMessage(message: string): string {
+export function escapeAnnotationMessage(message: string): string {
   return message
     .replace(/%/g, '%25')
     .replace(/\r/g, '%0D')

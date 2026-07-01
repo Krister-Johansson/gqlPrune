@@ -13,6 +13,7 @@ describe('cli dispatch', () => {
       process.env.GITHUB_ACTIONS = realGHA;
     }
     jest.resetModules();
+    process.exitCode = 0; // error paths set exitCode; don't leak to the runner
   });
 
   function runCli(args: string[], env: { GITHUB_ACTIONS?: string } = {}) {
@@ -30,7 +31,11 @@ describe('cli dispatch', () => {
       jest.doMock('../src/core/configGenerator', () => ({
         generateConfig: jest.fn(),
       }));
-      jest.doMock('../src/core/gqlPruner', () => ({ mainFunction: jest.fn() }));
+      // Partial mock: cli.ts also imports the real escapeAnnotationMessage.
+      jest.doMock('../src/core/gqlPruner', () => ({
+        ...jest.requireActual('../src/core/gqlPruner'),
+        mainFunction: jest.fn(),
+      }));
       jest.doMock('../src/utils/updateNotifier', () => ({
         notifyUpdate: jest.fn(),
       }));
@@ -140,5 +145,95 @@ describe('cli dispatch', () => {
       verbose: false,
       config: { graphqlDir: './g', srcDir: './s' },
     });
+  });
+
+  it('prints usage and exits without running the pruner on --help', () => {
+    const logSpy = jest
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    const { mainFunction, generateConfig, notifyUpdate } = runCli(['--help']);
+    expect(logSpy.mock.calls.flat().join('\n')).toContain('Usage:');
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(generateConfig).not.toHaveBeenCalled();
+    expect(notifyUpdate).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+    logSpy.mockRestore();
+  });
+
+  it('reports an unknown flag on stderr and does not run', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction, notifyUpdate } = runCli(['--jsn']);
+    const errs = errorSpy.mock.calls.flat().join('\n');
+    expect(errs).toContain('Unknown flag: --jsn');
+    expect(errs).toContain('--help');
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(notifyUpdate).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('reports a missing flag value on stderr and does not run', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction } = runCli(['--graphql']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      'Missing value for --graphql',
+    );
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('emits usage errors as ::error annotations in --annotate mode', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction } = runCli(['--jsn', '--annotate']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --jsn',
+    );
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('emits usage errors as ::error annotations under GitHub Actions', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    runCli(['--jsn'], { GITHUB_ACTIONS: 'true' });
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --jsn',
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('escapes usage-error annotations per workflow-command rules', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    // A stray flag containing "%" must be %25-escaped inside ::error data.
+    runCli(['--50%off', '--annotate']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      '::error::Unknown flag: --50%25off',
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('rejects an unknown command', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction, generateConfig } = runCli(['scna']);
+    const errs = errorSpy.mock.calls.flat().join('\n');
+    expect(errs).toContain('Unknown command: scna');
+    expect(errs).toContain('--help');
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(generateConfig).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
   });
 });

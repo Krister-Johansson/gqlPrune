@@ -1,4 +1,4 @@
-import { parseArgs } from '../src/utils/args';
+import { formatHelp, parseArgs } from '../src/utils/args';
 
 describe('parseArgs', () => {
   it('defaults to no command, all flags false, empty config', () => {
@@ -8,6 +8,8 @@ describe('parseArgs', () => {
       annotate: false,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -19,6 +21,8 @@ describe('parseArgs', () => {
       annotate: false,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -30,6 +34,8 @@ describe('parseArgs', () => {
       annotate: false,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -41,6 +47,8 @@ describe('parseArgs', () => {
       annotate: true,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -52,6 +60,8 @@ describe('parseArgs', () => {
       annotate: false,
       version: false,
       verbose: true,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -75,6 +85,8 @@ describe('parseArgs', () => {
       annotate: true,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: {},
     });
   });
@@ -134,14 +146,112 @@ describe('parseArgs', () => {
       annotate: false,
       version: false,
       verbose: false,
+      help: false,
+      errors: [],
       config: { graphqlDir: './g', srcDir: './s', excludedFolders: ['x'] },
     });
   });
 
-  it('ignores a value flag given no value', () => {
-    // `--graphql` with no following value (the next token is another flag).
+  it('reports a missing value when the next token is another flag', () => {
     const result = parseArgs(['--graphql', '--json']);
     expect(result.config).toEqual({});
+    expect(result.errors).toEqual(['Missing value for --graphql']);
     expect(result.json).toBe(true);
+  });
+
+  it('reports a missing value at the end of the arguments', () => {
+    expect(parseArgs(['--src']).errors).toEqual(['Missing value for --src']);
+  });
+
+  it('reports an empty inline value as missing', () => {
+    expect(parseArgs(['--graphql=']).errors).toEqual([
+      'Missing value for --graphql',
+    ]);
+  });
+
+  it('parses --help and the -h short flag', () => {
+    expect(parseArgs(['--help']).help).toBe(true);
+    expect(parseArgs(['-h']).help).toBe(true);
+    expect(parseArgs([]).help).toBe(false);
+  });
+
+  it('reports an unknown flag as an error', () => {
+    expect(parseArgs(['--jsn']).errors).toEqual(['Unknown flag: --jsn']);
+  });
+
+  it('reports an unknown flag given in --flag=value form', () => {
+    expect(parseArgs(['--foo=bar']).errors).toEqual(['Unknown flag: --foo']);
+  });
+
+  it('reports an unknown short flag as an error', () => {
+    expect(parseArgs(['-x']).errors).toEqual(['Unknown flag: -x']);
+  });
+
+  it('reports an unexpected second positional argument', () => {
+    const result = parseArgs(['init', 'extra']);
+    expect(result.command).toBe('init');
+    expect(result.errors).toEqual(['Unexpected argument: extra']);
+  });
+
+  it('collects repeated --graphql and --src into arrays', () => {
+    expect(
+      parseArgs([
+        '--graphql',
+        './g1',
+        '--graphql',
+        './g2',
+        '--src',
+        './s1',
+        '--src',
+        './s2',
+      ]).config,
+    ).toEqual({ graphqlDir: ['./g1', './g2'], srcDir: ['./s1', './s2'] });
+  });
+
+  it('keeps a single --graphql / --src value as a string', () => {
+    expect(parseArgs(['--graphql', './g', '--src', './s']).config).toEqual({
+      graphqlDir: './g',
+      srcDir: './s',
+    });
+  });
+
+  it('collects repeatable --exclude into config.exclude', () => {
+    expect(
+      parseArgs([
+        '--exclude',
+        '**/*.generated.ts',
+        '--exclude',
+        '__generated__',
+      ]).config,
+    ).toEqual({ exclude: ['**/*.generated.ts', '__generated__'] });
+  });
+});
+
+describe('formatHelp', () => {
+  it('documents the command and every flag', () => {
+    const help = formatHelp();
+    expect(help).toContain('init');
+    for (const flag of [
+      '--graphql',
+      '--src',
+      '--exclude',
+      '--ignore',
+      '--pattern',
+      '--fragment-pattern',
+      '--json',
+      '--annotate',
+      '--verbose',
+      '--version',
+      '--help',
+    ]) {
+      expect(help).toContain(flag);
+    }
+  });
+
+  it('marks --ignore as deprecated in favor of --exclude', () => {
+    const line = formatHelp()
+      .split('\n')
+      .find((l) => l.includes('--ignore'));
+    expect(line).toMatch(/deprecated/i);
   });
 });

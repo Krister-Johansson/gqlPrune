@@ -118,18 +118,19 @@ srcDir:
 Every config field has a matching flag, so you can run gqlPrune with **no `gqlPrune.config.yaml`** — handy for a one-off `npx` try with zero setup:
 
 ```bash
-npx gqlprune --graphql ./graphql --src ./src --ignore __generated__
+npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 ```
 
 | Flag | Config field |
 | ---- | ------------ |
-| `--graphql <dir>` | `graphqlDir` |
-| `--src <dir>` | `srcDir` |
-| `--ignore <folder>` _(repeatable)_ | `excludedFolders` |
+| `--graphql <dir>` _(repeatable)_ | `graphqlDir` |
+| `--src <dir>` _(repeatable)_ | `srcDir` |
+| `--exclude <glob>` _(repeatable)_ | `exclude` |
+| `--ignore <folder>` _(repeatable, deprecated — use `--exclude`)_ | `excludedFolders` |
 | `--pattern <template>` _(repeatable)_ | `usagePatterns` |
 | `--fragment-pattern <template>` _(repeatable)_ | `fragmentUsagePatterns` |
 
-Both `--flag value` and `--flag=value` work, in any order. **Precedence:** a flag overrides the same field in the YAML; flags alone work with no YAML; YAML alone works exactly as before. A list flag (e.g. `--ignore`) _replaces_ that list from the YAML rather than appending to it.
+Both `--flag value` and `--flag=value` work, in any order. **Precedence:** a flag overrides the same field in the YAML; flags alone work with no YAML; YAML alone works exactly as before. A list flag (e.g. `--exclude`) _replaces_ that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
 
 ## Usage
 
@@ -142,7 +143,7 @@ This prints any unused GraphQL operations and fragments. The command exits with:
 - **0** when nothing unused is found (suitable for CI gates).
 - **1** when unused operations or fragments are found (or on configuration errors).
 
-Print the installed version with `gqlprune --version` (or `-v`).
+Print the installed version with `gqlprune --version` (or `-v`), and the full list of commands and flags with `gqlprune --help` (or `-h`).
 
 ### JSON output
 

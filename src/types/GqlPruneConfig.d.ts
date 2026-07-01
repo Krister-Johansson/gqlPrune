@@ -41,6 +41,10 @@ export interface GqlPruneConfig {
 export type CliConfig = Partial<
   Pick<
     GqlPruneConfig,
-    'graphqlDir' | 'srcDir' | 'usagePatterns' | 'fragmentUsagePatterns'
+    | 'graphqlDir'
+    | 'srcDir'
+    | 'exclude'
+    | 'usagePatterns'
+    | 'fragmentUsagePatterns'
   >
 > & { excludedFolders?: string[] };
