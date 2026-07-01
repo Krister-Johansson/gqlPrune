@@ -7,6 +7,7 @@ describe('parseArgs', () => {
       json: false,
       annotate: false,
       version: false,
+      verbose: false,
       config: {},
     });
   });
@@ -17,6 +18,7 @@ describe('parseArgs', () => {
       json: false,
       annotate: false,
       version: false,
+      verbose: false,
       config: {},
     });
   });
@@ -27,6 +29,7 @@ describe('parseArgs', () => {
       json: true,
       annotate: false,
       version: false,
+      verbose: false,
       config: {},
     });
   });
@@ -37,8 +40,26 @@ describe('parseArgs', () => {
       json: false,
       annotate: true,
       version: false,
+      verbose: false,
       config: {},
     });
+  });
+
+  it('parses the --verbose flag', () => {
+    expect(parseArgs(['--verbose'])).toEqual({
+      command: undefined,
+      json: false,
+      annotate: false,
+      version: false,
+      verbose: true,
+      config: {},
+    });
+  });
+
+  it('combines --verbose with other flags', () => {
+    const result = parseArgs(['--verbose', '--json']);
+    expect(result.verbose).toBe(true);
+    expect(result.json).toBe(true);
   });
 
   it('parses --version and the -v short flag', () => {
@@ -53,6 +74,7 @@ describe('parseArgs', () => {
       json: true,
       annotate: true,
       version: false,
+      verbose: false,
       config: {},
     });
   });
@@ -111,6 +133,7 @@ describe('parseArgs', () => {
       json: true,
       annotate: false,
       version: false,
+      verbose: false,
       config: { graphqlDir: './g', srcDir: './s', excludedFolders: ['x'] },
     });
   });
