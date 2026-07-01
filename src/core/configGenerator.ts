@@ -105,7 +105,27 @@ function printPreview(config: GqlPruneConfig): void {
   );
 }
 
+const CONFIG_FILE = './gqlPrune.config.yaml';
+
 export async function generateConfig() {
+  // Never clobber an existing (possibly hand-tuned) config without asking.
+  if (fs.existsSync(CONFIG_FILE)) {
+    const { overwrite } = (await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'overwrite',
+        message: 'gqlPrune.config.yaml already exists. Overwrite it?',
+        default: false,
+      },
+    ])) as { overwrite: boolean };
+    if (!overwrite) {
+      console.log(
+        'Keeping the existing gqlPrune.config.yaml — nothing was changed.',
+      );
+      return;
+    }
+  }
+
   const graphqlDefault = detectGraphqlDir() ?? './path/to/graphql';
   const srcDefault = detectSrcDir() ?? './path/to/src';
 
@@ -146,7 +166,7 @@ export async function generateConfig() {
   const answers = await inquirer.prompt(questions);
 
   // Write the answers to a configuration file
-  fs.writeFileSync('./gqlPrune.config.yaml', yaml.dump(answers));
+  fs.writeFileSync(CONFIG_FILE, yaml.dump(answers));
   console.log('Configuration generated successfully!');
 
   // Show an instant preview of what a real run would find.

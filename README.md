@@ -76,6 +76,8 @@ npx gqlprune init
 ✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.
 ```
 
+If a `gqlPrune.config.yaml` already exists, `init` asks before overwriting it (defaulting to **No**), so an existing hand-tuned config is never clobbered by accident.
+
 ```yaml
 graphqlDir: ./path/to/graphql
 srcDir: ./src
