@@ -78,6 +78,7 @@ describe('cli dispatch', () => {
     expect(mainFunction).toHaveBeenCalledWith({
       json: false,
       annotate: false,
+      verbose: false,
       config: {},
     });
     expect(generateConfig).not.toHaveBeenCalled();
@@ -96,6 +97,7 @@ describe('cli dispatch', () => {
     expect(mainFunction).toHaveBeenCalledWith({
       json: true,
       annotate: false,
+      verbose: false,
       config: {},
     });
   });
@@ -105,6 +107,17 @@ describe('cli dispatch', () => {
     expect(mainFunction).toHaveBeenCalledWith({
       json: false,
       annotate: true,
+      verbose: false,
+      config: {},
+    });
+  });
+
+  it('passes --verbose through to the pruner', () => {
+    const { mainFunction } = runCli(['--verbose']);
+    expect(mainFunction).toHaveBeenCalledWith({
+      json: false,
+      annotate: false,
+      verbose: true,
       config: {},
     });
   });
@@ -114,6 +127,7 @@ describe('cli dispatch', () => {
     expect(mainFunction).toHaveBeenCalledWith({
       json: false,
       annotate: true,
+      verbose: false,
       config: {},
     });
   });
@@ -123,6 +137,7 @@ describe('cli dispatch', () => {
     expect(mainFunction).toHaveBeenCalledWith({
       json: false,
       annotate: false,
+      verbose: false,
       config: { graphqlDir: './g', srcDir: './s' },
     });
   });

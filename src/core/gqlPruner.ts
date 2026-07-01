@@ -93,6 +93,39 @@ export function findUnusedOperations(
   });
 }
 
+/** How a single operation's used/unused verdict was reached. */
+export type OperationUsage = {
+  operation: OperationInfo;
+  /** The concrete search strings expanded from the usage patterns. */
+  patterns: string[];
+  /** The first pattern/file hit; absent when the operation is unused. */
+  match?: { pattern: string; file: string };
+};
+
+/**
+ * Determines, for every operation, whether it is referenced in the sources —
+ * and when it is, which expanded pattern matched in which file. The unused set
+ * derived from this (`!usage.match`) is identical to `findUnusedOperations`;
+ * the extra detail exists so `--verbose` can explain each verdict.
+ */
+export function explainOperationUsage(
+  operations: OperationInfo[],
+  sources: SourceFile[],
+  usagePatterns: string[],
+): OperationUsage[] {
+  return operations.map((operation) => {
+    const patterns = buildUsagePatterns(operation, usagePatterns);
+    for (const { file, content } of sources) {
+      for (const pattern of patterns) {
+        if (content.includes(pattern)) {
+          return { operation, patterns, match: { pattern, file } };
+        }
+      }
+    }
+    return { operation, patterns };
+  });
+}
+
 /** Prints the aligned table of unused operations. */
 function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
   const maxTypeLength = Math.max(
@@ -417,6 +450,10 @@ export type ScanResult = {
   gqlFileCount: number;
   sourceFileCount: number;
   operationCount: number;
+  /** The `.gql`/`.graphql` files that were scanned. */
+  gqlFiles: string[];
+  /** Per-operation verdicts with the matching pattern/file (see `--verbose`). */
+  operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
   generatedWarnings: string[];
@@ -424,6 +461,38 @@ export type ScanResult = {
    * `gqlprune init` pre-filling them into `exclude`), not just the messages. */
   generatedFiles: GeneratedFileWarning[];
 };
+
+/** Renders the resolved configuration as `--verbose` lines. */
+export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
+  const list = (values: string[]): string => values.join(', ');
+  return [
+    `graphqlDir: ${list(resolveDirs(config.graphqlDir))}`,
+    `srcDir: ${list(resolveDirs(config.srcDir))}`,
+    `exclude: ${list(resolveExcludePatterns(config))}`,
+    `usagePatterns: ${list(resolveUsagePatterns(config))}`,
+    `fragmentUsagePatterns: ${list(resolveFragmentUsagePatterns(config))}`,
+  ];
+}
+
+/**
+ * Renders the scan's findings as `--verbose` lines: the files scanned, then one
+ * verdict per operation — with the matching pattern and file for used ones, and
+ * the searched-but-unmatched patterns for unused ones.
+ */
+export function formatVerboseScanLines(result: ScanResult): string[] {
+  const lines = [
+    `GraphQL files (${result.gqlFiles.length}): ${result.gqlFiles.join(', ')}`,
+    `Source files scanned: ${result.sourceFileCount}`,
+  ];
+  for (const { operation, patterns, match } of result.operationUsages) {
+    lines.push(
+      match
+        ? `used:   ${operation.name} (${operation.type}) — "${match.pattern}" found in ${match.file}`
+        : `unused: ${operation.name} (${operation.type}) — no match for ${patterns.join(', ')}`,
+    );
+  }
+  return lines;
+}
 
 /**
  * Runs one full scan for the given config and returns the results without
@@ -457,11 +526,16 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
   const sources = readSourceFiles(tsFiles);
   const fileContents = sources.map((source) => source.content);
 
-  const unusedOperations = findUnusedOperations(
+  // One sweep yields both the unused set and the per-operation explanations
+  // that `--verbose` reports.
+  const operationUsages = explainOperationUsage(
     operations,
-    fileContents,
+    sources,
     usagePatterns,
   );
+  const unusedOperations = operationUsages
+    .filter((usage) => !usage.match)
+    .map((usage) => usage.operation);
   const unusedFragments = findUnusedFragmentsInCorpus(
     gqlFiles,
     fileContents,
@@ -477,6 +551,8 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     gqlFileCount: gqlFiles.length,
     sourceFileCount: tsFiles.length,
     operationCount: operations.length,
+    gqlFiles,
+    operationUsages,
     unusedOperations,
     unusedFragments,
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
@@ -485,10 +561,22 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
 }
 
 export function mainFunction(
-  options: { json?: boolean; annotate?: boolean; config?: CliConfig } = {},
+  options: {
+    json?: boolean;
+    annotate?: boolean;
+    verbose?: boolean;
+    config?: CliConfig;
+  } = {},
 ) {
   const json = options.json ?? false;
   const annotate = options.annotate ?? false;
+  const verbose = options.verbose ?? false;
+  // Verbose lines go to stderr so stdout stays clean for --json.
+  const logVerbose = (lines: string[]): void => {
+    for (const line of lines) {
+      console.error(kleur.dim(`[verbose] ${line}`));
+    }
+  };
 
   let resolved: Partial<GqlPruneConfig>;
   try {
@@ -532,6 +620,11 @@ export function mainFunction(
 
   // ---------------- Main Logic ----------------
 
+  if (verbose) {
+    logVerbose(formatVerboseConfigLines(config));
+  }
+
+  const result = scanProject(config);
   const {
     gqlFileCount,
     sourceFileCount,
@@ -539,7 +632,11 @@ export function mainFunction(
     unusedOperations,
     unusedFragments,
     generatedWarnings,
-  } = scanProject(config);
+  } = result;
+
+  if (verbose) {
+    logVerbose(formatVerboseScanLines(result));
+  }
 
   if (!json) {
     console.log(

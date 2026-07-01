@@ -6,9 +6,12 @@ import {
   buildJsonReport,
   DEFAULT_EXCLUDED_FOLDERS,
   detectGeneratedFiles,
+  explainOperationUsage,
   findUnusedOperations,
   formatAnnotations,
   formatGeneratedFileWarnings,
+  formatVerboseConfigLines,
+  formatVerboseScanLines,
   mainFunction,
   resolveConfig,
   resolveDirs,
@@ -178,6 +181,132 @@ describe('gqlPruner', () => {
           DEFAULT_USAGE_PATTERNS,
         ),
       ).toEqual([]);
+    });
+  });
+
+  describe('explainOperationUsage', () => {
+    const ops: OperationInfo[] = [
+      { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+      { name: 'Unused', type: 'query', filePath: 'a.gql' },
+    ];
+    const sources = [
+      { file: 'src/App.tsx', content: 'const r = useGetUserQuery()' },
+      { file: 'src/Other.tsx', content: 'nothing here' },
+    ];
+
+    it('records the matching pattern and file for a used operation', () => {
+      const [usage] = explainOperationUsage(
+        [ops[0]],
+        sources,
+        DEFAULT_USAGE_PATTERNS,
+      );
+      expect(usage.operation.name).toBe('GetUser');
+      expect(usage.match).toEqual({
+        pattern: 'useGetUserQuery',
+        file: 'src/App.tsx',
+      });
+    });
+
+    it('leaves match absent for an unused operation, keeping the searched patterns', () => {
+      const [usage] = explainOperationUsage(
+        [ops[1]],
+        sources,
+        DEFAULT_USAGE_PATTERNS,
+      );
+      expect(usage.match).toBeUndefined();
+      expect(usage.patterns).toEqual([
+        'useUnusedQuery',
+        'useUnusedLazyQuery',
+        'useUnusedSuspenseQuery',
+        'UnusedDocument',
+      ]);
+    });
+
+    it('agrees with findUnusedOperations on the unused set', () => {
+      const usages = explainOperationUsage(
+        ops,
+        sources,
+        DEFAULT_USAGE_PATTERNS,
+      );
+      const unusedViaExplain = usages
+        .filter((usage) => !usage.match)
+        .map((usage) => usage.operation);
+      expect(unusedViaExplain).toEqual(
+        findUnusedOperations(
+          ops,
+          sources.map((source) => source.content),
+          DEFAULT_USAGE_PATTERNS,
+        ),
+      );
+    });
+
+    it('returns [] for no operations', () => {
+      expect(
+        explainOperationUsage([], sources, DEFAULT_USAGE_PATTERNS),
+      ).toEqual([]);
+    });
+  });
+
+  describe('formatVerboseConfigLines', () => {
+    it('renders the resolved dirs, excludes and patterns', () => {
+      const lines = formatVerboseConfigLines({
+        graphqlDir: './g',
+        srcDir: ['./s1', './s2'],
+        exclude: '**/dist',
+        usagePatterns: ['{Name}Doc'],
+      });
+      const text = lines.join('\n');
+      expect(text).toContain('graphqlDir: ./g');
+      expect(text).toContain('srcDir: ./s1, ./s2');
+      expect(text).toContain('exclude: **/dist, node_modules, .git');
+      expect(text).toContain('usagePatterns: {Name}Doc');
+      expect(text).toContain('fragmentUsagePatterns: {Name}FragmentDoc');
+    });
+  });
+
+  describe('formatVerboseScanLines', () => {
+    const baseResult = {
+      gqlFileCount: 1,
+      sourceFileCount: 3,
+      operationCount: 2,
+      gqlFiles: ['graphql/user.gql'],
+      unusedOperations: [],
+      unusedFragments: [],
+      generatedWarnings: [],
+      generatedFiles: [],
+    };
+
+    it('lists the gql files, source count, and one verdict line per operation', () => {
+      const lines = formatVerboseScanLines({
+        ...baseResult,
+        operationUsages: [
+          {
+            operation: { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+            patterns: ['useGetUserQuery'],
+            match: { pattern: 'useGetUserQuery', file: 'src/App.tsx' },
+          },
+          {
+            operation: { name: 'Dead', type: 'mutation', filePath: 'a.gql' },
+            patterns: ['useDeadMutation', 'DeadDocument'],
+          },
+        ],
+      });
+      const text = lines.join('\n');
+      expect(text).toContain('GraphQL files (1): graphql/user.gql');
+      expect(text).toContain('Source files scanned: 3');
+      expect(text).toContain('GetUser');
+      expect(text).toContain('"useGetUserQuery" found in src/App.tsx');
+      expect(text).toContain('Dead');
+      expect(text).toContain('useDeadMutation, DeadDocument');
+    });
+
+    it('handles a scan with no operations', () => {
+      const lines = formatVerboseScanLines({
+        ...baseResult,
+        operationCount: 0,
+        operationUsages: [],
+      });
+      expect(lines.join('\n')).toContain('Source files scanned: 3');
     });
   });
 
@@ -527,6 +656,29 @@ describe('gqlPruner', () => {
       expect(result.generatedFiles).toEqual([]);
     });
 
+    it('exposes the scanned gql files and a usage explanation per operation', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        { name: 'Unused', type: 'query', filePath: 'a.gql' },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.gqlFiles).toEqual(['a.gql']);
+      expect(result.operationUsages).toHaveLength(2);
+      expect(result.operationUsages[0].match).toEqual({
+        pattern: 'useGetUserQuery',
+        file: 'App.tsx',
+      });
+      expect(result.operationUsages[1].match).toBeUndefined();
+    });
+
     it('exposes the raw detected generated files (for init auto-exclude)', () => {
       const ops = ['A', 'B', 'C', 'D', 'E'].map((name) => ({
         name,
@@ -839,6 +991,84 @@ describe('gqlPruner', () => {
       expect(errs).toContain('::warning::Suspected generated file');
       // The "%" in "100%" is escaped for the workflow command.
       expect(errs).toContain('100%25');
+    });
+
+    it('logs the resolved config and per-operation verdicts to stderr with --verbose', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        { name: 'Dead', type: 'query', filePath: 'a.gql' },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'const r = useGetUserQuery()' },
+      ]);
+
+      mainFunction({ verbose: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('graphqlDir: ./g');
+      expect(errs).toContain('srcDir: ./s');
+      expect(errs).toContain('GraphQL files (1): a.gql');
+      expect(errs).toContain('"useGetUserQuery" found in App.tsx');
+      expect(errs).toContain('Dead');
+      // Verbose lines must never leak to stdout.
+      expect(logged()).not.toContain('found in App.tsx');
+    });
+
+    it('keeps stdout pure JSON when --verbose and --json are combined', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction({ json: true, verbose: true });
+
+      // stdout parses as JSON on its own…
+      const report = JSON.parse(logged());
+      expect(report.summary).toEqual({
+        unusedOperations: 0,
+        unusedFragments: 0,
+      });
+      // …and the verbose detail went to stderr.
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('"useGetUserQuery" found in App.tsx');
+    });
+
+    it('emits no verbose lines by default', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue([
+        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+      ]);
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction();
+
+      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(
+        'found in App.tsx',
+      );
     });
 
     it('runs from CLI config when no config file exists', () => {
