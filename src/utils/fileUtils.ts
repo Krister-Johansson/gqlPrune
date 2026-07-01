@@ -42,49 +42,66 @@ export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
  * any directory or file whose project-root-relative path is excluded by
  * `isExcluded`.
  *
+ * Directory symlinks are followed, but never into a real directory that was
+ * already walked (`visited` tracks real paths), so symlink cycles terminate
+ * and an aliased directory is scanned only once. Broken symlinks are logged
+ * and skipped.
+ *
  * @param {string} dir - The directory to start searching from.
  * @param {string[]} extensions - The list of file extensions to match.
  * @param {ExcludeMatcher} isExcluded - Predicate marking paths to skip.
+ * @param {Set<string>} visited - Real paths of directories already walked.
  * @returns {string[]} - The matching file paths.
  */
 export function findFilesWithExtension(
   dir: string,
   extensions: string[],
   isExcluded: ExcludeMatcher,
+  visited: Set<string> = new Set(),
 ): string[] {
   let files: string[] = [];
 
   try {
-    const items = fs.readdirSync(dir);
+    const realDir = fs.realpathSync(dir);
+    if (visited.has(realDir)) {
+      return files; // already walked (symlink cycle or aliased directory)
+    }
+    visited.add(realDir);
 
-    items.forEach((item) => {
-      const itemPath = path.join(dir, item);
-      let stat;
+    const items = fs.readdirSync(dir, { withFileTypes: true });
 
-      try {
-        stat = fs.statSync(itemPath);
-      } catch (error) {
-        console.error(`Error reading stats for: ${itemPath}`);
-        if (error instanceof Error) {
-          console.error(error.message);
-        } else {
-          console.error(error);
-        }
-        return; // Skip this item and continue with the next one
-      }
+    for (const item of items) {
+      const itemPath = path.join(dir, item.name);
 
       if (isExcluded(toRelativePosix(itemPath))) {
-        return; // Skip excluded directories and files
+        continue; // Skip excluded directories and files
       }
 
-      if (stat.isDirectory()) {
+      // Dirents answer isDirectory() without a per-entry stat; only a symlink
+      // needs a stat to learn what it points at.
+      let isDirectory = item.isDirectory();
+      if (item.isSymbolicLink()) {
+        try {
+          isDirectory = fs.statSync(itemPath).isDirectory();
+        } catch (error) {
+          console.error(`Error reading stats for: ${itemPath}`);
+          if (error instanceof Error) {
+            console.error(error.message);
+          } else {
+            console.error(error);
+          }
+          continue; // Broken symlink — skip it and continue with the next one
+        }
+      }
+
+      if (isDirectory) {
         files = files.concat(
-          findFilesWithExtension(itemPath, extensions, isExcluded),
+          findFilesWithExtension(itemPath, extensions, isExcluded, visited),
         );
-      } else if (extensions.includes(path.extname(item))) {
+      } else if (extensions.includes(path.extname(item.name))) {
         files.push(itemPath);
       }
-    });
+    }
   } catch (error) {
     console.error(`Error reading directory: ${dir}`);
     if (error instanceof Error) {

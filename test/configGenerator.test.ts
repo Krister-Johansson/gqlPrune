@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import inquirer from 'inquirer';
 import {
   commonParentDir,
@@ -30,12 +31,19 @@ function mockFsTree(
   entries: Record<string, string[]>,
   dirs: Set<string>,
 ): void {
-  (fs.readdirSync as jest.Mock).mockImplementation(
-    (p: string) => entries[p] ?? [],
+  (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+    (entries[p] ?? []).map((name) => ({
+      name,
+      isDirectory: () => dirs.has(path.join(p, name)),
+      isSymbolicLink: () => false,
+    })),
   );
   (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
     isDirectory: () => dirs.has(p),
   }));
+  (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+    (p: string) => p,
+  );
 }
 
 describe('configGenerator', () => {
