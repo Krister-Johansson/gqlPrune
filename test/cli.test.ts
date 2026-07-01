@@ -16,7 +16,11 @@ describe('cli dispatch', () => {
     process.exitCode = 0; // error paths set exitCode; don't leak to the runner
   });
 
-  function runCli(args: string[], env: { GITHUB_ACTIONS?: string } = {}) {
+  function runCli(
+    args: string[],
+    env: { GITHUB_ACTIONS?: string } = {},
+    initError?: Error,
+  ) {
     process.argv = ['node', 'cli', ...args];
     delete process.env.GITHUB_ACTIONS;
     if (env.GITHUB_ACTIONS !== undefined) {
@@ -29,7 +33,11 @@ describe('cli dispatch', () => {
     };
     jest.isolateModules(() => {
       jest.doMock('../src/core/configGenerator', () => ({
-        generateConfig: jest.fn(),
+        generateConfig: jest
+          .fn()
+          .mockImplementation(() =>
+            initError ? Promise.reject(initError) : Promise.resolve(),
+          ),
       }));
       // Partial mock: cli.ts also imports the real escapeAnnotationMessage.
       jest.doMock('../src/core/gqlPruner', () => ({
@@ -220,6 +228,36 @@ describe('cli dispatch', () => {
     expect(errorSpy.mock.calls.flat().join('\n')).toContain(
       '::error::Unknown flag: --50%25off',
     );
+    errorSpy.mockRestore();
+  });
+
+  it('exits cleanly when an init prompt is aborted (Ctrl+C)', async () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    // inquirer rejects with an ExitPromptError when the user aborts a prompt.
+    const abort = new Error('User force closed the prompt');
+    abort.name = 'ExitPromptError';
+    runCli(['init'], {}, abort);
+    await new Promise(process.nextTick); // let run()'s catch handler settle
+
+    const errs = errorSpy.mock.calls.flat();
+    expect(errs).toContain('Aborted.');
+    expect(errs).not.toContain(abort); // no stack trace for a deliberate exit
+    expect(process.exitCode).toBe(1);
+    errorSpy.mockRestore();
+  });
+
+  it('reports an unexpected init failure and exits 1', async () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const failure = new Error('disk full');
+    runCli(['init'], {}, failure);
+    await new Promise(process.nextTick);
+
+    expect(errorSpy.mock.calls.flat()).toContain(failure);
+    expect(process.exitCode).toBe(1);
     errorSpy.mockRestore();
   });
 

@@ -159,6 +159,58 @@ describe('configGenerator', () => {
 
     afterEach(() => logSpy.mockRestore());
 
+    it('asks before overwriting an existing config and keeps it when declined', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (inquirer.prompt as unknown as jest.Mock).mockResolvedValueOnce({
+        overwrite: false,
+      });
+
+      await generateConfig();
+
+      expect(inquirer.prompt).toHaveBeenCalledTimes(1); // confirm only
+      const [confirm] = (inquirer.prompt as unknown as jest.Mock).mock
+        .calls[0][0];
+      expect(confirm.type).toBe('confirm');
+      expect(confirm.default).toBe(false);
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('existing');
+    });
+
+    it('overwrites an existing config when the user confirms', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (inquirer.prompt as unknown as jest.Mock)
+        .mockResolvedValueOnce({ overwrite: true })
+        .mockResolvedValueOnce({
+          graphqlDir: './graphql',
+          srcDir: './src',
+          exclude: [],
+        });
+
+      await generateConfig();
+
+      expect(inquirer.prompt).toHaveBeenCalledTimes(2);
+      expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not ask for confirmation when no config exists', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      (fs.existsSync as jest.Mock).mockReturnValue(false);
+      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
+        graphqlDir: './graphql',
+        srcDir: './src',
+        exclude: [],
+      });
+
+      await generateConfig();
+
+      expect(inquirer.prompt).toHaveBeenCalledTimes(1);
+      const questions = (inquirer.prompt as unknown as jest.Mock).mock
+        .calls[0][0];
+      expect(questions[0].name).toBe('graphqlDir'); // straight to the questions
+    });
+
     it('prompts the user and writes the answers as YAML', async () => {
       mockFsTree({ '.': [] }, new Set());
       (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({

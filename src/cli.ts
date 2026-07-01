@@ -63,4 +63,13 @@ async function run(): Promise<void> {
   await notifyUpdate(pkg, { json });
 }
 
-void run();
+run().catch((error: unknown) => {
+  // Inquirer rejects with an ExitPromptError when the user aborts a prompt
+  // (Ctrl+C) — a deliberate exit, not a crash worth a stack trace.
+  if (error instanceof Error && error.name === 'ExitPromptError') {
+    console.error('Aborted.');
+  } else {
+    console.error(error);
+  }
+  process.exitCode = 1;
+});
