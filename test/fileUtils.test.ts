@@ -3,9 +3,7 @@ import {
   createExcludeMatcher,
   directoryExists,
   findFilesWithExtension,
-  isOperationUsed,
   isOperationUsedInContents,
-  readFileContents,
   readSourceFiles,
 } from '../src/utils/fileUtils';
 import { buildUsagePatterns } from '../src/utils/usagePatterns';
@@ -120,25 +118,6 @@ describe('fileUtils', () => {
     });
   });
 
-  describe('isOperationUsed', () => {
-    it('should check if an operation is used in a file', () => {
-      (fs.readFileSync as jest.Mock).mockReturnValue(
-        'const result = useMyQuery();',
-      );
-      expect(isOperationUsed('useMyQuery', './file.ts')).toBe(true);
-      expect(isOperationUsed('useAnotherQuery', './file.ts')).toBe(false);
-    });
-
-    it('should handle error when reading a file', () => {
-      (fs.readFileSync as jest.Mock).mockImplementation(() => {
-        throw new Error('Failed to read file');
-      });
-
-      const result = isOperationUsed('someOperation', './file1.ts');
-      expect(result).toBe(false); // Expect false since the file read failed
-    });
-  });
-
   describe('directoryExists', () => {
     afterEach(() => {
       jest.resetAllMocks();
@@ -217,30 +196,6 @@ describe('fileUtils', () => {
     it('excludes nothing when there are no positive patterns', () => {
       expect(createExcludeMatcher([])('anything')).toBe(false);
       expect(createExcludeMatcher(['  ', '!only-neg'])('anything')).toBe(false);
-    });
-  });
-
-  describe('readFileContents', () => {
-    it('should read each file once and return their contents', () => {
-      (fs.readFileSync as jest.Mock)
-        .mockReturnValueOnce('content-a')
-        .mockReturnValueOnce('content-b');
-
-      expect(readFileContents(['a.ts', 'b.ts'])).toEqual([
-        'content-a',
-        'content-b',
-      ]);
-      expect(fs.readFileSync).toHaveBeenCalledTimes(2);
-    });
-
-    it('should skip files that cannot be read', () => {
-      (fs.readFileSync as jest.Mock)
-        .mockImplementationOnce(() => {
-          throw new Error('nope');
-        })
-        .mockReturnValueOnce('content-b');
-
-      expect(readFileContents(['bad.ts', 'b.ts'])).toEqual(['content-b']);
     });
   });
 

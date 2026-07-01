@@ -4,6 +4,7 @@ import {
   findUnusedFragmentsInCorpus,
   reachableFragments,
 } from '../src/utils/fragments';
+import { extractGraphqlEntities } from '../src/utils/operations';
 import { FragmentInfo } from '../src/types/FragmentInfo';
 
 jest.mock('fs');
@@ -98,7 +99,7 @@ describe('fragments', () => {
         return 'fragment Used on T { id }\nfragment Dead on T { id }';
       });
       const unused = findUnusedFragmentsInCorpus(
-        ['ops.gql', 'frags.gql'],
+        ['ops.gql', 'frags.gql'].map(extractGraphqlEntities),
         [],
         ['{Name}FragmentDoc'],
       );
@@ -110,7 +111,7 @@ describe('fragments', () => {
         'fragment Masked on T { id }',
       );
       const unused = findUnusedFragmentsInCorpus(
-        ['f.gql'],
+        ['f.gql'].map(extractGraphqlEntities),
         ['const x = MaskedFragmentDoc;'],
         ['{Name}FragmentDoc'],
       );
@@ -123,7 +124,7 @@ describe('fragments', () => {
         return 'fragment Outer on T { ...Inner }\nfragment Inner on T { id }\nfragment Lonely on T { id }';
       });
       const unused = findUnusedFragmentsInCorpus(
-        ['ops.gql', 'frags.gql'],
+        ['ops.gql', 'frags.gql'].map(extractGraphqlEntities),
         [],
         ['{Name}FragmentDoc'],
       );
@@ -132,7 +133,13 @@ describe('fragments', () => {
 
     it('returns [] when there are no fragments', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('query Q { id }');
-      expect(findUnusedFragmentsInCorpus(['ops.gql'], [], [])).toEqual([]);
+      expect(
+        findUnusedFragmentsInCorpus(
+          ['ops.gql'].map(extractGraphqlEntities),
+          [],
+          [],
+        ),
+      ).toEqual([]);
     });
 
     it('warns on duplicate fragment names and merges their spread edges', () => {
@@ -148,7 +155,7 @@ describe('fragments', () => {
       (console.warn as jest.Mock).mockClear();
 
       const unused = findUnusedFragmentsInCorpus(
-        ['a.gql', 'b.gql'],
+        ['a.gql', 'b.gql'].map(extractGraphqlEntities),
         [],
         ['{Name}FragmentDoc'],
       );

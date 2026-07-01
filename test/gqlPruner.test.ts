@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as fileUtils from '../src/utils/fileUtils';
-import { extractOperations } from '../src/utils/operations';
+import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import {
   buildJsonReport,
@@ -39,7 +39,7 @@ jest.mock('../src/utils/fileUtils', () => {
   };
 });
 jest.mock('../src/utils/operations', () => ({
-  extractOperations: jest.fn(),
+  extractGraphqlEntities: jest.fn(),
 }));
 jest.mock('../src/utils/fragments', () => ({
   findUnusedFragmentsInCorpus: jest.fn(() => []),
@@ -48,7 +48,16 @@ jest.mock('../src/utils/fragments', () => ({
 const mockedDirExists = fileUtils.directoryExists as jest.Mock;
 const mockedFind = fileUtils.findFilesWithExtension as jest.Mock;
 const mockedReadSources = fileUtils.readSourceFiles as jest.Mock;
-const mockedExtract = extractOperations as jest.Mock;
+const mockedExtract = extractGraphqlEntities as jest.Mock;
+
+// The parsed-file shape extractGraphqlEntities returns for a file whose only
+// contents are the given operations.
+const entitiesOf = (operations: OperationInfo[]) => ({
+  operations,
+  fragments: [],
+  operationSpreads: [],
+  fragmentSpreads: [],
+});
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
 
@@ -624,7 +633,7 @@ describe('gqlPruner', () => {
         .mockReturnValueOnce(['a.gql']) // graphqlDir[0]
         .mockReturnValueOnce(['a.gql', 'b.gql']) // graphqlDir[1] (a.gql overlaps)
         .mockReturnValueOnce(['App.tsx']); // srcDir
-      mockedExtract.mockReturnValue([]);
+      mockedExtract.mockReturnValue(entitiesOf([]));
       mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
 
       const result = scanProject({ graphqlDir: ['g1', 'g2'], srcDir: 's' });
@@ -637,10 +646,12 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql']) // gql files
         .mockReturnValueOnce(['App.tsx']); // source files
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-        { name: 'Unused', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Unused', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -656,14 +667,33 @@ describe('gqlPruner', () => {
       expect(result.generatedFiles).toEqual([]);
     });
 
+    it('parses each GraphQL file exactly once and shares the result with the fragment scan', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql', 'b.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(mockedExtract).toHaveBeenCalledTimes(2);
+      expect(mockedUnusedFragments).toHaveBeenCalledWith(
+        [entitiesOf([]), entitiesOf([])],
+        [''],
+        DEFAULT_FRAGMENT_USAGE_PATTERNS,
+      );
+    });
+
     it('exposes the scanned gql files and a usage explanation per operation', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql']) // gql files
         .mockReturnValueOnce(['App.tsx']); // source files
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-        { name: 'Unused', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Unused', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -688,7 +718,7 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql']) // gql files
         .mockReturnValueOnce(['graphql.ts']); // source files
-      mockedExtract.mockReturnValue(ops);
+      mockedExtract.mockReturnValue(entitiesOf(ops));
       // One file references every operation (via {Name}Document) → coverage 1.0.
       mockedReadSources.mockReturnValue([
         {
@@ -772,10 +802,12 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql']) // gql files
         .mockReturnValueOnce(['App.tsx']); // source files
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-        { name: 'Unused', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Unused', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'const r = useGetUserQuery()' },
       ]);
@@ -794,9 +826,9 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -814,7 +846,7 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([]); // no operations at all
+      mockedExtract.mockReturnValue(entitiesOf([])); // no operations at all
       mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
       mockedUnusedFragments.mockReturnValueOnce([
         { name: 'DeadFragment', filePath: 'a.gql' },
@@ -834,14 +866,14 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([]);
+      mockedExtract.mockReturnValue(entitiesOf([]));
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'source' },
       ]);
 
       expect(() => mainFunction()).not.toThrow();
       expect(mockedUnusedFragments).toHaveBeenCalledWith(
-        ['a.gql'],
+        [entitiesOf([])],
         ['source'],
         ['{Name}FragmentDoc'],
       );
@@ -855,10 +887,12 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
-        { name: 'Unused', type: 'query', filePath: 'a.gql', line: 2 },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+          { name: 'Unused', type: 'query', filePath: 'a.gql', line: 2 },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -891,9 +925,11 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -915,9 +951,11 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'Dead', type: 'query', filePath: 'a.gql', line: 4 },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'Dead', type: 'query', filePath: 'a.gql', line: 4 },
+        ]),
+      );
       mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
 
       mainFunction({ annotate: true });
@@ -935,14 +973,14 @@ describe('gqlPruner', () => {
       mockedDirExists.mockReturnValue(true);
       const ops = ['A', 'B', 'C', 'D', 'E'].map((name) => ({
         name,
-        type: 'query',
+        type: 'query' as const,
         filePath: 'a.gql',
         line: 1,
       }));
       mockedFind
         .mockReturnValueOnce(['a.gql']) // gql files
         .mockReturnValueOnce(['src/gql/graphql.ts']); // source files
-      mockedExtract.mockReturnValue(ops);
+      mockedExtract.mockReturnValue(entitiesOf(ops));
       mockedReadSources.mockReturnValue([
         {
           file: 'src/gql/graphql.ts',
@@ -970,14 +1008,14 @@ describe('gqlPruner', () => {
       mockedDirExists.mockReturnValue(true);
       const ops = ['A', 'B', 'C', 'D', 'E'].map((name) => ({
         name,
-        type: 'query',
+        type: 'query' as const,
         filePath: 'a.gql',
         line: 1,
       }));
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['src/gql/graphql.ts']);
-      mockedExtract.mockReturnValue(ops);
+      mockedExtract.mockReturnValue(entitiesOf(ops));
       mockedReadSources.mockReturnValue([
         {
           file: 'src/gql/graphql.ts',
@@ -1001,10 +1039,12 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-        { name: 'Dead', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Dead', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'const r = useGetUserQuery()' },
       ]);
@@ -1029,9 +1069,11 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 },
+        ]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -1057,9 +1099,9 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);
@@ -1081,9 +1123,9 @@ describe('gqlPruner', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
         .mockReturnValueOnce(['App.tsx']);
-      mockedExtract.mockReturnValue([
-        { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-      ]);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
       mockedReadSources.mockReturnValue([
         { file: 'App.tsx', content: 'useGetUserQuery()' },
       ]);

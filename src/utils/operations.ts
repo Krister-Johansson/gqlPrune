@@ -92,13 +92,3 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
     };
   }
 }
-
-/**
- * Extracts GraphQL operations (queries, mutations, subscriptions) from a file.
- *
- * @param {string} filePath - The path to the GraphQL file.
- * @returns {OperationInfo[]} - The named operations defined in the file.
- */
-export function extractOperations(filePath: string): OperationInfo[] {
-  return extractGraphqlEntities(filePath).operations;
-}

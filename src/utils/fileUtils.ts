@@ -127,16 +127,6 @@ export function readSourceFiles(filePaths: string[]): SourceFile[] {
 }
 
 /**
- * Reads the contents of multiple files once, skipping any that cannot be read.
- *
- * @param {string[]} filePaths - The files to read.
- * @returns {string[]} - The contents of the readable files.
- */
-export function readFileContents(filePaths: string[]): string[] {
-  return readSourceFiles(filePaths).map((source) => source.content);
-}
-
-/**
  * Checks whether any of the given patterns appears in any of the provided file
  * contents. Operating on already-read contents avoids re-reading every source
  * file once per operation.
@@ -152,28 +142,6 @@ export function isOperationUsedInContents(
   return contents.some((content) =>
     patterns.some((pattern) => content.includes(pattern)),
   );
-}
-
-/**
- * Checks if a specific operation is used within a file.
- *
- * @param {string} operation - The operation to search for.
- * @param {string} filePath - The path to the file to search within.
- * @returns {boolean} - Returns true if the operation is found in the file, otherwise false.
- */
-export function isOperationUsed(operation: string, filePath: string): boolean {
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return content.includes(operation);
-  } catch (error) {
-    console.error(`Error reading file: ${filePath}`);
-    if (error instanceof Error) {
-      console.error(error.message);
-    } else {
-      console.error(error);
-    }
-    return false;
-  }
 }
 
 /**
