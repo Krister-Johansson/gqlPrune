@@ -6,6 +6,11 @@
 # repo, so the review profile is restated here.
 reviews:
   profile: chill
+  # Quieter bot = fewer GitHub notification emails: no "currently reviewing"
+  # status comments and no walkthrough poems. The review findings themselves
+  # are unaffected.
+  review_status: false
+  poem: false
   auto_review:
     enabled: true
     # One auto review when the PR opens. Pushes that address review comments
