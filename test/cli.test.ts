@@ -178,7 +178,7 @@ describe('cli dispatch', () => {
     expect(errs).toContain('--help');
     expect(mainFunction).not.toHaveBeenCalled();
     expect(notifyUpdate).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 
@@ -191,7 +191,7 @@ describe('cli dispatch', () => {
       'Missing value for --graphql',
     );
     expect(mainFunction).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 
@@ -204,7 +204,7 @@ describe('cli dispatch', () => {
       '::error::Unknown flag: --jsn',
     );
     expect(mainFunction).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 
@@ -244,11 +244,11 @@ describe('cli dispatch', () => {
     const errs = errorSpy.mock.calls.flat();
     expect(errs).toContain('Aborted.');
     expect(errs).not.toContain(abort); // no stack trace for a deliberate exit
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 
-  it('reports an unexpected init failure and exits 1', async () => {
+  it('reports an unexpected init failure and exits 2', async () => {
     const errorSpy = jest
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
@@ -257,7 +257,7 @@ describe('cli dispatch', () => {
     await new Promise(process.nextTick);
 
     expect(errorSpy.mock.calls.flat()).toContain(failure);
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 
@@ -271,7 +271,7 @@ describe('cli dispatch', () => {
     expect(errs).toContain('--help');
     expect(mainFunction).not.toHaveBeenCalled();
     expect(generateConfig).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
 });

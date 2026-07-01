@@ -760,37 +760,37 @@ describe('gqlPruner', () => {
       process.exitCode = 0; // report paths set exitCode; don't leak to the runner
     });
 
-    it('exits 1 when the config file cannot be read', () => {
+    it('exits 2 when the config file cannot be read', () => {
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
         throw new Error('no file');
       });
-      expect(() => mainFunction()).toThrow('process.exit:1');
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(() => mainFunction()).toThrow('process.exit:2');
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
 
-    it('exits 1 when the GraphQL directory does not exist', () => {
+    it('exits 2 when the GraphQL directory does not exist', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'graphqlDir: ./g\nsrcDir: ./s\n',
       );
       mockedDirExists.mockReturnValueOnce(false); // graphqlDir missing
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(() => mainFunction()).toThrow('process.exit:2');
       expect(errorSpy).toHaveBeenCalled();
     });
 
-    it('exits 1 when the source directory does not exist', () => {
+    it('exits 2 when the source directory does not exist', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'graphqlDir: ./g\nsrcDir: ./s\n',
       );
       mockedDirExists.mockReturnValueOnce(true).mockReturnValueOnce(false);
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(() => mainFunction()).toThrow('process.exit:2');
     });
 
-    it('exits 1 and names a missing directory in an array config', () => {
+    it('exits 2 and names a missing directory in an array config', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'graphqlDir:\n  - ./g1\n  - ./g2\nsrcDir: ./s\n',
       );
       mockedDirExists.mockImplementation((dir: string) => dir !== './g2');
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(() => mainFunction()).toThrow('process.exit:2');
       expect(errorSpy.mock.calls.flat().join('\n')).toContain('./g2');
     });
 
@@ -1137,14 +1137,14 @@ describe('gqlPruner', () => {
       expect(logged()).toContain('No unused');
     });
 
-    it('exits 1 with guidance when neither a config file nor flags supply dirs', () => {
+    it('exits 2 with guidance when neither a config file nor flags supply dirs', () => {
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
         const err = new Error('missing') as NodeJS.ErrnoException;
         err.code = 'ENOENT';
         throw err;
       });
 
-      expect(() => mainFunction()).toThrow('process.exit:1');
+      expect(() => mainFunction()).toThrow('process.exit:2');
       const errs = errorSpy.mock.calls.flat().join('\n');
       expect(errs).toContain('--graphql');
     });

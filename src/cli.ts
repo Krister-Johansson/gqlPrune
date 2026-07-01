@@ -11,9 +11,10 @@ const { command, json, annotate, version, verbose, help, errors, config } =
 const annotateMode = annotate || process.env.GITHUB_ACTIONS === 'true';
 
 /**
- * Prints usage errors and the --help pointer; the run is aborted. In CI /
- * --annotate mode each error is an (escaped) ::error workflow command so it
- * surfaces in the Actions UI instead of only in the raw log.
+ * Prints usage errors and the --help pointer; the run is aborted with exit
+ * code 2 (1 is reserved for "unused operations found"). In CI / --annotate
+ * mode each error is an (escaped) ::error workflow command so it surfaces in
+ * the Actions UI instead of only in the raw log.
  */
 function reportUsageErrors(lines: string[]): void {
   for (const line of lines) {
@@ -24,7 +25,7 @@ function reportUsageErrors(lines: string[]): void {
     );
   }
   console.error('Run "gqlprune --help" for usage.');
-  process.exitCode = 1;
+  process.exitCode = 2;
 }
 
 async function run(): Promise<void> {
@@ -71,5 +72,6 @@ run().catch((error: unknown) => {
   } else {
     console.error(error);
   }
-  process.exitCode = 1;
+  // 2, like other non-finding failures — 1 means "unused operations found".
+  process.exitCode = 2;
 });
