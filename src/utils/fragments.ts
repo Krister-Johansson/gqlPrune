@@ -1,5 +1,5 @@
 import { FragmentInfo } from '../types/FragmentInfo.js';
-import { extractGraphqlEntities } from './operations.js';
+import { GraphqlFileEntities } from './operations.js';
 import { isOperationUsedInContents } from './fileUtils.js';
 import {
   buildFragmentPatterns,
@@ -51,23 +51,25 @@ export function findUnusedFragments(
 }
 
 /**
- * Scans the GraphQL corpus and returns fragments that are unused — i.e. neither
- * (a) reachable via fragment spreads from any operation, nor (b) referenced in
- * the application source (e.g. a `<Name>FragmentDoc` constant under fragment
- * masking). Schema-free.
+ * Walks the parsed GraphQL corpus and returns fragments that are unused — i.e.
+ * neither (a) reachable via fragment spreads from any operation, nor (b)
+ * referenced in the application source (e.g. a `<Name>FragmentDoc` constant
+ * under fragment masking). Operates on pre-parsed entities (see
+ * `extractGraphqlEntities`) so each file is parsed once per scan; this function
+ * never touches the filesystem. Schema-free.
  *
  * Note: a fragment is considered used as soon as any operation spreads it, even
  * if that operation is itself unused — that operation is reported separately, so
  * this avoids flagging a fragment that becomes orphaned only after the operation
  * is deleted (caught on the next run).
  *
- * @param {string[]} gqlFiles - The `.gql`/`.graphql` files to analyze.
+ * @param {GraphqlFileEntities[]} parsedFiles - One parsed entry per gql file.
  * @param {string[]} fileContents - The already-read source file contents.
  * @param {string[]} fragmentUsagePatterns - Templates for source references.
  * @returns {FragmentInfo[]} - The unused fragments across the corpus.
  */
 export function findUnusedFragmentsInCorpus(
-  gqlFiles: string[],
+  parsedFiles: GraphqlFileEntities[],
   fileContents: string[],
   fragmentUsagePatterns: string[] = DEFAULT_FRAGMENT_USAGE_PATTERNS,
 ): FragmentInfo[] {
@@ -76,8 +78,7 @@ export function findUnusedFragmentsInCorpus(
   const roots = new Set<string>();
   const seenFragmentNames = new Set<string>();
 
-  for (const file of gqlFiles) {
-    const entities = extractGraphqlEntities(file);
+  for (const entities of parsedFiles) {
     entities.operationSpreads.forEach((spread) => roots.add(spread));
     for (const fragment of entities.fragments) {
       // Fragment names should be unique across the corpus. If they aren't, the

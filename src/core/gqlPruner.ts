@@ -18,7 +18,7 @@ import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
   DEFAULT_USAGE_PATTERNS,
 } from '../utils/usagePatterns.js';
-import { extractOperations } from '../utils/operations.js';
+import { extractGraphqlEntities } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 
 // Folders that are always excluded from traversal, regardless of config.
@@ -512,7 +512,11 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
       ),
     ),
   ];
-  const operations: OperationInfo[] = gqlFiles.flatMap(extractOperations);
+  // Parse every gql file once; operations and the fragment scan share the result.
+  const parsedFiles = gqlFiles.map(extractGraphqlEntities);
+  const operations: OperationInfo[] = parsedFiles.flatMap(
+    (file) => file.operations,
+  );
 
   const tsFiles = [
     ...new Set(
@@ -537,7 +541,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     .filter((usage) => !usage.match)
     .map((usage) => usage.operation);
   const unusedFragments = findUnusedFragmentsInCorpus(
-    gqlFiles,
+    parsedFiles,
     fileContents,
     fragmentUsagePatterns,
   );

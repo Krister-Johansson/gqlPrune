@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import { parse } from 'graphql';
 import {
   extractGraphqlEntities,
-  extractOperations,
   getFragmentSpreads,
 } from '../src/utils/operations';
 
@@ -23,44 +22,6 @@ afterAll(() => {
 describe('operationUtils', () => {
   afterEach(() => {
     jest.resetAllMocks();
-  });
-
-  describe('extractOperations', () => {
-    it('should extract operations from a valid GraphQL file', () => {
-      (fs.readFileSync as jest.Mock).mockReturnValue(
-        'query MyQuery { someField }',
-      );
-
-      const operations = extractOperations('./mockFile.gql');
-      expect(operations).toEqual([
-        {
-          name: 'MyQuery',
-          type: 'query',
-          filePath: './mockFile.gql',
-          line: 1,
-        },
-      ]);
-    });
-
-    it('should handle invalid GraphQL content', () => {
-      const mockContent = `
-        query MyQuery {
-          someField
-      `;
-      (fs.readFileSync as jest.Mock).mockReturnValue(mockContent);
-
-      const operations = extractOperations('./mockFile.gql');
-      expect(operations).toEqual([]);
-    });
-
-    it('should handle error when reading a file', () => {
-      (fs.readFileSync as jest.Mock).mockImplementation(() => {
-        throw new Error('Failed to read file');
-      });
-
-      const operations = extractOperations('./mockFile.gql');
-      expect(operations).toEqual([]);
-    });
   });
 
   describe('getFragmentSpreads', () => {
