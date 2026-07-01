@@ -142,8 +142,9 @@ npx gqlprune
 
 This prints any unused GraphQL operations and fragments. The command exits with:
 
-- **0** when nothing unused is found (suitable for CI gates).
-- **1** when unused operations or fragments are found (or on configuration errors).
+- **0** when the scan completes and nothing unused is found (suitable for CI gates).
+- **1** when the scan completes and unused operations or fragments are found — exit code 1 always means findings, nothing else.
+- **2** when the run itself fails: an unknown flag or command, a flag missing its value, no configuration, an unreadable config file, or a configured directory that doesn't exist. This lets a pipeline tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2).
 
 Print the installed version with `gqlprune --version` (or `-v`), and the full list of commands and flags with `gqlprune --help` (or `-h`).
 
@@ -168,7 +169,7 @@ npx gqlprune --json
 }
 ```
 
-Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages — currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results) — and is empty when there are none.
+Only the JSON is written to stdout and the exit code is unchanged (0 clean / 1 unused / 2 error — see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages — currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results) — and is empty when there are none.
 
 ### Verbose output
 
