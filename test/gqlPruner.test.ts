@@ -4,6 +4,7 @@ import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import {
   buildJsonReport,
+  createConfigExcludeMatcher,
   DEFAULT_EXCLUDED_FOLDERS,
   detectGeneratedFiles,
   explainOperationUsage,
@@ -102,6 +103,47 @@ describe('gqlPruner', () => {
           exclude: ['!legacy/keep.ts'],
         }),
       ).toEqual(['!legacy/keep.ts', 'legacy', 'node_modules', '.git']);
+    });
+  });
+
+  describe('createConfigExcludeMatcher', () => {
+    it('keeps node_modules and .git excluded even against a "!" re-include', () => {
+      const matcher = createConfigExcludeMatcher({
+        graphqlDir: 'g',
+        srcDir: 's',
+        exclude: ['!node_modules', '!.git'],
+      });
+      expect(matcher('node_modules')).toBe(true);
+      expect(matcher('.git')).toBe(true);
+    });
+
+    it('lets "!" re-includes work within the user patterns', () => {
+      const matcher = createConfigExcludeMatcher({
+        graphqlDir: 'g',
+        srcDir: 's',
+        exclude: ['*.gen.ts', '!keep.gen.ts'],
+      });
+      expect(matcher('a.gen.ts')).toBe(true);
+      expect(matcher('keep.gen.ts')).toBe(false);
+    });
+
+    it('lets an exclude negation re-include a deprecated excludedFolders entry', () => {
+      const matcher = createConfigExcludeMatcher({
+        graphqlDir: 'g',
+        srcDir: 's',
+        excludedFolders: ['legacy'],
+        exclude: ['!legacy'],
+      });
+      expect(matcher('legacy')).toBe(false);
+    });
+
+    it('excludes the defaults when no patterns are configured', () => {
+      const matcher = createConfigExcludeMatcher({
+        graphqlDir: 'g',
+        srcDir: 's',
+      });
+      expect(matcher('node_modules')).toBe(true);
+      expect(matcher('src')).toBe(false);
     });
   });
 
@@ -776,6 +818,21 @@ describe('gqlPruner', () => {
         file: 'App.tsx',
       });
       expect(result.operationUsages[1].match).toBeUndefined();
+    });
+
+    it('passes the walker a matcher that "!" cannot open node_modules through', () => {
+      mockedFind.mockReturnValue([]);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockReturnValue([]);
+
+      scanProject({
+        graphqlDir: './g',
+        srcDir: './s',
+        exclude: ['!node_modules'],
+      });
+
+      const isExcluded = mockedFind.mock.calls[0][2];
+      expect(isExcluded('node_modules')).toBe(true);
     });
 
     it('exposes duplicate-name warnings from the parsed corpus', () => {
