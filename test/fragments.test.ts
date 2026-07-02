@@ -142,7 +142,7 @@ describe('fragments', () => {
       ).toEqual([]);
     });
 
-    it('warns on duplicate fragment names and merges their spread edges', () => {
+    it('merges spread edges of duplicate fragment names (conservative)', () => {
       // a.gql's Dupe spreads OnlyInA; b.gql's Dupe (same name) spreads nothing.
       // Without merging, the later definition would drop the edge to OnlyInA and
       // wrongly flag it as unused. Merging keeps it reachable (conservative).
@@ -161,9 +161,9 @@ describe('fragments', () => {
       );
 
       expect(unused.map((f) => f.name)).not.toContain('OnlyInA');
-      expect(console.warn).toHaveBeenCalledWith(
-        expect.stringContaining('duplicate fragment name "Dupe"'),
-      );
+      // Reporting duplicates is scanProject's job now (findDuplicateNameWarnings);
+      // this function only keeps the graph conservative.
+      expect(console.warn).not.toHaveBeenCalled();
     });
   });
 });

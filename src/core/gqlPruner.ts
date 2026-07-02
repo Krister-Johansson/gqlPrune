@@ -18,7 +18,10 @@ import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
   DEFAULT_USAGE_PATTERNS,
 } from '../utils/usagePatterns.js';
-import { extractGraphqlEntities } from '../utils/operations.js';
+import {
+  extractGraphqlEntities,
+  GraphqlFileEntities,
+} from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 
 // Folders that are always excluded from traversal, regardless of config.
@@ -418,6 +421,47 @@ export function formatGeneratedFileWarnings(
 }
 
 /**
+ * Advisory warnings for operation/fragment names defined more than once across
+ * the parsed corpus. Detection is name-keyed, so duplicate definitions are
+ * conflated — every definition shares one used/unused verdict. Returned as
+ * data so the caller can route them per the I/O rules (stderr + the JSON
+ * `warnings` array), like the generated-file warnings.
+ */
+export function findDuplicateNameWarnings(
+  parsedFiles: GraphqlFileEntities[],
+): string[] {
+  const duplicates = (
+    kind: 'operation' | 'fragment',
+    definitions: { name: string; filePath: string }[],
+  ): string[] => {
+    const filesByName = new Map<string, string[]>();
+    for (const { name, filePath } of definitions) {
+      filesByName.set(name, [...(filesByName.get(name) ?? []), filePath]);
+    }
+    return [...filesByName]
+      .filter(([, files]) => files.length > 1)
+      .map(
+        ([name, files]) =>
+          `Duplicate ${kind} name "${name}" defined in ${[
+            ...new Set(files),
+          ].join(
+            ', ',
+          )} — detection is name-based, so all definitions share one verdict and results for it may be unreliable.`,
+      );
+  };
+  return [
+    ...duplicates(
+      'operation',
+      parsedFiles.flatMap((file) => file.operations),
+    ),
+    ...duplicates(
+      'fragment',
+      parsedFiles.flatMap((file) => file.fragments),
+    ),
+  ];
+}
+
+/**
  * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
  * values provided as CLI flags, which win per field. A missing config file is
  * fine — the CLI flags may supply everything. Throws on a malformed or
@@ -456,6 +500,8 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /** Advisory duplicate-name warnings (operations and fragments). */
+  duplicateWarnings: string[];
   generatedWarnings: string[];
   /** Raw suspected-generated files, so callers can act on the paths (e.g.
    * `gqlprune init` pre-filling them into `exclude`), not just the messages. */
@@ -559,6 +605,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationUsages,
     unusedOperations,
     unusedFragments,
+    duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
   };
@@ -635,8 +682,12 @@ export function mainFunction(
     operationCount,
     unusedOperations,
     unusedFragments,
+    duplicateWarnings,
     generatedWarnings,
   } = result;
+  // All advisory warnings share one pipeline: stderr lines (or ::warning in
+  // annotate mode) plus the JSON report's `warnings` array.
+  const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
@@ -658,7 +709,7 @@ export function mainFunction(
   // output): it would silently make every operation look "used" and report
   // nothing unused. Emit to stderr so it surfaces in --json mode too without
   // corrupting the JSON on stdout.
-  for (const line of generatedWarnings) {
+  for (const line of advisoryWarnings) {
     // In CI, surface it as an (escaped) ::warning workflow command like the other
     // annotations; otherwise a coloured stderr line for humans.
     console.error(
@@ -678,7 +729,7 @@ export function mainFunction(
   if (json) {
     console.log(
       JSON.stringify(
-        buildJsonReport(unusedOperations, unusedFragments, generatedWarnings),
+        buildJsonReport(unusedOperations, unusedFragments, advisoryWarnings),
         null,
         2,
       ),
