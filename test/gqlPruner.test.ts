@@ -7,6 +7,7 @@ import {
   DEFAULT_EXCLUDED_FOLDERS,
   detectGeneratedFiles,
   explainOperationUsage,
+  findDuplicateNameWarnings,
   findUnusedOperations,
   formatAnnotations,
   formatGeneratedFileWarnings,
@@ -281,6 +282,7 @@ describe('gqlPruner', () => {
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
+      duplicateWarnings: [],
       generatedWarnings: [],
       generatedFiles: [],
     };
@@ -316,6 +318,73 @@ describe('gqlPruner', () => {
         operationUsages: [],
       });
       expect(lines.join('\n')).toContain('Source files scanned: 3');
+    });
+  });
+
+  describe('findDuplicateNameWarnings', () => {
+    const file = (
+      operations: { name: string; filePath: string }[] = [],
+      fragments: { name: string; filePath: string }[] = [],
+    ) => ({
+      operations: operations.map((op) => ({ ...op, type: 'query' as const })),
+      fragments,
+      operationSpreads: [],
+      fragmentSpreads: [],
+    });
+
+    it('warns when an operation name is defined in two files', () => {
+      const warnings = findDuplicateNameWarnings([
+        file([{ name: 'GetUser', filePath: 'a.gql' }]),
+        file([{ name: 'GetUser', filePath: 'b.gql' }]),
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('operation');
+      expect(warnings[0]).toContain('"GetUser"');
+      expect(warnings[0]).toContain('a.gql');
+      expect(warnings[0]).toContain('b.gql');
+    });
+
+    it('warns on a duplicate defined twice within one file', () => {
+      const warnings = findDuplicateNameWarnings([
+        file([
+          { name: 'GetUser', filePath: 'a.gql' },
+          { name: 'GetUser', filePath: 'a.gql' },
+        ]),
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('"GetUser"');
+    });
+
+    it('warns when a fragment name is defined in two files', () => {
+      const warnings = findDuplicateNameWarnings([
+        file([], [{ name: 'UserFields', filePath: 'a.gql' }]),
+        file([], [{ name: 'UserFields', filePath: 'b.gql' }]),
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('fragment');
+      expect(warnings[0]).toContain('"UserFields"');
+    });
+
+    it('does not conflate an operation and a fragment sharing a name', () => {
+      expect(
+        findDuplicateNameWarnings([
+          file(
+            [{ name: 'User', filePath: 'a.gql' }],
+            [{ name: 'User', filePath: 'b.gql' }],
+          ),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('returns [] when every name is unique', () => {
+      expect(
+        findDuplicateNameWarnings([
+          file(
+            [{ name: 'A', filePath: 'a.gql' }],
+            [{ name: 'B', filePath: 'a.gql' }],
+          ),
+        ]),
+      ).toEqual([]);
     });
   });
 
@@ -707,6 +776,24 @@ describe('gqlPruner', () => {
         file: 'App.tsx',
       });
       expect(result.operationUsages[1].match).toBeUndefined();
+    });
+
+    it('exposes duplicate-name warnings from the parsed corpus', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql', 'b.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      // Both parsed files define GetUser (same mock for each) → duplicate.
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.duplicateWarnings).toHaveLength(1);
+      expect(result.duplicateWarnings[0]).toContain('"GetUser"');
     });
 
     it('exposes the raw detected generated files (for init auto-exclude)', () => {
@@ -1111,6 +1198,52 @@ describe('gqlPruner', () => {
       expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(
         'found in App.tsx',
       );
+    });
+
+    it('reports duplicate-name warnings on stderr and in the JSON warnings array', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql', 'b.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction({ json: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('"GetUser"');
+
+      const report = JSON.parse(logged());
+      expect(report.warnings).toHaveLength(1);
+      expect(report.warnings[0]).toContain('"GetUser"');
+    });
+
+    it('emits duplicate-name warnings as escaped ::warning annotations in annotate mode', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql', 'b.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction({ annotate: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toMatch(/::warning::.*GetUser/);
     });
 
     it('runs from CLI config when no config file exists', () => {

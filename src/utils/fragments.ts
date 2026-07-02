@@ -76,21 +76,12 @@ export function findUnusedFragmentsInCorpus(
   const allFragments: FragmentInfo[] = [];
   const fragmentSpreads = new Map<string, string[]>();
   const roots = new Set<string>();
-  const seenFragmentNames = new Set<string>();
 
   for (const entities of parsedFiles) {
     entities.operationSpreads.forEach((spread) => roots.add(spread));
-    for (const fragment of entities.fragments) {
-      // Fragment names should be unique across the corpus. If they aren't, the
-      // graph is keyed by name, so warn rather than silently conflate them.
-      if (seenFragmentNames.has(fragment.name)) {
-        console.warn(
-          `Warning: duplicate fragment name "${fragment.name}" defined in multiple files; usage results may be approximate.`,
-        );
-      }
-      seenFragmentNames.add(fragment.name);
-      allFragments.push(fragment);
-    }
+    // Duplicate fragment names are reported by findDuplicateNameWarnings at the
+    // scan level; here they only need conservative graph handling (below).
+    allFragments.push(...entities.fragments);
     for (const { name, spreads } of entities.fragmentSpreads) {
       // Merge (not overwrite) so a duplicate definition cannot drop spread
       // edges — over-approximating reachability keeps results conservative.
