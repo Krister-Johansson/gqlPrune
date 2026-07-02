@@ -8,6 +8,7 @@ import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
   directoryExists,
+  ExcludeMatcher,
   findFilesWithExtension,
   isOperationUsedInContents,
   readSourceFiles,
@@ -40,6 +41,24 @@ export function resolveExcludePatterns(config: GqlPruneConfig): string[] {
       ...DEFAULT_EXCLUDED_FOLDERS,
     ]),
   ];
+}
+
+/**
+ * Builds the scan's exclude matcher. The always-excluded folders
+ * ({@link DEFAULT_EXCLUDED_FOLDERS}) live in their own matcher, OR-ed with one
+ * built from the user's `exclude`/`excludedFolders` patterns — so a `!`
+ * negation applies only within the user's own patterns and can never
+ * re-include `node_modules` or `.git`, as the docs have always promised.
+ */
+export function createConfigExcludeMatcher(
+  config: GqlPruneConfig,
+): ExcludeMatcher {
+  const always = createExcludeMatcher(DEFAULT_EXCLUDED_FOLDERS);
+  const configured = createExcludeMatcher([
+    ...resolveDirs(config.exclude),
+    ...resolveDirs(config.excludedFolders),
+  ]);
+  return (relativePath) => always(relativePath) || configured(relativePath);
 }
 
 /**
@@ -546,7 +565,7 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
  * `gqlprune init`'s preview, so the preview always reflects the real run.
  */
 export function scanProject(config: GqlPruneConfig): ScanResult {
-  const isExcluded = createExcludeMatcher(resolveExcludePatterns(config));
+  const isExcluded = createConfigExcludeMatcher(config);
   const usagePatterns = resolveUsagePatterns(config);
   const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
 
