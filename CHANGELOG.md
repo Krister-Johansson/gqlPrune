@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.11.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.10.0...gqlprune-v2.11.0) (2026-07-02)
+
+
+### Features
+
+* **cli:** add --help, --exclude, repeatable dirs, and strict usage errors ([#66](https://github.com/Krister-Johansson/gqlPrune/issues/66)) ([1487565](https://github.com/Krister-Johansson/gqlPrune/commit/14875655868cb73c72de5759fe045f1f962cd474))
+* **cli:** add --verbose flag to explain scan verdicts ([#63](https://github.com/Krister-Johansson/gqlPrune/issues/63)) ([ce61f84](https://github.com/Krister-Johansson/gqlPrune/commit/ce61f849fd886312a85877a22791c4bb8e0ec741)), closes [#62](https://github.com/Krister-Johansson/gqlPrune/issues/62)
+* **cli:** exit 2 on usage/config errors, reserving exit 1 for findings ([#76](https://github.com/Krister-Johansson/gqlPrune/issues/76)) ([73a1507](https://github.com/Krister-Johansson/gqlPrune/commit/73a1507ac8454921c2f51cb23279d25a888e1d17))
+* **scan:** warn on duplicate names; surface all advisory warnings in JSON ([#83](https://github.com/Krister-Johansson/gqlPrune/issues/83)) ([ae45643](https://github.com/Krister-Johansson/gqlPrune/commit/ae4564372cec5efe407c34c24e756f6531a077f8)), closes [#82](https://github.com/Krister-Johansson/gqlPrune/issues/82)
+
+
+### Bug Fixes
+
+* **ci:** scorecard caller uses explicit permissions map; pin shared-configs v1.1.3 ([#81](https://github.com/Krister-Johansson/gqlPrune/issues/81)) ([4990d36](https://github.com/Krister-Johansson/gqlPrune/commit/4990d36911bac89f07bd0195c0657ec10907b3af))
+* **init:** confirm before overwriting an existing config; exit cleanly on Ctrl+C ([#70](https://github.com/Krister-Johansson/gqlPrune/issues/70)) ([4937373](https://github.com/Krister-Johansson/gqlPrune/commit/493737399330bd935ad823ab0c91ab82e06e4c61)), closes [#69](https://github.com/Krister-Johansson/gqlPrune/issues/69)
+* **scan:** keep node_modules/.git excluded against "!" re-includes ([#87](https://github.com/Krister-Johansson/gqlPrune/issues/87)) ([9860159](https://github.com/Krister-Johansson/gqlPrune/commit/98601599eab61dcab4332c3c5176927b337416fa)), closes [#86](https://github.com/Krister-Johansson/gqlPrune/issues/86)
+* **scan:** terminate on symlink cycles in the file walker ([#74](https://github.com/Krister-Johansson/gqlPrune/issues/74)) ([b579adc](https://github.com/Krister-Johansson/gqlPrune/commit/b579adc074c0958c060a815a7610f58f0504295f)), closes [#73](https://github.com/Krister-Johansson/gqlPrune/issues/73)
+
 ## [2.10.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.9.0...gqlprune-v2.10.0) (2026-06-25)
 
 
