@@ -1,4 +1,5 @@
-import inquirer from 'inquirer';
+import confirm from '@inquirer/confirm';
+import input from '@inquirer/input';
 import * as yaml from 'js-yaml';
 import fs from 'fs';
 import * as path from 'path';
@@ -110,14 +111,10 @@ const CONFIG_FILE = './gqlPrune.config.yaml';
 export async function generateConfig() {
   // Never clobber an existing (possibly hand-tuned) config without asking.
   if (fs.existsSync(CONFIG_FILE)) {
-    const { overwrite } = (await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'overwrite',
-        message: 'gqlPrune.config.yaml already exists. Overwrite it?',
-        default: false,
-      },
-    ])) as { overwrite: boolean };
+    const overwrite = await confirm({
+      message: 'gqlPrune.config.yaml already exists. Overwrite it?',
+      default: false,
+    });
     if (!overwrite) {
       console.log(
         'Keeping the existing gqlPrune.config.yaml — nothing was changed.',
@@ -140,35 +137,28 @@ export async function generateConfig() {
     );
   }
 
-  const questions = [
-    {
-      type: 'input',
-      name: 'graphqlDir',
+  const answers: GqlPruneConfig = {
+    graphqlDir: await input({
       message: 'Enter the path to your GraphQL directory:',
       default: graphqlDefault,
-    },
-    {
-      type: 'input',
-      name: 'srcDir',
+    }),
+    srcDir: await input({
       message: 'Enter the path to your source directory:',
       default: srcDefault,
-    },
-    {
-      type: 'input',
-      name: 'exclude',
-      message:
-        'Files or folders to exclude (comma separated; gitignore-style globs allowed):',
-      default: detectedExcludes.join(', '),
-      filter: splitFolders,
-    },
-  ];
-
-  const answers = await inquirer.prompt(questions);
+    }),
+    exclude: splitFolders(
+      await input({
+        message:
+          'Files or folders to exclude (comma separated; gitignore-style globs allowed):',
+        default: detectedExcludes.join(', '),
+      }),
+    ),
+  };
 
   // Write the answers to a configuration file
   fs.writeFileSync(CONFIG_FILE, yaml.dump(answers));
   console.log('Configuration generated successfully!');
 
   // Show an instant preview of what a real run would find.
-  printPreview(answers as GqlPruneConfig);
+  printPreview(answers);
 }
