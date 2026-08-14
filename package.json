@@ -47,8 +47,9 @@
   },
   "homepage": "https://github.com/Krister-Johansson/gqlPrune",
   "dependencies": {
+    "@inquirer/confirm": "^6.1.1",
+    "@inquirer/input": "^5.1.2",
     "graphql": "^17.0.1",
-    "inquirer": "^14.0.2",
     "js-yaml": "^5.1.0",
     "kleur": "^4.1.5",
     "picomatch": "^4.0.4"
