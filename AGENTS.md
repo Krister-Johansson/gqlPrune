@@ -42,6 +42,10 @@ wrong version bump.
   `npm run build && npm run typecheck && npm run coverage`
   (plus `npm run lint` if the repo defines it).
 - All changes land through PRs — `main` is protected; CI must be green.
+- **Agents never merge PRs and never enable auto-merge.** CodeRabbit's review
+  must complete (it is not a required status check, so auto-merge would not
+  wait for it), and the merge itself is a human decision. When everything is
+  green, report the PR as ready to merge.
 
 ## Release model (do not do these manually)
 
