@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import inquirer from 'inquirer';
+import confirm from '@inquirer/confirm';
+import input from '@inquirer/input';
 import {
   commonParentDir,
   detectGeneratedExcludes,
@@ -12,9 +13,13 @@ import {
 import { scanProject } from '../src/core/gqlPruner';
 
 jest.mock('fs');
-jest.mock('inquirer', () => ({
+jest.mock('@inquirer/confirm', () => ({
   __esModule: true,
-  default: { prompt: jest.fn() },
+  default: jest.fn(),
+}));
+jest.mock('@inquirer/input', () => ({
+  __esModule: true,
+  default: jest.fn(),
 }));
 jest.mock('../src/core/gqlPruner', () => ({
   scanProject: jest.fn(),
@@ -23,6 +28,20 @@ jest.mock('../src/core/gqlPruner', () => ({
 }));
 
 const mockedScan = scanProject as jest.Mock;
+const mockedConfirm = confirm as unknown as jest.Mock;
+const mockedInput = input as unknown as jest.Mock;
+
+/** Queues the three `init` prompt answers (graphqlDir, srcDir, exclude). */
+function mockInputAnswers(
+  graphqlDir: string,
+  srcDir: string,
+  exclude = '',
+): void {
+  mockedInput
+    .mockResolvedValueOnce(graphqlDir)
+    .mockResolvedValueOnce(srcDir)
+    .mockResolvedValueOnce(exclude);
+}
 
 // Drives findFilesWithExtension / directoryExists by simulating a tree:
 // `entries` maps a directory to its child names; `dirs` is the set of paths
@@ -170,17 +189,13 @@ describe('configGenerator', () => {
     it('asks before overwriting an existing config and keeps it when declined', async () => {
       mockFsTree({ '.': [] }, new Set());
       (fs.existsSync as jest.Mock).mockReturnValue(true);
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValueOnce({
-        overwrite: false,
-      });
+      mockedConfirm.mockResolvedValueOnce(false);
 
       await generateConfig();
 
-      expect(inquirer.prompt).toHaveBeenCalledTimes(1); // confirm only
-      const [confirm] = (inquirer.prompt as unknown as jest.Mock).mock
-        .calls[0][0];
-      expect(confirm.type).toBe('confirm');
-      expect(confirm.default).toBe(false);
+      expect(mockedConfirm).toHaveBeenCalledTimes(1);
+      expect(mockedConfirm.mock.calls[0][0].default).toBe(false);
+      expect(mockedInput).not.toHaveBeenCalled(); // confirm only
       expect(fs.writeFileSync).not.toHaveBeenCalled();
       expect(logSpy.mock.calls.flat().join('\n')).toContain('existing');
     });
@@ -188,48 +203,36 @@ describe('configGenerator', () => {
     it('overwrites an existing config when the user confirms', async () => {
       mockFsTree({ '.': [] }, new Set());
       (fs.existsSync as jest.Mock).mockReturnValue(true);
-      (inquirer.prompt as unknown as jest.Mock)
-        .mockResolvedValueOnce({ overwrite: true })
-        .mockResolvedValueOnce({
-          graphqlDir: './graphql',
-          srcDir: './src',
-          exclude: [],
-        });
+      mockedConfirm.mockResolvedValueOnce(true);
+      mockInputAnswers('./graphql', './src');
 
       await generateConfig();
 
-      expect(inquirer.prompt).toHaveBeenCalledTimes(2);
+      expect(mockedConfirm).toHaveBeenCalledTimes(1);
+      expect(mockedInput).toHaveBeenCalledTimes(3);
       expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
     });
 
     it('does not ask for confirmation when no config exists', async () => {
       mockFsTree({ '.': [] }, new Set());
       (fs.existsSync as jest.Mock).mockReturnValue(false);
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
-        graphqlDir: './graphql',
-        srcDir: './src',
-        exclude: [],
-      });
+      mockInputAnswers('./graphql', './src');
 
       await generateConfig();
 
-      expect(inquirer.prompt).toHaveBeenCalledTimes(1);
-      const questions = (inquirer.prompt as unknown as jest.Mock).mock
-        .calls[0][0];
-      expect(questions[0].name).toBe('graphqlDir'); // straight to the questions
+      expect(mockedConfirm).not.toHaveBeenCalled(); // straight to the questions
+      expect(mockedInput.mock.calls[0][0].message).toContain(
+        'GraphQL directory',
+      );
     });
 
     it('prompts the user and writes the answers as YAML', async () => {
       mockFsTree({ '.': [] }, new Set());
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
-        graphqlDir: './graphql',
-        srcDir: './src',
-        exclude: ['node_modules'],
-      });
+      mockInputAnswers('./graphql', './src', 'node_modules');
 
       await generateConfig();
 
-      expect(inquirer.prompt).toHaveBeenCalledTimes(1);
+      expect(mockedInput).toHaveBeenCalledTimes(3);
       expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
       const [file, contents] = (fs.writeFileSync as jest.Mock).mock.calls[0];
       expect(file).toBe('./gqlPrune.config.yaml');
@@ -248,30 +251,17 @@ describe('configGenerator', () => {
         { '.': ['graphql'], graphql: ['ops.gql'] },
         new Set(['graphql', 'src']),
       );
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
-        graphqlDir: './graphql',
-        srcDir: './src',
-        exclude: [],
-      });
+      mockInputAnswers('./graphql', './src');
 
       await generateConfig();
 
-      const questions = (inquirer.prompt as unknown as jest.Mock).mock
-        .calls[0][0];
-      const byName = Object.fromEntries(
-        questions.map((q: { name: string }) => [q.name, q]),
-      );
-      expect(byName.graphqlDir.default).toBe('./graphql');
-      expect(byName.srcDir.default).toBe('./src');
+      expect(mockedInput.mock.calls[0][0].default).toBe('./graphql');
+      expect(mockedInput.mock.calls[1][0].default).toBe('./src');
     });
 
     it('prints a preview after writing when the directories exist', async () => {
       mockFsTree({ '.': [] }, new Set(['./graphql', './src']));
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
-        graphqlDir: './graphql',
-        srcDir: './src',
-        exclude: [],
-      });
+      mockInputAnswers('./graphql', './src');
       mockedScan.mockReturnValue({
         gqlFileCount: 12,
         sourceFileCount: 30,
@@ -316,20 +306,11 @@ describe('configGenerator', () => {
           },
         ],
       });
-      (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({
-        graphqlDir: './graphql',
-        srcDir: './src',
-        exclude: ['src/gql/graphql.ts'],
-      });
+      mockInputAnswers('./graphql', './src', 'src/gql/graphql.ts');
 
       await generateConfig();
 
-      const questions = (inquirer.prompt as unknown as jest.Mock).mock
-        .calls[0][0];
-      const byName = Object.fromEntries(
-        questions.map((q: { name: string }) => [q.name, q]),
-      );
-      expect(byName.exclude.default).toBe('src/gql/graphql.ts');
+      expect(mockedInput.mock.calls[2][0].default).toBe('src/gql/graphql.ts');
       expect(logSpy.mock.calls.flat().join('\n')).toContain(
         'src/gql/graphql.ts',
       );
