@@ -12,6 +12,13 @@ export type Shell = (typeof SHELLS)[number];
 export type BooleanOption =
   'json' | 'annotate' | 'version' | 'verbose' | 'help';
 
+/**
+ * The boolean `CliConfig` field a switch flag turns on. Distinct from
+ * {@link BooleanOption}: these flags feed `resolveConfig` alongside
+ * `gqlPrune.config.yaml`, so passing one overrides the same key in the file.
+ */
+export type ConfigFlag = 'checkFields';
+
 /** The `CliConfig` field a value flag collects into. */
 export type ValueTarget =
   | 'graphqlDir'
@@ -42,6 +49,8 @@ export type FlagSpec = {
   description: string;
   /** Boolean flags: the `CliOptions` field this sets to true. */
   option?: BooleanOption;
+  /** Boolean flags: the `CliConfig` field this sets to true instead. */
+  configFlag?: ConfigFlag;
   /** Value flags: the `CliConfig` field collected values land in. */
   target?: ValueTarget;
   /** Repeatable flags: keep a lone value a plain string, not a 1-element array. */
@@ -119,6 +128,13 @@ export const FLAGS: readonly FlagSpec[] = [
     valueKind: 'path',
     target: 'schemaFile',
     description: 'Local SDL file; also flags @deprecated field and enum usage',
+  },
+  {
+    flag: '--fields',
+    takesValue: false,
+    configFlag: 'checkFields',
+    description:
+      'Also list selected fields whose name appears nowhere in the source (candidates)',
   },
   {
     flag: '--json',
@@ -264,7 +280,9 @@ function setConfigValue(
  * a value is never mistaken for the positional command. Repeating a flag the
  * table marks repeatable builds a list; repeating any other value flag replaces
  * the earlier value. A command listed with `argValues` (today only
- * `completion`) takes one further positional, kept as `commandArg`. Unknown
+ * `completion`) takes one further positional, kept as `commandArg`. A switch
+ * flag sets either its `CliOptions` field or, when the table gives it a
+ * `configFlag`, the matching boolean on the config override. Unknown
  * flags, flags missing their value, and stray positional
  * arguments are collected into `errors` rather than silently dropped — the
  * caller decides how to report them.
@@ -274,6 +292,7 @@ function setConfigValue(
  */
 export function parseArgs(argv: string[]): CliOptions {
   const collected = new Map<ValueTarget, string[]>();
+  const configFlags = new Set<ConfigFlag>();
   const options: Record<BooleanOption, boolean> = {
     json: false,
     annotate: false,
@@ -318,6 +337,7 @@ export function parseArgs(argv: string[]): CliOptions {
 
     if (!spec.takesValue) {
       if (spec.option !== undefined) options[spec.option] = true;
+      if (spec.configFlag !== undefined) configFlags.add(spec.configFlag);
       continue;
     }
 
@@ -362,6 +382,9 @@ export function parseArgs(argv: string[]): CliOptions {
       (spec.collapseSingle === true && values.length === 1);
     setConfigValue(config, spec.target, collapse ? values[0] : values);
   }
+  // Only set when the flag was passed, so it overrides `false` in the config
+  // file without an absent flag turning an enabled check back off.
+  for (const flag of configFlags) config[flag] = true;
 
   return { command, commandArg, ...options, errors, config };
 }

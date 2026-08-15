@@ -75,6 +75,30 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --fields into the config as checkFields', () => {
+    expect(parseArgs(['--fields'])).toEqual({
+      command: undefined,
+      json: false,
+      annotate: false,
+      version: false,
+      verbose: false,
+      help: false,
+      errors: [],
+      config: { checkFields: true },
+    });
+  });
+
+  it('leaves checkFields unset when --fields is absent', () => {
+    expect(parseArgs(['--json']).config).toEqual({});
+  });
+
+  it('combines --fields with other flags', () => {
+    const result = parseArgs(['--fields', '--json', '--src', './src']);
+    expect(result.config.checkFields).toBe(true);
+    expect(result.json).toBe(true);
+    expect(result.config.srcDir).toBe('./src');
+  });
+
   it('combines --verbose with other flags', () => {
     const result = parseArgs(['--verbose', '--json']);
     expect(result.verbose).toBe(true);
@@ -342,6 +366,25 @@ describe('CLI metadata tables', () => {
       FLAGS.filter((f) => f.valueKind === 'path').map((f) => f.flag),
     ).toEqual(['--graphql', '--src', '--schema']);
   });
+
+  it('gives every boolean flag exactly one destination', () => {
+    // A switch writes either a CliOptions field or a CliConfig one, never both
+    // and never neither, or passing it would silently do nothing.
+    for (const spec of FLAGS) {
+      if (spec.takesValue) continue;
+      const destinations = [spec.option, spec.configFlag].filter(
+        (value) => value !== undefined,
+      );
+      expect(destinations).toHaveLength(1);
+    }
+  });
+
+  it('routes --fields into the config rather than the CLI options', () => {
+    const fields = FLAGS.find((f) => f.flag === '--fields');
+    expect(fields?.takesValue).toBe(false);
+    expect(fields?.configFlag).toBe('checkFields');
+    expect(fields?.option).toBeUndefined();
+  });
 });
 
 describe('formatHelp', () => {
@@ -356,6 +399,7 @@ describe('formatHelp', () => {
       '--pattern',
       '--fragment-pattern',
       '--schema',
+      '--fields',
       '--json',
       '--annotate',
       '--verbose',

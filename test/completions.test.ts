@@ -111,6 +111,14 @@ describe('completionScript registration', () => {
     expect(completionScript('fish')).toContain(`-a '${shells}'`);
   });
 
+  it('offers --fields as a switch in every shell', () => {
+    // Boolean, so it appears in the flag list but never asks for a value.
+    expect(completionScript('bash')).toContain('--fields');
+    expect(completionScript('zsh')).toContain('(--fields)--fields[');
+    expect(completionScript('fish')).toContain('-l fields');
+    expect(completionScript('fish')).not.toContain('-l fields -r');
+  });
+
   it('completes nothing for value flags without a path value', () => {
     // --pattern takes a free-form template; the shell should not offer files.
     const bash = completionScript('bash');

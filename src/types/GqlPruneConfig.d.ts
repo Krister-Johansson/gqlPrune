@@ -48,6 +48,13 @@ export interface GqlPruneConfig {
    * schema-free.
    */
   schemaFile?: string;
+  /**
+   * Opt in to the advisory field-candidate list: response keys selected by a
+   * used operation (or a fragment it reaches) whose name appears nowhere in the
+   * scanned source. Off by default, and never changes the exit code. Set to
+   * `true`, or pass `--fields`.
+   */
+  checkFields?: boolean;
 }
 
 /**
@@ -64,5 +71,6 @@ export type CliConfig = Partial<
     | 'usagePatterns'
     | 'fragmentUsagePatterns'
     | 'schemaFile'
+    | 'checkFields'
   >
 > & { excludedFolders?: string[] };

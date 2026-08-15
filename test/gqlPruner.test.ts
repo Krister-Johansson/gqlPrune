@@ -21,6 +21,7 @@ import {
   formatVerboseConfigLines,
   formatVerboseScanLines,
   mainFunction,
+  resolveCheckFields,
   resolveConfig,
   resolveDirs,
   resolveExcludePatterns,
@@ -46,10 +47,14 @@ jest.mock('../src/utils/fileUtils', () => {
     readSourceFiles: jest.fn(),
   };
 });
+// Partial mock again: only the filesystem-backed extractor is stubbed, so the
+// pure AST helpers (getFragmentSpreads) stay real for the field pass.
 jest.mock('../src/utils/operations', () => ({
+  ...jest.requireActual('../src/utils/operations'),
   extractGraphqlEntities: jest.fn(),
 }));
 jest.mock('../src/utils/fragments', () => ({
+  ...jest.requireActual('../src/utils/fragments'),
   findUnusedFragmentsInCorpus: jest.fn(() => []),
 }));
 
@@ -70,6 +75,16 @@ const entitiesOf = (operations: OperationInfo[], filePath = 'a.gql') => ({
   hasAnonymousOperation: false,
   document: null,
 });
+// Like entitiesOf, but carrying a real parsed document so the opt-in field pass
+// has selection sets (and locations) to walk.
+const entitiesWithDocument = (
+  filePath: string,
+  text: string,
+  operations: OperationInfo[] = [],
+) => ({
+  ...entitiesOf(operations, filePath),
+  document: parse(new Source(text, filePath)),
+});
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
 
@@ -79,16 +94,6 @@ const SDL = [
   '  legacyName: String @deprecated(reason: "use displayName") }',
   'type Query { user: User }',
 ].join('\n');
-const entitiesWithDocument = (filePath: string, content: string) => ({
-  operations: [],
-  fragments: [],
-  operationSpreads: [],
-  fragmentSpreads: [],
-  filePath,
-  imports: [],
-  hasAnonymousOperation: false,
-  document: parse(new Source(content, filePath)),
-});
 const DEPRECATED_QUERY = 'query GetUser {\n  user {\n    nickname\n  }\n}';
 
 describe('gqlPruner', () => {
@@ -228,6 +233,28 @@ describe('gqlPruner', () => {
           fragmentUsagePatterns: [],
         }),
       ).toEqual([]);
+    });
+  });
+
+  describe('resolveCheckFields', () => {
+    it('is off when the option is absent', () => {
+      expect(resolveCheckFields({ graphqlDir: 'g', srcDir: 's' })).toBe(false);
+    });
+
+    it('is on for an explicit true', () => {
+      expect(
+        resolveCheckFields({ graphqlDir: 'g', srcDir: 's', checkFields: true }),
+      ).toBe(true);
+    });
+
+    it('is off for a non-boolean YAML value', () => {
+      expect(
+        resolveCheckFields({
+          graphqlDir: 'g',
+          srcDir: 's',
+          checkFields: 'yes' as unknown as boolean,
+        }),
+      ).toBe(false);
     });
   });
 
@@ -383,6 +410,7 @@ describe('gqlPruner', () => {
       unusedFragments: [],
       orphanedFiles: [],
       deprecatedUsages: [],
+      unusedFieldCandidates: [],
       duplicateWarnings: [],
       generatedWarnings: [],
       generatedFiles: [],
@@ -573,6 +601,39 @@ describe('gqlPruner', () => {
       ]);
       expect(report.summary.deprecatedUsages).toBe(1);
     });
+
+    it('omits unusedFields entirely when the field check did not run', () => {
+      const report = buildJsonReport([], []);
+      expect(report).not.toHaveProperty('unusedFields');
+      expect(report.summary).not.toHaveProperty('unusedFields');
+    });
+
+    it('serializes field candidates and counts them in the summary', () => {
+      const report = buildJsonReport(
+        [],
+        [],
+        [],
+        [],
+        [],
+        [{ field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] }],
+      );
+      expect(report.unusedFields).toEqual([
+        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] },
+      ]);
+      expect(report.summary).toEqual({
+        unusedOperations: 0,
+        unusedFragments: 0,
+        orphanedFiles: 0,
+        deprecatedUsages: 0,
+        unusedFields: 1,
+      });
+    });
+
+    it('keeps an empty unusedFields when the check ran and found nothing', () => {
+      const report = buildJsonReport([], [], [], [], [], []);
+      expect(report.unusedFields).toEqual([]);
+      expect(report.summary.unusedFields).toBe(0);
+    });
   });
 
   describe('formatAnnotations', () => {
@@ -618,6 +679,42 @@ describe('gqlPruner', () => {
     it('annotates an orphaned file without a line', () => {
       expect(formatAnnotations([], [], ['graphql/dead.gql'])).toEqual([
         '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it',
+      ]);
+    });
+
+    it('annotates each field candidate at its first selection', () => {
+      expect(
+        formatAnnotations(
+          [],
+          [],
+          [],
+          [],
+          [
+            {
+              field: 'avatarUrl',
+              locations: [
+                { file: 'graphql/user.gql', line: 4 },
+                { file: 'graphql/post.gql', line: 9 },
+              ],
+            },
+          ],
+        ),
+      ).toEqual([
+        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+      ]);
+    });
+
+    it('omits the line for a field candidate with no known line', () => {
+      expect(
+        formatAnnotations(
+          [],
+          [],
+          [],
+          [],
+          [{ field: 'avatarUrl', locations: [{ file: 'a.gql' }] }],
+        ),
+      ).toEqual([
+        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
       ]);
     });
 
@@ -1085,6 +1182,48 @@ describe('gqlPruner', () => {
           file: 'a.gql',
           line: 3,
         },
+      ]);
+    });
+
+    it('skips the field pass entirely unless checkFields is on', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', 'query GetUser {\n  avatarUrl\n}', [
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.unusedFieldCandidates).toEqual([]);
+    });
+
+    it('reports field candidates of used operations when checkFields is on', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', 'query GetUser {\n  avatarUrl\n  id\n}', [
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'const { id } = useGetUserQuery().data;' },
+      ]);
+
+      const result = scanProject({
+        graphqlDir: './g',
+        srcDir: './s',
+        checkFields: true,
+      });
+
+      expect(result.unusedFieldCandidates).toEqual([
+        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
       ]);
     });
   });
@@ -1662,6 +1801,167 @@ describe('gqlPruner', () => {
       ).not.toThrow();
       expect(exitSpy).not.toHaveBeenCalled();
       expect(logged()).toContain('No unused');
+    });
+
+    // The opt-in field candidates. Each case parses one query selecting a dead
+    // field (avatarUrl) and a live one (id) for a used operation.
+    describe('field candidates', () => {
+      const setUpScan = (configYaml: string) => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(configYaml);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesWithDocument(
+            'a.gql',
+            'query GetUser {\n  avatarUrl\n  id\n}',
+            [{ name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 }],
+          ),
+        );
+        mockedReadSources.mockReturnValue([
+          {
+            file: 'App.tsx',
+            content: 'const { id } = useGetUserQuery().data;',
+          },
+        ]);
+      };
+      const enabled = 'graphqlDir: ./g\nsrcDir: ./s\ncheckFields: true\n';
+      const disabled = 'graphqlDir: ./g\nsrcDir: ./s\n';
+
+      it('prints nothing extra when the option is off', () => {
+        setUpScan(disabled);
+
+        mainFunction();
+
+        expect(logged()).not.toContain('Field Candidates');
+        expect(logged()).not.toContain('avatarUrl');
+        expect(logged()).toContain('No unused');
+      });
+
+      it('leaves the JSON report untouched when the option is off', () => {
+        setUpScan(disabled);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report).not.toHaveProperty('unusedFields');
+        expect(report.summary).toEqual({
+          unusedOperations: 0,
+          unusedFragments: 0,
+          orphanedFiles: 0,
+          deprecatedUsages: 0,
+        });
+      });
+
+      it('prints the candidates section with its caveat when the option is on', () => {
+        setUpScan(enabled);
+
+        mainFunction();
+
+        const out = logged();
+        expect(out).toContain('Unused Field Candidates');
+        expect(out).toContain('avatarUrl');
+        expect(out).toContain('a.gql:2');
+        expect(out).toContain('not proof');
+      });
+
+      it('does not change the exit code', () => {
+        setUpScan(enabled);
+
+        mainFunction();
+
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('leaves the closing reminder off the all-clear path', () => {
+        setUpScan(enabled);
+
+        mainFunction();
+
+        // The section carries its own caveat, so the reminder that accompanies
+        // findings would only repeat it here.
+        expect(logged()).toContain('Unused Field Candidates');
+        expect(logged()).not.toContain(CANDIDATE_REMINDER);
+      });
+
+      it('prints after the orphaned files and before the closing reminder', () => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(enabled);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql', 'dead.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract
+          .mockReturnValueOnce(
+            entitiesWithDocument(
+              'a.gql',
+              'query GetUser {\n  avatarUrl\n  id\n}',
+              [{ name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 }],
+            ),
+          )
+          .mockReturnValueOnce(
+            entitiesOf(
+              [{ name: 'Dead', type: 'query', filePath: 'dead.gql' }],
+              'dead.gql',
+            ),
+          );
+        mockedReadSources.mockReturnValue([
+          {
+            file: 'App.tsx',
+            content: 'const { id } = useGetUserQuery().data;',
+          },
+        ]);
+
+        mainFunction();
+
+        const out = logged();
+        expect(process.exitCode).toBe(1);
+        const at = (section: string) => {
+          const index = out.indexOf(section);
+          expect(index).toBeGreaterThanOrEqual(0);
+          return index;
+        };
+        expect(at('Unused GraphQL Operations')).toBeLessThan(
+          at('Orphaned GraphQL Files'),
+        );
+        expect(at('Orphaned GraphQL Files')).toBeLessThan(
+          at('Unused Field Candidates'),
+        );
+        expect(at('Unused Field Candidates')).toBeLessThan(
+          at(CANDIDATE_REMINDER),
+        );
+      });
+
+      it('serializes the candidates in --json mode', () => {
+        setUpScan(enabled);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedFields).toEqual([
+          { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+        ]);
+        expect(report.summary.unusedFields).toBe(1);
+      });
+
+      it('emits one ::warning annotation per candidate in annotate mode', () => {
+        setUpScan(enabled);
+
+        mainFunction({ annotate: true });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          '::warning file=a.gql,line=2::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+        );
+      });
+
+      it('turns the check on from the --fields flag over a config that omits it', () => {
+        setUpScan(disabled);
+
+        mainFunction({ json: true, config: { checkFields: true } });
+
+        const report = JSON.parse(logged());
+        expect(report.summary.unusedFields).toBe(1);
+      });
     });
 
     // A directory tree for the glob expansion below: each key is a directory,

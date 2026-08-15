@@ -8,6 +8,7 @@ import path from 'path';
 import { buildSchema, GraphQLSchema } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
+import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
@@ -30,6 +31,7 @@ import {
   GraphqlFileEntities,
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
 
@@ -107,6 +109,14 @@ export function resolveFragmentUsagePatterns(config: GqlPruneConfig): string[] {
   return Array.isArray(config.fragmentUsagePatterns)
     ? config.fragmentUsagePatterns
     : DEFAULT_FRAGMENT_USAGE_PATTERNS;
+}
+
+/**
+ * Whether the opt-in field-candidate check runs. Strictly boolean `true`, so a
+ * stray YAML value never silently enables an advisory scan of every selection.
+ */
+export function resolveCheckFields(config: GqlPruneConfig): boolean {
+  return config.checkFields === true;
 }
 
 /**
@@ -213,6 +223,51 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
+/** Formats one selection location as `file:line`, or just the file. */
+function formatFieldLocation(location: {
+  file: string;
+  line?: number;
+}): string {
+  return location.line ? `${location.file}:${location.line}` : location.file;
+}
+
+/**
+ * Prints the advisory table of field candidates: one row per selection, with
+ * the key shown on its first row only.
+ */
+function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
+  const maxFieldLength = Math.max(
+    'Field'.length,
+    ...candidates.map((candidate) => candidate.field.length),
+  );
+
+  console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
+  console.log('Field'.padEnd(maxFieldLength), 'Selected in');
+  candidates.forEach((candidate) => {
+    candidate.locations.forEach((location, index) => {
+      const label = index === 0 ? candidate.field : '';
+      console.log(
+        `${kleur.cyan(label.padEnd(maxFieldLength))} ${kleur.magenta(
+          formatFieldLocation(location),
+        )}`,
+      );
+    });
+  });
+  console.log(kleur.blue('-------------------------------'));
+  console.log(
+    kleur.yellow(
+      `Found ${candidates.length} field candidates whose name appears nowhere in the source.`,
+    ),
+  );
+  console.log(
+    kleur.dim(
+      'These are string-search candidates, not proof: a field read through a ' +
+        'computed key, spread into props, or read by another repository looks ' +
+        'the same, and a field with a common name never reaches this list. ' +
+        'Verify each one before trimming it.',
+    ),
+  );
+}
 /** Prints the list of orphaned GraphQL files. */
 function reportOrphanedFiles(orphanedFiles: string[]): void {
   console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
@@ -272,6 +327,11 @@ export type JsonReport = {
   orphanedFiles: string[];
   /** Selections of `@deprecated` fields/enum values; empty without a schema. */
   deprecatedUsages: DeprecatedUsage[];
+  /**
+   * Field candidates. Present only when the opt-in check ran, so an absent key
+   * means "not checked" rather than "nothing found".
+   */
+  unusedFields?: UnusedFieldInfo[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
   summary: {
@@ -279,16 +339,22 @@ export type JsonReport = {
     unusedFragments: number;
     orphanedFiles: number;
     deprecatedUsages: number;
+    unusedFields?: number;
   };
 };
 
-/** Builds the structured report for `--json` output. */
+/**
+ * Builds the structured report for `--json` output. `unusedFields` is omitted
+ * entirely when the opt-in field check did not run. An empty array would claim
+ * a clean result the scan never looked for.
+ */
 export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
   orphanedFiles: string[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
+  unusedFields?: UnusedFieldInfo[],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -304,12 +370,14 @@ export function buildJsonReport(
     })),
     orphanedFiles,
     deprecatedUsages,
+    ...(unusedFields ? { unusedFields } : {}),
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
       orphanedFiles: orphanedFiles.length,
       deprecatedUsages: deprecatedUsages.length,
+      ...(unusedFields ? { unusedFields: unusedFields.length } : {}),
     },
   };
 }
@@ -335,13 +403,15 @@ function escapeAnnotationProperty(value: string): string {
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
  * fragments, for each orphaned file and for each deprecated selection, so they
- * surface inline on a PR. Omits the line when unknown.
+ * surface inline on a PR. Omits the line when unknown. Field candidates get one
+ * annotation each, pinned to their first selection.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   orphanedFiles: string[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
+  unusedFields: UnusedFieldInfo[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -380,6 +450,13 @@ export function formatAnnotations(
     // and its replacement, so it stands on its own as the annotation text.
     ...deprecatedUsages.map((usage) =>
       annotate(usage.file, usage.line, usage.message),
+    ),
+    ...unusedFields.map((candidate) =>
+      annotate(
+        candidate.locations[0].file,
+        candidate.locations[0].line,
+        `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+      ),
     ),
   ];
 }
@@ -611,6 +688,11 @@ export type ScanResult = {
    * unless the caller passed a schema (see `schemaFile`).
    */
   deprecatedUsages: DeprecatedUsage[];
+  /**
+   * Advisory field candidates. Always empty unless `checkFields` is on: the
+   * detection does not run at all when the option is off.
+   */
+  unusedFieldCandidates: UnusedFieldInfo[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -736,6 +818,15 @@ export function scanProject(
     operations,
     usagePatterns,
   );
+  // Opt-in: skip the whole pass (and its per-key source sweep) when it is off.
+  const unusedFieldCandidates = resolveCheckFields(config)
+    ? findUnusedFieldCandidates(
+        parsedFiles,
+        unusedOperations,
+        unusedFragments,
+        sources,
+      )
+    : [];
 
   return {
     gqlFileCount: gqlFiles.length,
@@ -751,6 +842,7 @@ export function scanProject(
       unusedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
+    unusedFieldCandidates,
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -886,9 +978,15 @@ export function mainFunction(
     unusedFragments,
     orphanedFiles,
     deprecatedUsages,
+    unusedFieldCandidates,
     duplicateWarnings,
     generatedWarnings,
   } = result;
+  // Absent (not empty) in the JSON when the check is off, so a consumer can
+  // tell "nothing found" from "never looked".
+  const fieldCandidates = resolveCheckFields(config)
+    ? unusedFieldCandidates
+    : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
   const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
@@ -930,6 +1028,7 @@ export function mainFunction(
       unusedFragments,
       orphanedFiles,
       deprecatedUsages,
+      unusedFieldCandidates,
     )) {
       console.error(line);
     }
@@ -944,6 +1043,7 @@ export function mainFunction(
           advisoryWarnings,
           orphanedFiles,
           deprecatedUsages,
+          fieldCandidates,
         ),
         null,
         2,
@@ -980,6 +1080,11 @@ export function mainFunction(
   // line) and never carries the exit code on its own.
   if (deprecatedUsages.length > 0) {
     reportDeprecatedUsages(deprecatedUsages);
+  }
+  // Advisory too, and last of the sections. It carries its own caveat instead
+  // of the closing reminder, which only the findings path prints.
+  if (unusedFieldCandidates.length > 0) {
+    reportUnusedFieldCandidates(unusedFieldCandidates);
   }
 
   // Use exitCode (not process.exit) so all report output flushes before exit.

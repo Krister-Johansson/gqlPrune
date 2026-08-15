@@ -22,7 +22,8 @@ export type GraphqlFileEntities = {
   hasAnonymousOperation: boolean;
   /**
    * The parsed document, tagged with the file path as its source name, or
-   * `null` when the file failed to parse. Kept so the opt-in schema checks can
+   * `null` when the file failed to parse. Kept so later passes can walk the
+   * selection sets without re-parsing, and so the opt-in schema checks can
    * validate the corpus and map findings back to the right file.
    */
   document: DocumentNode | null;
@@ -84,7 +85,8 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
     const content = fs.readFileSync(filePath, 'utf-8');
     imports = extractImports(content, filePath);
     // Naming the Source after the file makes every node's location carry the
-    // path, so validation errors can be reported against the right file.
+    // path, so a selection or a validation error can be reported against the
+    // right file without extra bookkeeping.
     const ast = parse(new Source(content, filePath));
     const operations: OperationInfo[] = [];
     const fragments: FragmentInfo[] = [];
