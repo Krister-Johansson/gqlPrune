@@ -1,4 +1,4 @@
-# Working in this repository (agents & humans)
+# Working in this repository (agents and humans)
 
 This repo follows the shared setup from
 [Krister-Johansson/shared-configs](https://github.com/Krister-Johansson/shared-configs).
@@ -7,7 +7,7 @@ human-facing version.
 
 ## Workflow rules
 
-### 1. Issue-first — no code without an issue
+### 1. Issue first: no code without an issue
 
 Every piece of work starts as a GitHub issue describing the problem or feature.
 If none exists, create one before touching code:
@@ -21,8 +21,8 @@ description. The CI job `linked issue` fails PRs that don't.
 
 ### 2. Test-driven development (TDD)
 
-1. Write the test first (unit, type-level, or integration — whichever fits the change).
-2. Run it and **confirm it fails** for the expected reason.
+1. Write the test first (unit, type-level, or integration, whichever fits the change).
+2. Run it and confirm it fails for the expected reason.
 3. Implement the minimal change that makes it pass.
 4. Refactor with the tests green.
 
@@ -32,8 +32,8 @@ New functionality and bug fixes without accompanying tests are rejected in revie
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat:`, `fix:`, `docs:`, `chore:`, `test:`, `refactor:`; `!`/`BREAKING CHANGE:` for
-majors). They drive automated releases via release-please — a wrong type means a
-wrong version bump.
+majors). They drive automated releases via release-please, so a wrong type means
+a wrong version bump.
 
 ### 4. Branch and verify
 
@@ -41,11 +41,19 @@ wrong version bump.
 - Before pushing, run the local CI equivalent:
   `npm run build && npm run typecheck && npm run coverage`
   (plus `npm run lint` if the repo defines it).
-- All changes land through PRs — `main` is protected; CI must be green.
+- All changes land through PRs. `main` is protected and CI must be green.
 - **Agents never merge PRs and never enable auto-merge.** CodeRabbit's review
   must complete (it is not a required status check, so auto-merge would not
   wait for it), and the merge itself is a human decision. When everything is
   green, report the PR as ready to merge.
+
+### 5. Writing style
+
+All prose (documentation, code comments, PR and issue text) follows the
+project's humanizer style guide: plain human writing with no em or en dashes,
+no AI-vocabulary filler, simple copulas over "serves as"/"boasts", sentence-case
+headings, and active voice. Code blocks and program output are quoted as they
+are.
 
 ## Release model (do not do these manually)
 
