@@ -59,10 +59,8 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false # never cache in release builds
-      # Trusted Publishing requires npm >= 11.5.1; upgrade regardless of the
-      # bundled version. Pinned exactly (Scorecard Pinned-Dependencies); bump
-      # deliberately when a newer npm is needed.
-      - run: npm install -g npm@12.0.2
+      # Trusted Publishing requires npm >= 11.5.1; Node 24 bundles 11.17.0, so
+      # no npm self-install is needed (and none would be hash-pinnable).
       - run: npm ci
       # prepublishOnly (build + tests) runs as the pre-publish gate.
       - run: npm publish --access public
