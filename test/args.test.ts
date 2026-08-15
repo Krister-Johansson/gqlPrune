@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Krister Johansson
 
-import { formatHelp, parseArgs } from '../src/utils/args';
+import {
+  COMMANDS,
+  FLAGS,
+  SHELLS,
+  formatHelp,
+  parseArgs,
+} from '../src/utils/args';
 
 describe('parseArgs', () => {
   it('defaults to no command, all flags false, empty config', () => {
@@ -251,6 +257,91 @@ describe('parseArgs', () => {
       ]).config,
     ).toEqual({ exclude: ['**/*.generated.ts', '__generated__'] });
   });
+
+  it('parses the completion command with its shell argument', () => {
+    expect(parseArgs(['completion', 'zsh'])).toEqual({
+      command: 'completion',
+      commandArg: 'zsh',
+      json: false,
+      annotate: false,
+      version: false,
+      verbose: false,
+      help: false,
+      errors: [],
+      config: {},
+    });
+  });
+
+  it('leaves commandArg undefined when completion gets no shell', () => {
+    const result = parseArgs(['completion']);
+    expect(result.command).toBe('completion');
+    expect(result.commandArg).toBeUndefined();
+    expect(result.errors).toEqual([]);
+  });
+
+  it('keeps an unknown shell as commandArg for the caller to reject', () => {
+    // parseArgs reports usage shape only; cli.ts decides which shells exist.
+    expect(parseArgs(['completion', 'ksh']).commandArg).toBe('ksh');
+  });
+
+  it('parses flags given after the completion command', () => {
+    const result = parseArgs(['completion', 'bash', '--json']);
+    expect(result.command).toBe('completion');
+    expect(result.commandArg).toBe('bash');
+    expect(result.json).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('reports a third positional after the completion shell', () => {
+    const result = parseArgs(['completion', 'bash', 'extra']);
+    expect(result.commandArg).toBe('bash');
+    expect(result.errors).toEqual(['Unexpected argument: extra']);
+  });
+
+  it('does not give init a command argument', () => {
+    expect(parseArgs(['init', 'extra']).commandArg).toBeUndefined();
+  });
+
+  it('accepts every flag and alias in the FLAGS table', () => {
+    for (const spec of FLAGS) {
+      const argv = spec.takesValue ? [spec.flag, 'x'] : [spec.flag];
+      expect(parseArgs(argv).errors).toEqual([]);
+      if (spec.alias !== undefined) {
+        expect(parseArgs([spec.alias]).errors).toEqual([]);
+      }
+    }
+  });
+});
+
+describe('CLI metadata tables', () => {
+  it('lists init and completion as the commands', () => {
+    expect(COMMANDS.map((c) => c.name)).toEqual(['init', 'completion']);
+  });
+
+  it('gives the completion command the supported shells as its argument', () => {
+    const completion = COMMANDS.find((c) => c.name === 'completion');
+    expect(completion?.argValues).toEqual([...SHELLS]);
+  });
+
+  it('supports bash, zsh and fish', () => {
+    expect([...SHELLS]).toEqual(['bash', 'zsh', 'fish']);
+  });
+
+  it('gives every value flag a placeholder and every boolean flag none', () => {
+    for (const spec of FLAGS) {
+      if (spec.takesValue) {
+        expect(spec.valuePlaceholder).toMatch(/^<.+>$/);
+      } else {
+        expect(spec.valuePlaceholder).toBeUndefined();
+      }
+    }
+  });
+
+  it('marks the directory and schema flags as path-valued', () => {
+    expect(
+      FLAGS.filter((f) => f.valueKind === 'path').map((f) => f.flag),
+    ).toEqual(['--graphql', '--src', '--schema']);
+  });
 });
 
 describe('formatHelp', () => {
@@ -272,6 +363,31 @@ describe('formatHelp', () => {
       '--help',
     ]) {
       expect(help).toContain(flag);
+    }
+  });
+
+  it('documents every flag in the FLAGS table', () => {
+    const help = formatHelp();
+    for (const spec of FLAGS) {
+      expect(help).toContain(spec.flag);
+      expect(help).toContain(spec.description);
+      if (spec.alias !== undefined) expect(help).toContain(spec.alias);
+    }
+  });
+
+  it('documents every command in the COMMANDS table', () => {
+    const help = formatHelp();
+    for (const spec of COMMANDS) {
+      expect(help).toContain(spec.name);
+      expect(help).toContain(spec.description);
+    }
+  });
+
+  it('starts every command and flag description in the same column', () => {
+    const lines = formatHelp().split('\n');
+    for (const spec of [...COMMANDS, ...FLAGS]) {
+      const line = lines.find((l) => l.endsWith(spec.description));
+      expect(line?.indexOf(spec.description)).toBe(28);
     }
   });
 

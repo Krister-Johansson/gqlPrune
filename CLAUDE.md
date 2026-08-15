@@ -23,7 +23,8 @@ src/
     gqlPruner.ts          mainFunction orchestration + pure report/detect helpers
     configGenerator.ts    `gqlprune init` (interactive config via inquirer)
   utils/
-    args.ts               parseArgs — command + --json / --annotate flags
+    args.ts               FLAGS/COMMANDS tables + parseArgs + formatHelp
+    completions.ts        completionScript — bash/zsh/fish scripts from the tables
     fileUtils.ts          findFilesWithExtension, readFileContents, exclusions
     operations.ts         extractOperations (graphql parse) → OperationInfo[]
     fragments.ts          findUnusedFragmentsInCorpus (cross-file spread graph)

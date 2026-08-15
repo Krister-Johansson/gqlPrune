@@ -264,6 +264,53 @@ describe('cli dispatch', () => {
     errorSpy.mockRestore();
   });
 
+  it('prints a completion script on "completion <shell>"', () => {
+    const logSpy = jest
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    const { mainFunction, generateConfig, notifyUpdate } = runCli([
+      'completion',
+      'zsh',
+    ]);
+    expect(logSpy.mock.calls.flat().join('\n')).toContain('compdef');
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(generateConfig).not.toHaveBeenCalled();
+    // The script is eval'd at shell startup; keep that path free of chatter.
+    expect(notifyUpdate).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+    logSpy.mockRestore();
+  });
+
+  it('reports usage when "completion" gets no shell', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { mainFunction } = runCli(['completion']);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      'Usage: gqlprune completion <bash|zsh|fish>',
+    );
+    expect(mainFunction).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    errorSpy.mockRestore();
+  });
+
+  it('reports an unsupported shell for "completion"', () => {
+    const errorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const logSpy = jest
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    runCli(['completion', 'ksh']);
+    const errs = errorSpy.mock.calls.flat().join('\n');
+    expect(errs).toContain('Unsupported shell: ksh');
+    expect(errs).toContain('Usage: gqlprune completion <bash|zsh|fish>');
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it('rejects an unknown command', () => {
     const errorSpy = jest
       .spyOn(console, 'error')
