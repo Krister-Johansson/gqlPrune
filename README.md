@@ -176,8 +176,8 @@ fragmentUsagePatterns:
   - '{Name}FragmentDoc'
 ```
 
-- `graphqlDir`: directory, or an array of directories, containing your `.gql`/`.graphql` files.
-- `srcDir`: directory, or an array of directories, containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
+- `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
+- `srcDir`: directory, array of directories, or glob pattern covering your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
 - `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere by basename (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
@@ -194,6 +194,15 @@ srcDir:
   - ./packages/web/src
   - ./packages/admin/src
 ```
+
+An entry can also be a glob pattern, which gqlPrune expands to the directories it matches before scanning. That covers every package without naming them one by one, and picks up new packages on its own:
+
+```yaml
+graphqlDir: 'packages/*/graphql'
+srcDir: 'packages/*/src'
+```
+
+`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
 ### Without a config file (CLI flags)
 
@@ -213,6 +222,8 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
 | `--schema <file>`                                                      | `schemaFile`            |
 
+`--graphql` and `--src` take the same glob patterns as their YAML fields; quote them (`--graphql 'packages/*/graphql'`) so the shell passes the pattern through instead of expanding it first.
+
 Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
 
 ## Usage
@@ -225,7 +236,7 @@ This prints any unused GraphQL operations and fragments. The command exits with:
 
 - 0 when the scan completes and nothing unused is found (suitable for CI gates).
 - 1 when the scan completes and unused operations or fragments are found. Exit code 1 always means findings, nothing else.
-- 2 when the run itself fails: an unknown flag or command, a flag missing its value, no configuration, an unreadable config file, or a configured directory that doesn't exist. This lets a pipeline tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2).
+- 2 when the run itself fails: an unknown flag or command, a flag missing its value, no configuration, an unreadable config file, a configured directory that doesn't exist, or a directory pattern that matches nothing. This lets a pipeline tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2).
 
 Print the installed version with `gqlprune --version` (or `-v`), and the full list of commands and flags with `gqlprune --help` (or `-h`).
 
