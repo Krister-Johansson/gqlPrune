@@ -2,9 +2,11 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { parse } from 'graphql';
 import {
   extractGraphqlEntities,
+  extractImports,
   getFragmentSpreads,
 } from '../src/utils/operations';
 
@@ -71,6 +73,19 @@ describe('operationUtils', () => {
       const r = extractGraphqlEntities('f.gql');
       expect(r.operations).toEqual([]); // anonymous op is not a named operation
       expect(r.operationSpreads).toEqual(['Anon']); // but its spread still counts
+      expect(r.hasAnonymousOperation).toBe(true);
+    });
+
+    it('reports no anonymous operation when every operation is named', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('query Named { id }');
+      expect(extractGraphqlEntities('f.gql').hasAnonymousOperation).toBe(false);
+    });
+
+    it('carries the file path it parsed', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('query Q { id }');
+      expect(extractGraphqlEntities('graphql/q.gql').filePath).toBe(
+        'graphql/q.gql',
+      );
     });
 
     it('returns an empty structure on parse error', () => {
@@ -80,7 +95,77 @@ describe('operationUtils', () => {
         fragments: [],
         operationSpreads: [],
         fragmentSpreads: [],
+        filePath: 'f.gql',
+        imports: [],
+        hasAnonymousOperation: false,
       });
+    });
+
+    it('keeps the #import targets of a file that fails to parse', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        '#import "./fields.gql"\nquery Broken {',
+      );
+      expect(extractGraphqlEntities('graphql/q.gql').imports).toEqual([
+        path.resolve('graphql', './fields.gql'),
+      ]);
+    });
+
+    it('returns no imports when the file cannot be read', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      expect(extractGraphqlEntities('f.gql').imports).toEqual([]);
+    });
+  });
+
+  describe('extractImports', () => {
+    it('resolves a double-quoted import against the file directory', () => {
+      expect(
+        extractImports('#import "./fields.gql"\n', 'graphql/user.gql'),
+      ).toEqual([path.resolve('graphql', './fields.gql')]);
+    });
+
+    it('resolves a single-quoted import too', () => {
+      expect(
+        extractImports("#import '../shared/fields.graphql'\n", 'a/b/user.gql'),
+      ).toEqual([path.resolve('a/b', '../shared/fields.graphql')]);
+    });
+
+    it('collects every import line, in order', () => {
+      expect(
+        extractImports('#import "./a.gql"\n#import "./b.gql"\n', 'g/u.gql'),
+      ).toEqual([path.resolve('g', './a.gql'), path.resolve('g', './b.gql')]);
+    });
+
+    it('tolerates whitespace around the directive', () => {
+      expect(extractImports('  #  import   "./a.gql"  \n', 'g/u.gql')).toEqual([
+        path.resolve('g', './a.gql'),
+      ]);
+    });
+
+    it('de-duplicates repeated imports of the same target', () => {
+      expect(
+        extractImports('#import "./a.gql"\n#import "./a.gql"\n', 'g/u.gql'),
+      ).toEqual([path.resolve('g', './a.gql')]);
+    });
+
+    it('ignores comments that are not import directives', () => {
+      expect(
+        extractImports(
+          '# import this fragment somewhere\n# imported by user.gql\n',
+          'g/u.gql',
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores an import directive that is not at the start of a line', () => {
+      expect(
+        extractImports('query Q { id } #import "./a.gql"', 'g/u.gql'),
+      ).toEqual([]);
+    });
+
+    it('returns an empty array when there are no imports', () => {
+      expect(extractImports('query Q { id }', 'g/u.gql')).toEqual([]);
     });
   });
 });

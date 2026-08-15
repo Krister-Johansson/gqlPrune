@@ -27,6 +27,7 @@ import {
   GraphqlFileEntities,
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { findOrphanedFiles } from '../utils/orphans.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -207,6 +208,19 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
+/** Prints the list of orphaned GraphQL files. */
+function reportOrphanedFiles(orphanedFiles: string[]): void {
+  console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
+  console.log('File');
+  orphanedFiles.forEach((file) => console.log(kleur.magenta(file)));
+  console.log(kleur.blue('------------------------------'));
+  console.log(
+    kleur.red(
+      `Found ${orphanedFiles.length} orphaned GraphQL files. Every definition in them is unused and no document imports them, so they can likely be deleted.`,
+    ),
+  );
+}
+
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
   unusedOperations: {
@@ -216,9 +230,15 @@ export type JsonReport = {
     line?: number;
   }[];
   unusedFragments: { name: string; file: string; line?: number }[];
+  /** Files whose every definition is unused and which nothing imports. */
+  orphanedFiles: string[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
-  summary: { unusedOperations: number; unusedFragments: number };
+  summary: {
+    unusedOperations: number;
+    unusedFragments: number;
+    orphanedFiles: number;
+  };
 };
 
 /** Builds the structured report for `--json` output. */
@@ -226,6 +246,7 @@ export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
+  orphanedFiles: string[] = [],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -239,10 +260,12 @@ export function buildJsonReport(
       file: fragment.filePath,
       line: fragment.line,
     })),
+    orphanedFiles,
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
+      orphanedFiles: orphanedFiles.length,
     },
   };
 }
@@ -267,11 +290,13 @@ function escapeAnnotationProperty(value: string): string {
 
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
- * fragments, so they surface inline on a PR. Omits the line when unknown.
+ * fragments and for each orphaned file, so they surface inline on a PR. Omits
+ * the line when unknown.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
+  orphanedFiles: string[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -297,6 +322,13 @@ export function formatAnnotations(
         fragment.filePath,
         fragment.line,
         `Unused GraphQL fragment "${fragment.name}"`,
+      ),
+    ),
+    ...orphanedFiles.map((file) =>
+      annotate(
+        file,
+        undefined,
+        'Orphaned GraphQL file: every definition is unused and no document imports it',
       ),
     ),
   ];
@@ -522,6 +554,8 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /** Files whose every definition is unused and which no document imports. */
+  orphanedFiles: string[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -627,6 +661,11 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationUsages,
     unusedOperations,
     unusedFragments,
+    orphanedFiles: findOrphanedFiles(
+      parsedFiles,
+      unusedOperations,
+      unusedFragments,
+    ),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -704,6 +743,7 @@ export function mainFunction(
     operationCount,
     unusedOperations,
     unusedFragments,
+    orphanedFiles,
     duplicateWarnings,
     generatedWarnings,
   } = result;
@@ -743,7 +783,11 @@ export function mainFunction(
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
   if (annotate) {
-    for (const line of formatAnnotations(unusedOperations, unusedFragments)) {
+    for (const line of formatAnnotations(
+      unusedOperations,
+      unusedFragments,
+      orphanedFiles,
+    )) {
       console.error(line);
     }
   }
@@ -751,7 +795,12 @@ export function mainFunction(
   if (json) {
     console.log(
       JSON.stringify(
-        buildJsonReport(unusedOperations, unusedFragments, advisoryWarnings),
+        buildJsonReport(
+          unusedOperations,
+          unusedFragments,
+          advisoryWarnings,
+          orphanedFiles,
+        ),
         null,
         2,
       ),
@@ -775,6 +824,11 @@ export function mainFunction(
   }
   if (unusedFragments.length > 0) {
     reportUnusedFragments(unusedFragments);
+  }
+  // An orphaned file always implies unused definitions, so this section only
+  // ever follows one of the two above; it never carries the exit code alone.
+  if (orphanedFiles.length > 0) {
+    reportOrphanedFiles(orphanedFiles);
   }
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
