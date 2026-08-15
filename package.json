@@ -42,7 +42,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Krister-Johansson/gqlPrune.git"
+    "url": "git+https://github.com/Krister-Johansson/gqlPrune.git"
   },
   "bugs": {
     "url": "https://github.com/Krister-Johansson/gqlPrune/issues"
