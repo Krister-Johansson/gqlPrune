@@ -1,19 +1,21 @@
 # Contributing
 
-Thanks for your interest in improving **gqlPrune**! This guide covers how to
-report issues, set up a dev environment, and the standards a change needs to meet.
+Thanks for your interest in improving gqlPrune! This guide covers how to report
+issues, set up a dev environment, and the standards a change needs to meet.
 
-## Reporting bugs & requesting features
+## Reporting bugs and requesting features
 
-- **Bugs / features:** open a [GitHub issue](https://github.com/Krister-Johansson/gqlPrune/issues).
-  For bugs, include your `gqlPrune.config.yaml`, a minimal `.gql` example, and the
-  command output.
-- **Security vulnerabilities:** please **do not** open a public issue — follow
-  [`SECURITY.md`](./SECURITY.md) (private reporting via GitHub Security Advisories).
+- To report a bug or request a feature, open a
+  [GitHub issue](https://github.com/Krister-Johansson/gqlPrune/issues). For bugs,
+  include your `gqlPrune.config.yaml`, a minimal `.gql` example, and the command
+  output.
+- For security vulnerabilities, do not open a public issue. Follow
+  [`SECURITY.md`](./SECURITY.md), which uses private reporting via GitHub
+  Security Advisories.
 
 ## Development setup
 
-Prerequisite: **Node ≥ 20**.
+You need Node.js 20 or newer.
 
 ```bash
 git clone https://github.com/Krister-Johansson/gqlPrune
@@ -23,35 +25,36 @@ npm install
 
 Useful scripts:
 
-| Command | What it does |
-| ------- | ------------ |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm test` | Run the Jest test suite |
-| `npm run coverage` | Run tests with coverage |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run lint` | ESLint (flat config) |
-| `npm run format` | Format with Prettier |
+| Command             | What it does                  |
+| ------------------- | ----------------------------- |
+| `npm run build`     | Compile TypeScript to `dist/` |
+| `npm test`          | Run the Jest test suite       |
+| `npm run coverage`  | Run tests with coverage       |
+| `npm run typecheck` | `tsc --noEmit`                |
+| `npm run lint`      | ESLint (flat config)          |
+| `npm run format`    | Format with Prettier          |
 
-The source lives under `src/`: `src/core` (the pruner + config generator),
-`src/utils` (file/operation/pattern helpers), and `src/cli.ts` (the entry point).
+The source lives under `src/`: `src/core` (the pruner and config generator),
+`src/utils` (file, operation, and pattern helpers), and `src/cli.ts` (the entry
+point).
 
 ## Coding standards
 
-- **TypeScript, `strict: true`.** Code must typecheck and lint with no errors.
-- **Match the surrounding code** — naming, comment density, and idioms. Keep
+- TypeScript with `strict: true`. Code must typecheck and lint with no errors.
+- Match the surrounding code in naming, comment density, and idioms. Keep
   changes focused.
 
 ## Testing policy
 
-**New functionality and bug fixes must come with tests** (`test/`, Jest). Cover the
-pure logic — pattern expansion, folder exclusion, operation extraction, usage
+New functionality and bug fixes must come with tests (`test/`, Jest). Cover the
+pure logic: pattern expansion, folder exclusion, operation extraction, usage
 detection.
 
 ## Commit messages
 
-This repo uses [Conventional Commits](https://www.conventionalcommits.org/) —
-`release-please` derives versions and the changelog from them. Use `feat:`, `fix:`,
-`docs:`, `chore:`, `ci:`, `refactor:`, `test:`, etc. Example:
+This repo uses [Conventional Commits](https://www.conventionalcommits.org/);
+release-please derives versions and the changelog from them. Use `feat:`, `fix:`,
+`docs:`, `chore:`, `ci:`, `refactor:`, `test:`, and so on. Example:
 `feat(detection): support urql document conventions`.
 
 ## Pull requests
@@ -62,5 +65,5 @@ This repo uses [Conventional Commits](https://www.conventionalcommits.org/) —
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the project's
-[MIT license](./LICENSE).
+By contributing, you agree that your contributions are licensed under the
+project's [MIT license](./LICENSE).
