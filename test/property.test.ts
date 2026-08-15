@@ -3,10 +3,7 @@
 
 import fc from 'fast-check';
 import { capitalizeFirstLetter } from '../src/utils/stringHelpers';
-import {
-  buildUsagePatterns,
-  expandPattern,
-} from '../src/utils/usagePatterns';
+import { buildUsagePatterns, expandPattern } from '../src/utils/usagePatterns';
 import {
   createExcludeMatcher,
   isOperationUsedInContents,
