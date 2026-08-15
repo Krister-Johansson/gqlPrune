@@ -2,9 +2,16 @@
 // Copyright (c) 2023 Krister Johansson
 
 export interface GqlPruneConfig {
-  /** Directory (or directories) containing your `.gql`/`.graphql` files. */
+  /**
+   * Directory (or directories) containing your `.gql`/`.graphql` files. An
+   * entry may also be a glob pattern, expanded to the directories it matches
+   * before the scan (see the README for examples).
+   */
   graphqlDir: string | string[];
-  /** Directory (or directories) containing your source files. */
+  /**
+   * Directory (or directories) containing your source files. Accepts glob
+   * patterns like `graphqlDir`.
+   */
   srcDir: string | string[];
   /**
    * Glob patterns (gitignore-flavored) for files and folders to skip during
@@ -35,6 +42,13 @@ export interface GqlPruneConfig {
    */
   fragmentUsagePatterns?: string[];
   /**
+   * Path to a local SDL file (e.g. `./schema.graphql`). Opt-in: when set,
+   * operations and fragments are also checked against the schema's
+   * `@deprecated` fields and enum values. Omit it and the scan stays entirely
+   * schema-free.
+   */
+  schemaFile?: string;
+  /**
    * Opt in to the advisory field-candidate list: response keys selected by a
    * used operation (or a fragment it reaches) whose name appears nowhere in the
    * scanned source. Off by default, and never changes the exit code. Set to
@@ -56,6 +70,7 @@ export type CliConfig = Partial<
     | 'exclude'
     | 'usagePatterns'
     | 'fragmentUsagePatterns'
+    | 'schemaFile'
     | 'checkFields'
   >
 > & { excludedFolders?: string[] };

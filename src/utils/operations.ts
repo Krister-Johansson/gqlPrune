@@ -21,9 +21,10 @@ export type GraphqlFileEntities = {
   /** Whether the file defines an operation without a name. */
   hasAnonymousOperation: boolean;
   /**
-   * The parsed document, so a later pass can walk the selection sets without
-   * re-parsing the file. Node locations carry the file path (the document was
-   * parsed from a named `Source`). `null` when the file failed to parse.
+   * The parsed document, tagged with the file path as its source name, or
+   * `null` when the file failed to parse. Kept so later passes can walk the
+   * selection sets without re-parsing, and so the opt-in schema checks can
+   * validate the corpus and map findings back to the right file.
    */
   document: DocumentNode | null;
 };
@@ -71,10 +72,10 @@ export function getFragmentSpreads(node: ASTNode): string[] {
 /**
  * Parses a GraphQL file and extracts its named operations, fragment
  * definitions, the fragment-spread edges between them, and the documents it
- * pulls in via `#import`. Schema-free.
+ * pulls in via `#import`, plus the parsed document itself. Schema-free.
  *
  * @param {string} filePath - The path to the GraphQL file.
- * @returns {GraphqlFileEntities} - Operations, fragments, spread edges, imports.
+ * @returns {GraphqlFileEntities} - Operations, fragments, spread edges, imports, document.
  */
 export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   // Imports are read off the raw text before parsing, so a document that other
@@ -83,8 +84,9 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     imports = extractImports(content, filePath);
-    // Naming the Source puts the file path on every node's location, so later
-    // passes can report where a selection lives without extra bookkeeping.
+    // Naming the Source after the file makes every node's location carry the
+    // path, so a selection or a validation error can be reported against the
+    // right file without extra bookkeeping.
     const ast = parse(new Source(content, filePath));
     const operations: OperationInfo[] = [];
     const fragments: FragmentInfo[] = [];

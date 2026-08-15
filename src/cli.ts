@@ -6,11 +6,25 @@ import kleur from 'kleur';
 import { generateConfig } from './core/configGenerator.js';
 import { escapeAnnotationMessage, mainFunction } from './core/gqlPruner.js';
 import { formatHelp, parseArgs } from './utils/args.js';
+import {
+  completionScript,
+  completionUsage,
+  isShell,
+} from './utils/completions.js';
 import { notifyUpdate } from './utils/updateNotifier.js';
 import { pkg } from './utils/pkgInfo.js';
 
-const { command, json, annotate, version, verbose, help, errors, config } =
-  parseArgs(process.argv.slice(2));
+const {
+  command,
+  commandArg,
+  json,
+  annotate,
+  version,
+  verbose,
+  help,
+  errors,
+  config,
+} = parseArgs(process.argv.slice(2));
 const annotateMode = annotate || process.env.GITHUB_ACTIONS === 'true';
 
 /**
@@ -44,6 +58,21 @@ async function run(): Promise<void> {
 
   if (version) {
     console.log(pkg.version);
+    return;
+  }
+
+  // Shells eval this output at startup, so it returns before the update check:
+  // both stdout and stderr stay clean on this path.
+  if (command === 'completion') {
+    if (!isShell(commandArg)) {
+      reportUsageErrors(
+        commandArg === undefined
+          ? [completionUsage()]
+          : [`Unsupported shell: ${commandArg}`, completionUsage()],
+      );
+      return;
+    }
+    console.log(completionScript(commandArg));
     return;
   }
 
