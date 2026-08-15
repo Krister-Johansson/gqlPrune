@@ -59,10 +59,21 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false # never cache in release builds
-      # Trusted Publishing requires npm >= 11.5.1; upgrade regardless of the
-      # bundled version. Pinned exactly (Scorecard Pinned-Dependencies); bump
-      # deliberately when a newer npm is needed.
-      - run: npm install -g npm@12.0.2
+      # Trusted Publishing requires npm >= 11.5.1. Recent Node 24.x bundles a
+      # satisfying npm, so no self-install is needed (and none would be
+      # hash-pinnable); assert the floor instead of assuming it.
+      - name: Assert npm >= 11.5.1 (Trusted Publishing floor)
+        run: |
+          V="$(npm --version)"
+          node -e "
+            const need = [11, 5, 1];
+            const got = process.argv[1].split('.').map(Number);
+            const cmp = got[0] - need[0] || got[1] - need[1] || got[2] - need[2];
+            if (cmp < 0) {
+              console.error('npm ' + process.argv[1] + ' is below the Trusted Publishing floor 11.5.1');
+              process.exit(1);
+            }
+          " "$V"
       - run: npm ci
       # prepublishOnly (build + tests) runs as the pre-publish gate.
       - run: npm publish --access public
