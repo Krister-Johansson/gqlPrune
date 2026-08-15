@@ -221,6 +221,14 @@ function reportOrphanedFiles(orphanedFiles: string[]): void {
   );
 }
 
+/**
+ * Closing line of the human-readable report. Usage is detected by string search,
+ * so a finding is a candidate rather than proof: names built dynamically, or
+ * referenced outside `srcDir` or from another repository, look unused here.
+ */
+export const CANDIDATE_REMINDER =
+  'These are candidates from a string search. Verify each one before deleting.';
+
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
   unusedOperations: {
@@ -830,6 +838,7 @@ export function mainFunction(
   if (orphanedFiles.length > 0) {
     reportOrphanedFiles(orphanedFiles);
   }
+  console.log(kleur.dim(CANDIDATE_REMINDER));
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
   process.exitCode = 1;

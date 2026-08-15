@@ -7,6 +7,7 @@ import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import {
   buildJsonReport,
+  CANDIDATE_REMINDER,
   createConfigExcludeMatcher,
   DEFAULT_EXCLUDED_FOLDERS,
   detectGeneratedFiles,
@@ -1070,6 +1071,49 @@ describe('gqlPruner', () => {
       expect(process.exitCode).toBe(1);
       expect(logged()).toContain('DeadFragment');
       expect(logged()).toContain('unused GraphQL fragments');
+      expect(logged()).toContain(CANDIDATE_REMINDER);
+    });
+
+    it('reminds that findings are candidates once there are findings', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+      const lines = logSpy.mock.calls.flat().map(String);
+      const reminders = lines.filter((line) =>
+        line.includes(CANDIDATE_REMINDER),
+      );
+      expect(reminders).toHaveLength(1);
+      // It closes the report, after the table it qualifies.
+      expect(lines.indexOf(reminders[0])).toBe(lines.length - 1);
+    });
+
+    it('omits the candidates reminder when nothing is unused', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction();
+      expect(logged()).not.toContain(CANDIDATE_REMINDER);
     });
 
     it('lists orphaned files after the fragments section', () => {
@@ -1195,6 +1239,8 @@ describe('gqlPruner', () => {
       expect(process.exitCode).toBe(1);
       const out = logged();
       expect(out).not.toContain('Found ');
+      // stdout stays pure JSON: no human-readable reminder leaks into it.
+      expect(out).not.toContain(CANDIDATE_REMINDER);
       const report = JSON.parse(out);
       expect(report.unusedOperations).toEqual([
         { name: 'Unused', type: 'query', file: 'a.gql', line: 2 },

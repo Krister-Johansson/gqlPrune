@@ -12,7 +12,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/13364/baseline)](https://www.bestpractices.dev/projects/13364)
 
-`gqlPrune` finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by an operation or referenced in source. It does not need a running server or a schema.
+`gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
 
 ## Migrating from 1.x to 2.0
 
@@ -62,6 +62,26 @@ gqlPrune guards against this. When one source file alone references most of your
 > ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.
 
 Add it to `exclude` (for example `'**/*.generated.ts'`) and re-run, or run `gqlprune init`, which detects such a file and pre-fills it into `exclude` for you. The warning goes to stderr (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
+
+## Limitations
+
+### Operations and fragments, not fields
+
+gqlPrune reports whole operations and fragments that nothing references. It does not look inside an operation that is used, so a field the operation selects but the app never reads (over-fetching) is not reported. Deciding that requires a schema and data-flow analysis, which is why it sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
+
+### Results are candidates, not proof
+
+Usage detection is a string search over `srcDir`. An operation is reported as unused when none of its search strings appear there, and that is not the same as the operation being unreachable. Three cases produce false positives:
+
+- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the literal name never appears in the source.
+- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not read (it reads `.ts`, `.tsx`, `.js`, and `.jsx`).
+- Another repository consumes it, for example a shared GraphQL package that several applications import.
+
+Check each finding before you delete it. `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
+
+### Generated code can hide findings
+
+The opposite failure also happens: codegen output inside `srcDir` references every operation, so everything looks used and nothing is reported. gqlPrune warns you when it spots this; see [Avoiding false "all clear" results](#avoiding-false-all-clear-results).
 
 ## Setup
 
@@ -250,7 +270,11 @@ FragmentName    fragmentFile.gql
 --- Orphaned GraphQL Files ---
 File
 graphql/deadFile.gql
+
+These are candidates from a string search. Verify each one before deleting.
 ```
+
+The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints only when there is something to report, and never in `--json` mode.
 
 ## Contributing
 
