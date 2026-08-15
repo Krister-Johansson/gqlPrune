@@ -134,3 +134,6 @@ dist/**
 
 # Local research artifacts (kept locally, not committed for now)
 docs/research/
+
+# Temporary agent worktrees
+.claude/worktrees/
