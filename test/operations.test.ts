@@ -64,6 +64,15 @@ describe('operationUtils', () => {
       );
     });
 
+    it('keeps the parsed document, with the file path on node locations', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('query GetUser { id }');
+      const r = extractGraphqlEntities('graphql/user.gql');
+      expect(r.document?.definitions).toHaveLength(1);
+      // The named Source is what lets a later pass attribute a selection to
+      // its file without threading the path through every call.
+      expect(r.document?.loc?.source.name).toBe('graphql/user.gql');
+    });
+
     it('collects spreads from anonymous operations too', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'query { ...Anon }\nfragment Anon on T { id }',
@@ -80,6 +89,7 @@ describe('operationUtils', () => {
         fragments: [],
         operationSpreads: [],
         fragmentSpreads: [],
+        document: null,
       });
     });
   });

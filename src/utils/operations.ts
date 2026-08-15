@@ -2,7 +2,7 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
-import { ASTNode, parse, visit } from 'graphql';
+import { ASTNode, DocumentNode, parse, Source, visit } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 
@@ -13,6 +13,12 @@ export type GraphqlFileEntities = {
   operationSpreads: string[];
   /** Per-fragment direct fragment-spread dependencies. */
   fragmentSpreads: { name: string; spreads: string[] }[];
+  /**
+   * The parsed document, so a later pass can walk the selection sets without
+   * re-parsing the file. Node locations carry the file path (the document was
+   * parsed from a named `Source`). `null` when the file failed to parse.
+   */
+  document: DocumentNode | null;
 };
 
 /**
@@ -42,7 +48,9 @@ export function getFragmentSpreads(node: ASTNode): string[] {
 export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const ast = parse(content);
+    // Naming the Source puts the file path on every node's location, so later
+    // passes can report where a selection lives without extra bookkeeping.
+    const ast = parse(new Source(content, filePath));
     const operations: OperationInfo[] = [];
     const fragments: FragmentInfo[] = [];
     const operationSpreads = new Set<string>();
@@ -79,6 +87,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragments,
       operationSpreads: [...operationSpreads],
       fragmentSpreads,
+      document: ast,
     };
   } catch (error) {
     console.error(`Error parsing GraphQL file: ${filePath}`);
@@ -92,6 +101,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragments: [],
       operationSpreads: [],
       fragmentSpreads: [],
+      document: null,
     };
   }
 }

@@ -32,6 +32,7 @@ Flags:
   --ignore <folder>         Deprecated: use --exclude instead
   --pattern <template>      Operation usage pattern, e.g. use{Name}{Type} (repeatable)
   --fragment-pattern <t>    Fragment usage pattern, e.g. {Name}FragmentDoc (repeatable)
+  --fields                  Also list selected fields whose name appears nowhere in the source (candidates)
   --json                    Print a machine-readable JSON report on stdout
   --annotate                Emit GitHub Actions ::warning annotations (auto in Actions)
   --verbose                 Explain each verdict on stderr
@@ -47,9 +48,10 @@ Docs: https://github.com/Krister-Johansson/gqlPrune#readme`;
  * Parses CLI arguments (everything after the node binary and script path).
  *
  * Recognizes the optional `init` command, the boolean `--json` / `--annotate`
- * / `--verbose` / `--help` flags, and value flags that mirror the config file:
- * the repeatable `--graphql`, `--src`, `--exclude`, `--ignore`, `--pattern`,
- * `--fragment-pattern`. Value flags accept both `--flag value` and
+ * / `--verbose` / `--help` flags, and flags that mirror the config file: the
+ * repeatable `--graphql`, `--src`, `--exclude`, `--ignore`, `--pattern`,
+ * `--fragment-pattern`, plus the boolean `--fields` (which sets
+ * `checkFields`). Value flags accept both `--flag value` and
  * `--flag=value`, in any order. A value is never mistaken for the positional
  * command. Unknown flags, flags missing their value, and stray positional
  * arguments are collected into `errors` rather than silently dropped — the
@@ -73,6 +75,7 @@ export function parseArgs(argv: string[]): CliOptions {
   let version = false;
   let verbose = false;
   let help = false;
+  let checkFields = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -113,6 +116,9 @@ export function parseArgs(argv: string[]): CliOptions {
         break;
       case '--verbose':
         verbose = true;
+        break;
+      case '--fields':
+        checkFields = true;
         break;
       case '--version':
       case '-v':
@@ -177,6 +183,9 @@ export function parseArgs(argv: string[]): CliOptions {
   if (fragmentUsagePatterns.length > 0) {
     config.fragmentUsagePatterns = fragmentUsagePatterns;
   }
+  // Only set when the flag is present, so it overrides `checkFields: false` in
+  // the config file without an absent flag turning an enabled check back off.
+  if (checkFields) config.checkFields = true;
 
   return { command, json, annotate, version, verbose, help, errors, config };
 }

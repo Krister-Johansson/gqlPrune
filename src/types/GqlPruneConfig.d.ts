@@ -34,6 +34,13 @@ export interface GqlPruneConfig {
    * rely only on fragment-spread reachability.
    */
   fragmentUsagePatterns?: string[];
+  /**
+   * Opt in to the advisory field-candidate list: response keys selected by a
+   * used operation (or a fragment it reaches) whose name appears nowhere in the
+   * scanned source. Off by default, and never changes the exit code. Set to
+   * `true`, or pass `--fields`.
+   */
+  checkFields?: boolean;
 }
 
 /**
@@ -49,5 +56,6 @@ export type CliConfig = Partial<
     | 'exclude'
     | 'usagePatterns'
     | 'fragmentUsagePatterns'
+    | 'checkFields'
   >
 > & { excludedFolders?: string[] };

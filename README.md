@@ -45,6 +45,27 @@ If your project uses a different convention (urql, react-query, graphql-request,
 
 A fragment spread only by another unused fragment is reported too. Note that a fragment is kept alive by any operation that spreads it, even an unused one. That operation is reported separately, so the fragment surfaces on the next run once you remove the operation.
 
+### Field candidates (opt-in)
+
+Operations and fragments are the default unit of detection. Pass `--fields` (or set `checkFields: true` in the config) to also get an advisory list of individual fields your app may be selecting without ever reading:
+
+```bash
+npx gqlprune --fields
+```
+
+gqlPrune collects the response key of every field selected by a **used** operation, and by the fragments those operations reach through the spread graph. The response key is the alias when a field is aliased (`nickname: displayName` contributes `nickname`), otherwise the field name. `__typename` is always skipped, and so are the fields of operations and fragments that are already reported unused, since those are reported whole.
+
+A key becomes a candidate when it appears **nowhere** in any scanned source file. The test is a case-sensitive whole-word match, `\bkey\b`, so `id` matches `data.id` but not `video`.
+
+The list is advisory. It prints after the other sections, adds `unusedFields` to the JSON report, emits one `::warning` annotation per key, and never changes the exit code.
+
+Read it as a starting shortlist, not a verdict. A string search cannot see how your code consumes data, and this check errs in both directions:
+
+- It flags fields you do use. A field read through a renamed binding (`const { avatarUrl: avatar } = user`), spread into props (`<Avatar {...user} />`), serialized whole, or consumed by a different repository never appears by name in `srcDir`.
+- It stays quiet about fields you don't use. A field with a common name (`id`, `name`, `title`, `url`) matches somewhere in any real codebase, so it can never be flagged, even when it is genuinely dead.
+
+Removing a field also changes the response shape for every consumer of that operation, which no schema-free tool can check for you. Verify each candidate by hand before trimming it.
+
 ### Avoiding false "all clear" results
 
 Because usage is detected by string-matching `srcDir`, GraphQL Code Generator output that lives inside `srcDir` is a trap: a single generated file (such as `src/gql/graphql.ts`) references every operation, so everything looks used and nothing is ever reported unused, with no error to tell you so.
@@ -96,6 +117,9 @@ usagePatterns:
 # Supports {name}, {Name} placeholders.
 fragmentUsagePatterns:
   - '{Name}FragmentDoc'
+# Optional: also list selected fields whose name appears nowhere in srcDir.
+# Advisory only; off by default.
+checkFields: true
 ```
 
 - `graphqlDir`: directory, or an array of directories, containing your `.gql`/`.graphql` files.
@@ -104,6 +128,7 @@ fragmentUsagePatterns:
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
+- `checkFields` (optional): set to `true` to add the advisory [field candidates](#field-candidates-opt-in) list. Off by default.
 
 For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a list of directories:
 
@@ -132,6 +157,7 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--ignore <folder>` _(repeatable, deprecated in favor of `--exclude`)_ | `excludedFolders`       |
 | `--pattern <template>` _(repeatable)_                                  | `usagePatterns`         |
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
+| `--fields`                                                             | `checkFields`           |
 
 Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
 
@@ -177,6 +203,22 @@ npx gqlprune --json
 
 Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none.
 
+With `--fields`, the report gains an `unusedFields` array and a matching `summary.unusedFields` count:
+
+```json
+{
+  "unusedFields": [
+    {
+      "field": "avatarUrl",
+      "locations": [{ "file": "graphql/user.gql", "line": 4 }]
+    }
+  ],
+  "summary": { "unusedOperations": 0, "unusedFragments": 0, "unusedFields": 1 }
+}
+```
+
+Both keys are absent without the flag, so a consumer can tell "nothing found" from "never checked". One entry lists every place that key is selected.
+
 ### Verbose output
 
 Pass `--verbose` to see why each operation was judged used or unused: the resolved configuration, the files scanned, and for each operation the exact search string that matched and the file it matched in.
@@ -213,7 +255,7 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), so they show up on the PR's Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate
@@ -237,6 +279,15 @@ query    OperationName   operationFile.gql
 --- Unused GraphQL Fragments ---
 Fragment        File
 FragmentName    fragmentFile.gql
+```
+
+With `--fields`, a third section follows with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row:
+
+```bash
+--- Unused Field Candidates ---
+Field       Selected in
+avatarUrl   graphql/user.gql:4
+            graphql/post.gql:9
 ```
 
 ## Contributing

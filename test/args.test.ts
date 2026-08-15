@@ -69,6 +69,30 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --fields into the config as checkFields', () => {
+    expect(parseArgs(['--fields'])).toEqual({
+      command: undefined,
+      json: false,
+      annotate: false,
+      version: false,
+      verbose: false,
+      help: false,
+      errors: [],
+      config: { checkFields: true },
+    });
+  });
+
+  it('leaves checkFields unset when --fields is absent', () => {
+    expect(parseArgs(['--json']).config).toEqual({});
+  });
+
+  it('combines --fields with other flags', () => {
+    const result = parseArgs(['--fields', '--json', '--src', './src']);
+    expect(result.config.checkFields).toBe(true);
+    expect(result.json).toBe(true);
+    expect(result.config.srcDir).toBe('./src');
+  });
+
   it('combines --verbose with other flags', () => {
     const result = parseArgs(['--verbose', '--json']);
     expect(result.verbose).toBe(true);
@@ -241,6 +265,7 @@ describe('formatHelp', () => {
       '--ignore',
       '--pattern',
       '--fragment-pattern',
+      '--fields',
       '--json',
       '--annotate',
       '--verbose',

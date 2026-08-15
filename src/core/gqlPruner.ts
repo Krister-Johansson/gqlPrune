@@ -7,6 +7,7 @@ import * as yaml from 'js-yaml';
 import path from 'path';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
+import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
@@ -27,6 +28,7 @@ import {
   GraphqlFileEntities,
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { findUnusedFieldCandidates } from '../utils/fields.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -101,6 +103,14 @@ export function resolveFragmentUsagePatterns(config: GqlPruneConfig): string[] {
   return Array.isArray(config.fragmentUsagePatterns)
     ? config.fragmentUsagePatterns
     : DEFAULT_FRAGMENT_USAGE_PATTERNS;
+}
+
+/**
+ * Whether the opt-in field-candidate check runs. Strictly boolean `true`, so a
+ * stray YAML value never silently enables an advisory scan of every selection.
+ */
+export function resolveCheckFields(config: GqlPruneConfig): boolean {
+  return config.checkFields === true;
 }
 
 /**
@@ -207,6 +217,52 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
+/** Formats one selection location as `file:line`, or just the file. */
+function formatFieldLocation(location: {
+  file: string;
+  line?: number;
+}): string {
+  return location.line ? `${location.file}:${location.line}` : location.file;
+}
+
+/**
+ * Prints the advisory table of field candidates: one row per selection, with
+ * the key shown on its first row only.
+ */
+function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
+  const maxFieldLength = Math.max(
+    'Field'.length,
+    ...candidates.map((candidate) => candidate.field.length),
+  );
+
+  console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
+  console.log('Field'.padEnd(maxFieldLength), 'Selected in');
+  candidates.forEach((candidate) => {
+    candidate.locations.forEach((location, index) => {
+      const label = index === 0 ? candidate.field : '';
+      console.log(
+        `${kleur.cyan(label.padEnd(maxFieldLength))} ${kleur.magenta(
+          formatFieldLocation(location),
+        )}`,
+      );
+    });
+  });
+  console.log(kleur.blue('-------------------------------'));
+  console.log(
+    kleur.yellow(
+      `Found ${candidates.length} field candidates whose name appears nowhere in the source.`,
+    ),
+  );
+  console.log(
+    kleur.dim(
+      'These are string-search candidates, not proof: a field renamed while ' +
+        'destructuring, spread into props, or read by another repository looks ' +
+        'the same, and a field with a common name never reaches this list. ' +
+        'Verify each one before trimming it.',
+    ),
+  );
+}
+
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
   unusedOperations: {
@@ -216,16 +272,30 @@ export type JsonReport = {
     line?: number;
   }[];
   unusedFragments: { name: string; file: string; line?: number }[];
+  /**
+   * Field candidates. Present only when the opt-in check ran, so an absent key
+   * means "not checked" rather than "nothing found".
+   */
+  unusedFields?: UnusedFieldInfo[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
-  summary: { unusedOperations: number; unusedFragments: number };
+  summary: {
+    unusedOperations: number;
+    unusedFragments: number;
+    unusedFields?: number;
+  };
 };
 
-/** Builds the structured report for `--json` output. */
+/**
+ * Builds the structured report for `--json` output. `unusedFields` is omitted
+ * entirely when the opt-in field check did not run. An empty array would claim
+ * a clean result the scan never looked for.
+ */
 export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
+  unusedFields?: UnusedFieldInfo[],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -239,10 +309,12 @@ export function buildJsonReport(
       file: fragment.filePath,
       line: fragment.line,
     })),
+    ...(unusedFields ? { unusedFields } : {}),
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
+      ...(unusedFields ? { unusedFields: unusedFields.length } : {}),
     },
   };
 }
@@ -267,11 +339,13 @@ function escapeAnnotationProperty(value: string): string {
 
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
- * fragments, so they surface inline on a PR. Omits the line when unknown.
+ * fragments, so they surface inline on a PR. Omits the line when unknown. Field
+ * candidates get one annotation each, pinned to their first selection.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
+  unusedFields: UnusedFieldInfo[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -297,6 +371,13 @@ export function formatAnnotations(
         fragment.filePath,
         fragment.line,
         `Unused GraphQL fragment "${fragment.name}"`,
+      ),
+    ),
+    ...unusedFields.map((candidate) =>
+      annotate(
+        candidate.locations[0].file,
+        candidate.locations[0].line,
+        `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
       ),
     ),
   ];
@@ -522,6 +603,11 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /**
+   * Advisory field candidates. Always empty unless `checkFields` is on: the
+   * detection does not run at all when the option is off.
+   */
+  unusedFieldCandidates: UnusedFieldInfo[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -618,6 +704,15 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operations,
     usagePatterns,
   );
+  // Opt-in: skip the whole pass (and its per-key source sweep) when it is off.
+  const unusedFieldCandidates = resolveCheckFields(config)
+    ? findUnusedFieldCandidates(
+        parsedFiles,
+        unusedOperations,
+        unusedFragments,
+        sources,
+      )
+    : [];
 
   return {
     gqlFileCount: gqlFiles.length,
@@ -627,6 +722,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationUsages,
     unusedOperations,
     unusedFragments,
+    unusedFieldCandidates,
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -704,9 +800,15 @@ export function mainFunction(
     operationCount,
     unusedOperations,
     unusedFragments,
+    unusedFieldCandidates,
     duplicateWarnings,
     generatedWarnings,
   } = result;
+  // Absent (not empty) in the JSON when the check is off, so a consumer can
+  // tell "nothing found" from "never looked".
+  const fieldCandidates = resolveCheckFields(config)
+    ? unusedFieldCandidates
+    : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
   const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
@@ -743,7 +845,11 @@ export function mainFunction(
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
   if (annotate) {
-    for (const line of formatAnnotations(unusedOperations, unusedFragments)) {
+    for (const line of formatAnnotations(
+      unusedOperations,
+      unusedFragments,
+      unusedFieldCandidates,
+    )) {
       console.error(line);
     }
   }
@@ -751,7 +857,12 @@ export function mainFunction(
   if (json) {
     console.log(
       JSON.stringify(
-        buildJsonReport(unusedOperations, unusedFragments, advisoryWarnings),
+        buildJsonReport(
+          unusedOperations,
+          unusedFragments,
+          advisoryWarnings,
+          fieldCandidates,
+        ),
         null,
         2,
       ),
@@ -763,20 +874,24 @@ export function mainFunction(
     return;
   }
 
-  if (unusedOperations.length === 0 && unusedFragments.length === 0) {
-    console.log(
-      kleur.green('\n✓ No unused GraphQL operations or fragments found.'),
-    );
-    return;
-  }
-
   if (unusedOperations.length > 0) {
     reportUnusedOperations(unusedOperations);
   }
   if (unusedFragments.length > 0) {
     reportUnusedFragments(unusedFragments);
   }
+  if (unusedOperations.length === 0 && unusedFragments.length === 0) {
+    console.log(
+      kleur.green('\n✓ No unused GraphQL operations or fragments found.'),
+    );
+  }
+  // Advisory, so it prints last and never contributes to the exit code.
+  if (unusedFieldCandidates.length > 0) {
+    reportUnusedFieldCandidates(unusedFieldCandidates);
+  }
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
-  process.exitCode = 1;
+  if (unusedOperations.length > 0 || unusedFragments.length > 0) {
+    process.exitCode = 1;
+  }
 }
