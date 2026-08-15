@@ -618,7 +618,7 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
  * printing anything. Shared by `mainFunction` (which presents the results) and
  * `gqlprune init`'s preview, so the preview always reflects the real run.
  *
- * The optional `schema` enables the deprecated-field check. It is passed in
+ * The optional `schema` enables the deprecated-usage check. It is passed in
  * already built rather than read from `config.schemaFile` here, so that reading
  * and building it (and failing the run when it is unusable) stays in
  * `mainFunction`, and callers such as `init`'s preview keep a scan that never
@@ -772,7 +772,9 @@ export function mainFunction(
       schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
     } catch (e) {
       console.error(
-        kleur.red(`Could not read the GraphQL schema file: ${schemaFile}.`),
+        kleur.red(
+          `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
+        ),
       );
       console.error(e);
       process.exit(2);

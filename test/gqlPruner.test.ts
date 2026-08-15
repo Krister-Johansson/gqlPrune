@@ -1607,7 +1607,9 @@ describe('gqlPruner', () => {
 
       expect(() => mainFunction()).toThrow('process.exit:2');
       const errs = errorSpy.mock.calls.flat().join('\n');
-      expect(errs).toContain('./schema.graphql');
+      expect(errs).toContain(
+        'Could not read or parse the GraphQL schema file: ./schema.graphql.',
+      );
     });
 
     it('exits 2 when the schema file is not valid SDL', () => {
@@ -1618,8 +1620,10 @@ describe('gqlPruner', () => {
       mockedDirExists.mockReturnValue(true);
 
       expect(() => mainFunction()).toThrow('process.exit:2');
+      // The same message covers both failures: the file is read and parsed in
+      // one step, so invalid SDL must not be reported as unreadable.
       expect(errorSpy.mock.calls.flat().join('\n')).toContain(
-        './schema.graphql',
+        'Could not read or parse the GraphQL schema file: ./schema.graphql.',
       );
     });
 

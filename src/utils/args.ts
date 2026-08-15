@@ -32,7 +32,7 @@ Flags:
   --ignore <folder>         Deprecated: use --exclude instead
   --pattern <template>      Operation usage pattern, e.g. use{Name}{Type} (repeatable)
   --fragment-pattern <t>    Fragment usage pattern, e.g. {Name}FragmentDoc (repeatable)
-  --schema <file>           Local SDL file; also flags @deprecated field usage
+  --schema <file>           Local SDL file; also flags @deprecated field and enum usage
   --json                    Print a machine-readable JSON report on stdout
   --annotate                Emit GitHub Actions ::warning annotations (auto in Actions)
   --verbose                 Explain each verdict on stderr
