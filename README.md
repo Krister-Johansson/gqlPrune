@@ -97,6 +97,8 @@ npx gqlprune init
 ✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.
 ```
 
+If your files sit under several top-level directories, as in a monorepo, `init` shows a checklist of those directories instead of defaulting to the project root. Every entry starts ticked; untick the ones you do not want. One directory is written as a string, several as a list. Untick everything and you get the plain path question back, with the project root as the default.
+
 If a `gqlPrune.config.yaml` already exists, `init` asks before overwriting it (defaulting to No), so an existing hand-tuned config is never clobbered by accident.
 
 ```yaml
