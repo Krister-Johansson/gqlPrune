@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.12.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.2...gqlprune-v2.12.0) (2026-08-15)
+
+
+### Features
+
+* **cli:** add a completion subcommand for bash, zsh, and fish ([#136](https://github.com/Krister-Johansson/gqlPrune/issues/136)) ([3ecbe7d](https://github.com/Krister-Johansson/gqlPrune/commit/3ecbe7dac30a848da00975a088c77c0d9e9193c0))
+* **cli:** remind that findings are candidates to verify ([#131](https://github.com/Krister-Johansson/gqlPrune/issues/131)) ([1020892](https://github.com/Krister-Johansson/gqlPrune/commit/10208925456cb79053df1f2bee7cab60b5215add))
+* **config:** expand glob patterns in graphqlDir and srcDir ([#135](https://github.com/Krister-Johansson/gqlPrune/issues/135)) ([4ccae89](https://github.com/Krister-Johansson/gqlPrune/commit/4ccae893d7bf06cf959f93d9b4789dc06b581a23))
+* **init:** offer a checklist of roots for multi-root layouts ([#133](https://github.com/Krister-Johansson/gqlPrune/issues/133)) ([f7edd75](https://github.com/Krister-Johansson/gqlPrune/commit/f7edd752c97625d5ffe7a3acb02a3b8a22dcbf64))
+* **scan:** detect deprecated-field usage via a local SDL ([#134](https://github.com/Krister-Johansson/gqlPrune/issues/134)) ([ffb935f](https://github.com/Krister-Johansson/gqlPrune/commit/ffb935fda659f9e08d7dc631647a7a31113a5277))
+* **scan:** detect orphaned GraphQL files ([#132](https://github.com/Krister-Johansson/gqlPrune/issues/132)) ([041ec8d](https://github.com/Krister-Johansson/gqlPrune/commit/041ec8df1a9775ed3a5aa33646b434f4ced89911))
+* **scan:** opt-in unused-field candidates via --fields ([#138](https://github.com/Krister-Johansson/gqlPrune/issues/138)) ([08503a4](https://github.com/Krister-Johansson/gqlPrune/commit/08503a4044ac479e2dd5ea348ff03dd107202521))
+
 ## [2.11.2](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.1...gqlprune-v2.11.2) (2026-08-15)
 
 
