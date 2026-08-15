@@ -6,9 +6,18 @@ import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 import { GraphqlFileEntities } from './operations.js';
 
-/** Keys a definition by file and name, so same-named definitions stay distinct. */
-function definitionKey(filePath: string, name: string): string {
-  return `${path.resolve(filePath)}::${name}`;
+/**
+ * Keys a definition by kind, file and name, so same-named definitions stay
+ * distinct. Operations and fragments are separate GraphQL namespaces, so a
+ * `query Foo` and a `fragment Foo` in one file must not share a key.
+ */
+function definitionKey(
+  kind: 'operation' | 'fragment',
+  filePath: string,
+  name: string,
+): string {
+  const prefix = kind === 'operation' ? 'op' : 'frag';
+  return `${prefix}::${path.resolve(filePath)}::${name}`;
 }
 
 /**
@@ -36,9 +45,11 @@ export function findOrphanedFiles(
   unusedFragments: FragmentInfo[],
 ): string[] {
   const unused = new Set([
-    ...unusedOperations.map((op) => definitionKey(op.filePath, op.name)),
+    ...unusedOperations.map((op) =>
+      definitionKey('operation', op.filePath, op.name),
+    ),
     ...unusedFragments.map((fragment) =>
-      definitionKey(fragment.filePath, fragment.name),
+      definitionKey('fragment', fragment.filePath, fragment.name),
     ),
   ]);
 
@@ -59,11 +70,22 @@ export function findOrphanedFiles(
   return parsedFiles
     .filter((file) => {
       if (file.hasAnonymousOperation) return false;
-      const definitions = [...file.operations, ...file.fragments];
+      const definitions: { kind: 'operation' | 'fragment'; name: string }[] = [
+        ...file.operations.map((op) => ({
+          kind: 'operation' as const,
+          name: op.name,
+        })),
+        ...file.fragments.map((fragment) => ({
+          kind: 'fragment' as const,
+          name: fragment.name,
+        })),
+      ];
       if (definitions.length === 0) return false;
       if (imported.has(path.resolve(file.filePath))) return false;
       return definitions.every((definition) =>
-        unused.has(definitionKey(file.filePath, definition.name)),
+        unused.has(
+          definitionKey(definition.kind, file.filePath, definition.name),
+        ),
       );
     })
     .map((file) => file.filePath);

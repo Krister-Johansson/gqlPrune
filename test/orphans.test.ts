@@ -145,6 +145,32 @@ describe('orphans', () => {
       ).toEqual([]);
     });
 
+    it('keys unused definitions by kind as well as file and name', () => {
+      // Operations and fragments are separate namespaces: the unused query
+      // "Shared" must not make the still-used fragment "Shared" look dead.
+      const files = [
+        parsed('g/both.gql', {
+          operations: [op('Shared', 'g/both.gql')],
+          fragments: [frag('Shared', 'g/both.gql')],
+        }),
+      ];
+      expect(
+        findOrphanedFiles(files, [op('Shared', 'g/both.gql')], []),
+      ).toEqual([]);
+    });
+
+    it('does not let an unused fragment stand in for a used operation', () => {
+      const files = [
+        parsed('g/both.gql', {
+          operations: [op('Shared', 'g/both.gql')],
+          fragments: [frag('Shared', 'g/both.gql')],
+        }),
+      ];
+      expect(
+        findOrphanedFiles(files, [], [frag('Shared', 'g/both.gql')]),
+      ).toEqual([]);
+    });
+
     it('returns the flagged files in scan order', () => {
       const files = [
         parsed('g/a.gql', { operations: [op('A', 'g/a.gql')] }),
