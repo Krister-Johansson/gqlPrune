@@ -27,6 +27,8 @@ src/
     fileUtils.ts          findFilesWithExtension, readFileContents, exclusions
     operations.ts         extractOperations (graphql parse) → OperationInfo[]
     fragments.ts          findUnusedFragmentsInCorpus (cross-file spread graph)
+    orphans.ts            findOrphanedFiles (whole-file dead documents)
+    deprecated.ts         findDeprecatedUsages (opt-in, needs a local SDL)
     usagePatterns.ts      DEFAULT_*_PATTERNS, buildUsagePatterns, expandPattern
     stringHelpers.ts      small string utilities
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)
