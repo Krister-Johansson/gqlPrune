@@ -48,7 +48,11 @@ cosign verify-blob \
 ```
 
 The certificate identity must be this repository's sbom.yml workflow running
-on a release tag; treat anything else as compromised, and report it.
+on a release tag; treat anything else as compromised, and report it. One
+exception: releases published before 2.11.2 had their signatures backfilled
+by a manual run of the same workflow, so their identity ends in
+`sbom.yml@refs/heads/main` instead of the tag. From 2.11.2 onward, expect the
+tag form.
 
 ## Reporting a vulnerability
 

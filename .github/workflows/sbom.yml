@@ -13,6 +13,16 @@ name: SBOM
 on:
   release:
     types: [published]
+  # Backfill: run the same pipeline against an existing release, e.g. one
+  # published before signing existed. A dispatch runs from the default branch,
+  # so the signing identity is sbom.yml@refs/heads/main rather than the
+  # release tag; SECURITY.md notes this for pre-2.11.2 releases.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to regenerate, sign, and attach the SBOM for (e.g. gqlprune-v2.11.0)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -26,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
           persist-credentials: false
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
@@ -35,7 +45,7 @@ jobs:
       - name: Generate CycloneDX SBOM for the production tree
         run: npm sbom --sbom-format cyclonedx --omit dev > "gqlprune-${TAG#gqlprune-v}.cdx.json"
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
@@ -62,7 +72,7 @@ jobs:
       - name: Attach SBOM and signature bundle to the release
         run: gh release upload "$TAG" gqlprune-*.cdx.json gqlprune-*.cdx.json.sigstore.json --clobber
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
           # No checkout in this job, so gh needs the repo context explicitly.
           GH_REPO: ${{ github.repository }}
