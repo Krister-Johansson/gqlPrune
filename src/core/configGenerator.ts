@@ -88,6 +88,9 @@ export interface DirDetection {
    * Config-formatted top-level roots worth offering as a checklist. Only filled
    * when detection collapsed to the project root because the files are spread
    * over several roots, which is where a single suggestion is least useful.
+   * A file sitting directly in the project root makes `.` one of those roots,
+   * and `.` already covers every other one, so the checklist is suppressed and
+   * the plain `.` suggestion stands.
    */
   candidates: string[];
 }
@@ -97,14 +100,20 @@ function formatDir(dir: string): string {
   return dir === '.' ? '.' : `./${dir}`;
 }
 
-/** Turns a set of detected files into a suggestion plus multi-root candidates. */
+/**
+ * Turns a set of detected files into a suggestion plus multi-root candidates.
+ * When `.` is itself one of the roots (a file sits directly in the project
+ * root) it subsumes the others, so no checklist is offered and the plain `.`
+ * suggestion stands.
+ */
 function detectFrom(filePaths: string[]): DirDetection {
   const dir = commonParentDir(filePaths);
   if (dir === undefined) return { suggestion: undefined, candidates: [] };
   const roots = dir === '.' ? topLevelRoots(filePaths) : [];
   return {
     suggestion: formatDir(dir),
-    candidates: roots.length > 1 ? roots.map(formatDir) : [],
+    candidates:
+      roots.length > 1 && !roots.includes('.') ? roots.map(formatDir) : [],
   };
 }
 

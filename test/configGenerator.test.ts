@@ -215,6 +215,21 @@ describe('configGenerator', () => {
       });
     });
 
+    it('keeps the plain root suggestion when a .gql file sits in the project root', () => {
+      mockFsTree(
+        {
+          '.': ['root.gql', 'apps', 'packages'],
+          apps: ['a.gql'],
+          packages: ['b.gql'],
+        },
+        new Set(['apps', 'packages']),
+      );
+      expect(detectGraphqlDirs()).toEqual({
+        suggestion: '.',
+        candidates: [],
+      });
+    });
+
     it('returns no suggestion when no GraphQL files exist', () => {
       mockFsTree({ '.': [] }, new Set());
       expect(detectGraphqlDirs()).toEqual({
@@ -243,6 +258,21 @@ describe('configGenerator', () => {
       expect(detectSrcDirs()).toEqual({
         suggestion: '.',
         candidates: ['./apps', './packages'],
+      });
+    });
+
+    it('keeps the plain root suggestion when a source file sits in the project root', () => {
+      mockFsTree(
+        {
+          '.': ['root.ts', 'apps', 'packages'],
+          apps: ['a.ts'],
+          packages: ['b.tsx'],
+        },
+        new Set(['apps', 'packages']),
+      );
+      expect(detectSrcDirs()).toEqual({
+        suggestion: '.',
+        candidates: [],
       });
     });
 
