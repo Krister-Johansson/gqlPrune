@@ -4,7 +4,6 @@
 import fc from 'fast-check';
 import { capitalizeFirstLetter } from '../src/utils/stringHelpers';
 import {
-  buildFragmentPatterns,
   buildUsagePatterns,
   expandPattern,
 } from '../src/utils/usagePatterns';
