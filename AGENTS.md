@@ -1,9 +1,8 @@
 # Working in this repository (agents and humans)
 
-This repo follows the shared setup from
-[Krister-Johansson/shared-configs](https://github.com/Krister-Johansson/shared-configs).
-These rules are binding for AI agents working here; CONTRIBUTING.md is the
-human-facing version.
+This repo owns its GitHub workflows outright (`.github/workflows/`); the
+former shared-configs callers were vendored in #118. These rules are binding
+for AI agents working here; CONTRIBUTING.md is the human-facing version.
 
 ## Workflow rules
 
