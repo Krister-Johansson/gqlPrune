@@ -247,6 +247,31 @@ Contributions are welcome; see [CONTRIBUTING.md](./CONTRIBUTING.md). This projec
 
 See [SECURITY.md](./SECURITY.md) for how to report a vulnerability.
 
+### Verifying a release
+
+Every release is verifiable. The npm package is published through Trusted
+Publishing with Sigstore provenance; check your installed copy with:
+
+```bash
+npm audit signatures
+```
+
+The provenance must name this repository, built by GitHub Actions. Each GitHub
+release also carries a CycloneDX SBOM of the runtime dependency tree, signed
+with keyless cosign; verify it with:
+
+```bash
+cosign verify-blob \
+  --bundle gqlprune-<version>.cdx.json.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/Krister-Johansson/gqlPrune/\.github/workflows/sbom\.yml@refs/tags/gqlprune-v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  gqlprune-<version>.cdx.json
+```
+
+[SECURITY.md](./SECURITY.md) has the full instructions, including the
+certificate identity used for releases published before 2.11.2, whose
+signatures were backfilled.
+
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md).
