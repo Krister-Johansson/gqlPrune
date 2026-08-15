@@ -64,3 +64,5 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job, so gh needs the repo context explicitly.
+          GH_REPO: ${{ github.repository }}
