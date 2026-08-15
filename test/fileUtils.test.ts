@@ -302,6 +302,40 @@ describe('fileUtils', () => {
       );
     });
 
+    it('reports a glob rooted in an always-excluded folder instead of walking it', () => {
+      mockTree({
+        node_modules: ['dep'],
+        'node_modules/dep': ['graphql'],
+      });
+      expect(expandDirPatterns(['node_modules/*/graphql'])).toEqual({
+        dirs: [],
+        unmatched: ['node_modules/*/graphql'],
+      });
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('reports a glob whose base nests an always-excluded folder', () => {
+      mockTree({
+        'vendor/node_modules': ['dep'],
+        'vendor/node_modules/dep': ['graphql'],
+      });
+      expect(expandDirPatterns(['vendor/node_modules/*/graphql'])).toEqual({
+        dirs: [],
+        unmatched: ['vendor/node_modules/*/graphql'],
+      });
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('still passes a literal path inside an always-excluded folder through', () => {
+      mockTree({});
+      // Naming a directory outright is a deliberate choice, and the walk itself
+      // still skips node_modules; only glob expansion is barred from it.
+      expect(expandDirPatterns(['node_modules/dep/graphql'])).toEqual({
+        dirs: ['node_modules/dep/graphql'],
+        unmatched: [],
+      });
+    });
+
     it('de-duplicates matches while keeping walk order', () => {
       mockTree({ packages: ['web'], 'packages/web': ['graphql'] });
       expect(

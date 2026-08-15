@@ -123,7 +123,7 @@ graphqlDir: 'packages/*/graphql'
 srcDir: 'packages/*/src'
 ```
 
-`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
+`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
 ### Without a config file (CLI flags)
 

@@ -190,6 +190,17 @@ function findMatchingDirs(
 }
 
 /**
+ * Whether a glob's static base reaches into a folder that is always excluded,
+ * such as `node_modules/*` or `vendor/node_modules/*`. The base is the part of
+ * the pattern the walk starts from, so it is never filtered by the walk itself.
+ */
+function baseEntersExcludedFolder(base: string): boolean {
+  return base
+    .split('/')
+    .some((segment) => DEFAULT_EXCLUDED_FOLDERS.includes(segment));
+}
+
+/**
  * Expands the glob patterns in a `graphqlDir`/`srcDir` list into the directories
  * they match, leaving plain paths alone.
  *
@@ -198,6 +209,12 @@ function findMatchingDirs(
  * magic is expanded against the filesystem, and is returned in `unmatched` when
  * it matches nothing, because a pattern that quietly scans zero directories is a
  * configuration mistake rather than a clean run.
+ *
+ * A glob whose base is inside `node_modules` or `.git` matches nothing at all:
+ * the walk skips those names as it descends, but it never re-examines the
+ * directory it starts from, so the base has to be checked here. Checking the
+ * base is enough to keep every expanded path clear of them, because no other
+ * segment of a match can be an excluded name.
  *
  * @param {string[]} patterns - The configured directories and glob patterns.
  * @returns {DirExpansion} - The literal directories plus any empty patterns.
@@ -219,6 +236,10 @@ export function expandDirPatterns(patterns: string[]): DirExpansion {
     const { isGlob, base, glob, prefix } = picomatch.scan(pattern);
     if (!isGlob) {
       add(pattern);
+      continue;
+    }
+    if (baseEntersExcludedFolder(base)) {
+      unmatched.push(pattern);
       continue;
     }
     const matches = findMatchingDirs(base, glob, prefix);
