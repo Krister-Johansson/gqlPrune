@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { ASTNode, parse, visit } from 'graphql';
+import { ASTNode, DocumentNode, parse, Source, visit } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 
@@ -20,6 +20,12 @@ export type GraphqlFileEntities = {
   imports: string[];
   /** Whether the file defines an operation without a name. */
   hasAnonymousOperation: boolean;
+  /**
+   * The parsed document, tagged with the file path as its source name, or
+   * `null` when the file failed to parse. Kept so the opt-in schema checks can
+   * validate the corpus and map findings back to the right file.
+   */
+  document: DocumentNode | null;
 };
 
 // A `#import "./other.gql"` line, as understood by graphql-tag's loader and the
@@ -65,10 +71,10 @@ export function getFragmentSpreads(node: ASTNode): string[] {
 /**
  * Parses a GraphQL file and extracts its named operations, fragment
  * definitions, the fragment-spread edges between them, and the documents it
- * pulls in via `#import`. Schema-free.
+ * pulls in via `#import`, plus the parsed document itself. Schema-free.
  *
  * @param {string} filePath - The path to the GraphQL file.
- * @returns {GraphqlFileEntities} - Operations, fragments, spread edges, imports.
+ * @returns {GraphqlFileEntities} - Operations, fragments, spread edges, imports, document.
  */
 export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   // Imports are read off the raw text before parsing, so a document that other
@@ -77,7 +83,9 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     imports = extractImports(content, filePath);
-    const ast = parse(content);
+    // Naming the Source after the file makes every node's location carry the
+    // path, so validation errors can be reported against the right file.
+    const ast = parse(new Source(content, filePath));
     const operations: OperationInfo[] = [];
     const fragments: FragmentInfo[] = [];
     const operationSpreads = new Set<string>();
@@ -120,6 +128,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragmentSpreads,
       imports,
       hasAnonymousOperation,
+      document: ast,
     };
   } catch (error) {
     console.error(`Error parsing GraphQL file: ${filePath}`);
@@ -136,6 +145,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragmentSpreads: [],
       imports,
       hasAnonymousOperation: false,
+      document: null,
     };
   }
 }

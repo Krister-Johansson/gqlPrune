@@ -34,6 +34,13 @@ export interface GqlPruneConfig {
    * rely only on fragment-spread reachability.
    */
   fragmentUsagePatterns?: string[];
+  /**
+   * Path to a local SDL file (e.g. `./schema.graphql`). Opt-in: when set,
+   * operations and fragments are also checked against the schema's
+   * `@deprecated` fields and enum values. Omit it and the scan stays entirely
+   * schema-free.
+   */
+  schemaFile?: string;
 }
 
 /**
@@ -49,5 +56,6 @@ export type CliConfig = Partial<
     | 'exclude'
     | 'usagePatterns'
     | 'fragmentUsagePatterns'
+    | 'schemaFile'
   >
 > & { excludedFolders?: string[] };

@@ -30,6 +30,7 @@ const parsed = (
   fragmentSpreads: [],
   imports: [],
   hasAnonymousOperation: false,
+  document: null,
   ...entities,
 });
 

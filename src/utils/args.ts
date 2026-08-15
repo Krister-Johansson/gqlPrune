@@ -32,6 +32,7 @@ Flags:
   --ignore <folder>         Deprecated: use --exclude instead
   --pattern <template>      Operation usage pattern, e.g. use{Name}{Type} (repeatable)
   --fragment-pattern <t>    Fragment usage pattern, e.g. {Name}FragmentDoc (repeatable)
+  --schema <file>           Local SDL file; also flags @deprecated field and enum usage
   --json                    Print a machine-readable JSON report on stdout
   --annotate                Emit GitHub Actions ::warning annotations (auto in Actions)
   --verbose                 Explain each verdict on stderr
@@ -49,7 +50,8 @@ Docs: https://github.com/Krister-Johansson/gqlPrune#readme`;
  * Recognizes the optional `init` command, the boolean `--json` / `--annotate`
  * / `--verbose` / `--help` flags, and value flags that mirror the config file:
  * the repeatable `--graphql`, `--src`, `--exclude`, `--ignore`, `--pattern`,
- * `--fragment-pattern`. Value flags accept both `--flag value` and
+ * `--fragment-pattern`, and the single-valued `--schema`. Value flags accept
+ * both `--flag value` and
  * `--flag=value`, in any order. A value is never mistaken for the positional
  * command. Unknown flags, flags missing their value, and stray positional
  * arguments are collected into `errors` rather than silently dropped — the
@@ -150,6 +152,13 @@ export function parseArgs(argv: string[]): CliOptions {
       case '--fragment-pattern': {
         const value = takeValue();
         if (value !== undefined) fragmentUsagePatterns.push(value);
+        break;
+      }
+      // A scan validates against one schema, so this flag isn't repeatable:
+      // a second one replaces the first rather than building a list.
+      case '--schema': {
+        const value = takeValue();
+        if (value !== undefined) config.schemaFile = value;
         break;
       }
       default:
