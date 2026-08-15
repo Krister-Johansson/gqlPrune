@@ -3,19 +3,25 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import checkbox from '@inquirer/checkbox';
 import confirm from '@inquirer/confirm';
 import input from '@inquirer/input';
 import {
   commonParentDir,
   detectGeneratedExcludes,
-  detectGraphqlDir,
-  detectSrcDir,
+  detectGraphqlDirs,
+  detectSrcDirs,
   generateConfig,
   splitFolders,
+  topLevelRoots,
 } from '../src/core/configGenerator';
 import { scanProject } from '../src/core/gqlPruner';
 
 jest.mock('fs');
+jest.mock('@inquirer/checkbox', () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 jest.mock('@inquirer/confirm', () => ({
   __esModule: true,
   default: jest.fn(),
@@ -31,6 +37,7 @@ jest.mock('../src/core/gqlPruner', () => ({
 }));
 
 const mockedScan = scanProject as jest.Mock;
+const mockedCheckbox = checkbox as unknown as jest.Mock;
 const mockedConfirm = confirm as unknown as jest.Mock;
 const mockedInput = input as unknown as jest.Mock;
 
@@ -148,34 +155,103 @@ describe('configGenerator', () => {
     });
   });
 
-  describe('detectGraphqlDir', () => {
+  describe('topLevelRoots', () => {
+    it('returns [] for no files', () => {
+      expect(topLevelRoots([])).toEqual([]);
+    });
+
+    it('returns the single root of co-located files', () => {
+      expect(topLevelRoots(['graphql/a.gql', 'graphql/q/b.gql'])).toEqual([
+        'graphql',
+      ]);
+    });
+
+    it('de-duplicates and sorts the roots of scattered files', () => {
+      expect(
+        topLevelRoots([
+          'packages/web/a.gql',
+          'apps/admin/b.gql',
+          'packages/api/c.gql',
+        ]),
+      ).toEqual(['apps', 'packages']);
+    });
+
+    it('counts a file in the project root as "."', () => {
+      expect(topLevelRoots(['a.gql', 'graphql/b.gql'])).toEqual([
+        '.',
+        'graphql',
+      ]);
+    });
+
+    it('normalizes Windows separators and a leading "./"', () => {
+      expect(topLevelRoots(['graphql\\a.gql', './graphql/b.gql'])).toEqual([
+        'graphql',
+      ]);
+    });
+  });
+
+  describe('detectGraphqlDirs', () => {
     beforeEach(() => jest.clearAllMocks());
 
-    it('suggests the directory holding .gql files', () => {
+    it('suggests the directory holding .gql files, with no candidates', () => {
       mockFsTree(
         { '.': ['graphql'], graphql: ['ops.gql'] },
         new Set(['graphql']),
       );
-      expect(detectGraphqlDir()).toBe('./graphql');
+      expect(detectGraphqlDirs()).toEqual({
+        suggestion: './graphql',
+        candidates: [],
+      });
     });
 
-    it('returns undefined when no GraphQL files exist', () => {
+    it('lists the roots when .gql files span several of them', () => {
+      mockFsTree(
+        { '.': ['apps', 'packages'], apps: ['a.gql'], packages: ['b.gql'] },
+        new Set(['apps', 'packages']),
+      );
+      expect(detectGraphqlDirs()).toEqual({
+        suggestion: '.',
+        candidates: ['./apps', './packages'],
+      });
+    });
+
+    it('returns no suggestion when no GraphQL files exist', () => {
       mockFsTree({ '.': [] }, new Set());
-      expect(detectGraphqlDir()).toBeUndefined();
+      expect(detectGraphqlDirs()).toEqual({
+        suggestion: undefined,
+        candidates: [],
+      });
     });
   });
 
-  describe('detectSrcDir', () => {
+  describe('detectSrcDirs', () => {
     beforeEach(() => jest.clearAllMocks());
 
     it('prefers an existing ./src directory', () => {
       mockFsTree({}, new Set(['src']));
-      expect(detectSrcDir()).toBe('./src');
+      expect(detectSrcDirs()).toEqual({
+        suggestion: './src',
+        candidates: [],
+      });
     });
 
-    it('returns undefined when there is no src and no source files', () => {
+    it('lists the roots when source files span several of them', () => {
+      mockFsTree(
+        { '.': ['apps', 'packages'], apps: ['a.ts'], packages: ['b.tsx'] },
+        new Set(['apps', 'packages']),
+      );
+      expect(detectSrcDirs()).toEqual({
+        suggestion: '.',
+        candidates: ['./apps', './packages'],
+      });
+    });
+
+    it('returns no suggestion when there is no src and no source files', () => {
       mockFsTree({ '.': [] }, new Set());
-      expect(detectSrcDir()).toBeUndefined();
+      expect(detectSrcDirs()).toEqual({
+        suggestion: undefined,
+        candidates: [],
+      });
     });
   });
 
@@ -317,6 +393,93 @@ describe('configGenerator', () => {
       expect(logSpy.mock.calls.flat().join('\n')).toContain(
         'src/gql/graphql.ts',
       );
+    });
+
+    it('never offers a checklist for a single-root project', async () => {
+      mockFsTree(
+        { '.': ['graphql'], graphql: ['ops.gql'] },
+        new Set(['graphql', 'src']),
+      );
+      mockInputAnswers('./graphql', './src');
+
+      await generateConfig();
+
+      expect(mockedCheckbox).not.toHaveBeenCalled();
+    });
+
+    it('offers a pre-checked list of roots when GraphQL files span several', async () => {
+      mockFsTree(
+        { '.': ['apps', 'packages'], apps: ['a.gql'], packages: ['b.gql'] },
+        new Set(['apps', 'packages']),
+      );
+      mockedCheckbox.mockResolvedValueOnce(['./apps', './packages']);
+      mockedInput.mockResolvedValueOnce('./src').mockResolvedValueOnce('');
+
+      await generateConfig();
+
+      expect(mockedCheckbox).toHaveBeenCalledTimes(1);
+      const question = mockedCheckbox.mock.calls[0][0];
+      expect(question.message).toContain('several roots');
+      expect(question.choices).toEqual([
+        { name: './apps', value: './apps', checked: true },
+        { name: './packages', value: './packages', checked: true },
+      ]);
+      const contents = (fs.writeFileSync as jest.Mock).mock.calls[0][1];
+      expect(contents).toContain('graphqlDir:\n  - ./apps\n  - ./packages');
+    });
+
+    it('stores a single selected root as a plain string', async () => {
+      mockFsTree(
+        { '.': ['apps', 'packages'], apps: ['a.gql'], packages: ['b.gql'] },
+        new Set(['apps', 'packages']),
+      );
+      mockedCheckbox.mockResolvedValueOnce(['./packages']);
+      mockedInput.mockResolvedValueOnce('./src').mockResolvedValueOnce('');
+
+      await generateConfig();
+
+      const contents = (fs.writeFileSync as jest.Mock).mock.calls[0][1];
+      expect(contents).toContain('graphqlDir: ./packages');
+    });
+
+    it('falls back to the path prompt when nothing is selected', async () => {
+      mockFsTree(
+        { '.': ['apps', 'packages'], apps: ['a.gql'], packages: ['b.gql'] },
+        new Set(['apps', 'packages']),
+      );
+      mockedCheckbox.mockResolvedValueOnce([]);
+      mockInputAnswers('./apps', './src');
+
+      await generateConfig();
+
+      expect(mockedInput).toHaveBeenCalledTimes(3);
+      expect(mockedInput.mock.calls[0][0].message).toContain(
+        'GraphQL directory',
+      );
+      expect(mockedInput.mock.calls[0][0].default).toBe('.');
+      const contents = (fs.writeFileSync as jest.Mock).mock.calls[0][1];
+      expect(contents).toContain('graphqlDir: ./apps');
+    });
+
+    it('offers the checklist for the source directory too', async () => {
+      mockFsTree(
+        {
+          '.': ['apps', 'packages'],
+          apps: ['a.ts'],
+          packages: ['b.ts', 'ops.gql'],
+        },
+        new Set(['apps', 'packages']),
+      );
+      mockedCheckbox.mockResolvedValueOnce(['./apps', './packages']);
+      mockedInput.mockResolvedValueOnce('./packages').mockResolvedValueOnce('');
+
+      await generateConfig();
+
+      expect(mockedCheckbox).toHaveBeenCalledTimes(1);
+      expect(mockedCheckbox.mock.calls[0][0].message).toContain('Source files');
+      const contents = (fs.writeFileSync as jest.Mock).mock.calls[0][1];
+      expect(contents).toContain('graphqlDir: ./packages');
+      expect(contents).toContain('srcDir:\n  - ./apps\n  - ./packages');
     });
   });
 });

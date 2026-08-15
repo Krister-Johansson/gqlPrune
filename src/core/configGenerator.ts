@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Krister Johansson
 
+import checkbox from '@inquirer/checkbox';
 import confirm from '@inquirer/confirm';
 import input from '@inquirer/input';
 import * as yaml from 'js-yaml';
@@ -32,8 +33,8 @@ export function splitFolders(input: string): string[] {
  * paths, or `[]` when a directory is missing (nothing to scan yet).
  */
 export function detectGeneratedExcludes(
-  graphqlDir: string,
-  srcDir: string,
+  graphqlDir: string | string[],
+  srcDir: string | string[],
 ): string[] {
   const dirs = [...resolveDirs(graphqlDir), ...resolveDirs(srcDir)];
   if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
@@ -65,30 +66,65 @@ export function commonParentDir(filePaths: string[]): string | undefined {
   return common;
 }
 
+/**
+ * Returns the distinct top-level directories the given files live under, sorted
+ * and de-duplicated. A file sitting in the project root contributes `.`.
+ */
+export function topLevelRoots(filePaths: string[]): string[] {
+  const roots = filePaths.map((file) => {
+    const dir = path.posix.dirname(
+      file.replace(/\\/g, '/').replace(/^\.\//, ''),
+    );
+    return dir === '.' ? '.' : dir.split('/')[0];
+  });
+  return [...new Set(roots)].sort();
+}
+
+/** A detected directory setting: what to suggest, and roots to choose between. */
+export interface DirDetection {
+  /** The detected directory, config-formatted, or `undefined` when nothing matched. */
+  suggestion: string | undefined;
+  /**
+   * Config-formatted top-level roots worth offering as a checklist. Only filled
+   * when detection collapsed to the project root because the files are spread
+   * over several roots, which is where a single suggestion is least useful.
+   */
+  candidates: string[];
+}
+
 /** Formats a detected directory for the config (`./`-prefixed, except root). */
 function formatDir(dir: string): string {
   return dir === '.' ? '.' : `./${dir}`;
 }
 
+/** Turns a set of detected files into a suggestion plus multi-root candidates. */
+function detectFrom(filePaths: string[]): DirDetection {
+  const dir = commonParentDir(filePaths);
+  if (dir === undefined) return { suggestion: undefined, candidates: [] };
+  const roots = dir === '.' ? topLevelRoots(filePaths) : [];
+  return {
+    suggestion: formatDir(dir),
+    candidates: roots.length > 1 ? roots.map(formatDir) : [],
+  };
+}
+
 /** Suggests a `graphqlDir` from where the `.gql`/`.graphql` files live. */
-export function detectGraphqlDir(): string | undefined {
-  const dir = commonParentDir(
+export function detectGraphqlDirs(): DirDetection {
+  return detectFrom(
     findFilesWithExtension('.', ['.gql', '.graphql'], isDetectExcluded),
   );
-  return dir === undefined ? undefined : formatDir(dir);
 }
 
 /** Suggests a `srcDir`, preferring a conventional `./src`, then the source root. */
-export function detectSrcDir(): string | undefined {
-  if (directoryExists('src')) return './src';
-  const dir = commonParentDir(
+export function detectSrcDirs(): DirDetection {
+  if (directoryExists('src')) return { suggestion: './src', candidates: [] };
+  return detectFrom(
     findFilesWithExtension(
       '.',
       ['.ts', '.tsx', '.js', '.jsx'],
       isDetectExcluded,
     ),
   );
-  return dir === undefined ? undefined : formatDir(dir);
 }
 
 /** Prints a one-line preview of what a real run would find, when the dirs exist. */
@@ -111,6 +147,35 @@ function printPreview(config: GqlPruneConfig): void {
 
 const CONFIG_FILE = './gqlPrune.config.yaml';
 
+/**
+ * Asks for one directory setting. Files spread over several top-level roots get
+ * a checklist of those roots (all ticked) rather than a bare `.` default, which
+ * would scan the whole project; one tick is stored as a string, several as a
+ * list. Everything else, including a checklist left empty, gets the path prompt.
+ */
+async function askForDir(
+  detection: DirDetection,
+  messages: { select: string; path: string },
+  placeholder: string,
+): Promise<string | string[]> {
+  if (detection.candidates.length > 0) {
+    const selected = await checkbox({
+      message: messages.select,
+      choices: detection.candidates.map((dir) => ({
+        name: dir,
+        value: dir,
+        checked: true,
+      })),
+    });
+    if (selected.length === 1) return selected[0];
+    if (selected.length > 1) return selected;
+  }
+  return input({
+    message: messages.path,
+    default: detection.suggestion ?? placeholder,
+  });
+}
+
 export async function generateConfig() {
   // Never clobber an existing (possibly hand-tuned) config without asking.
   if (fs.existsSync(CONFIG_FILE)) {
@@ -126,12 +191,29 @@ export async function generateConfig() {
     }
   }
 
-  const graphqlDefault = detectGraphqlDir() ?? './path/to/graphql';
-  const srcDefault = detectSrcDir() ?? './path/to/src';
+  const graphqlDir = await askForDir(
+    detectGraphqlDirs(),
+    {
+      select:
+        'GraphQL files were found under several roots. Select the directories to scan:',
+      path: 'Enter the path to your GraphQL directory:',
+    },
+    './path/to/graphql',
+  );
+  const srcDir = await askForDir(
+    detectSrcDirs(),
+    {
+      select:
+        'Source files were found under several roots. Select the directories to scan:',
+      path: 'Enter the path to your source directory:',
+    },
+    './path/to/src',
+  );
 
   // Reuse the generated-file detector so a fresh config excludes any file that
-  // would otherwise reference every operation and mask all unused results.
-  const detectedExcludes = detectGeneratedExcludes(graphqlDefault, srcDefault);
+  // would otherwise reference every operation and mask all unused results. It
+  // runs on the answers, so a multi-root selection narrows it the same way.
+  const detectedExcludes = detectGeneratedExcludes(graphqlDir, srcDir);
   if (detectedExcludes.length > 0) {
     console.log(
       `⚠ Detected a likely generated file that references most operations: ${detectedExcludes.join(
@@ -141,14 +223,8 @@ export async function generateConfig() {
   }
 
   const answers: GqlPruneConfig = {
-    graphqlDir: await input({
-      message: 'Enter the path to your GraphQL directory:',
-      default: graphqlDefault,
-    }),
-    srcDir: await input({
-      message: 'Enter the path to your source directory:',
-      default: srcDefault,
-    }),
+    graphqlDir,
+    srcDir,
     exclude: splitFolders(
       await input({
         message:
