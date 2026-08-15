@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 // cli.ts runs its dispatch on import, so each case re-executes it in an isolated
 // module registry via require() — the standard jest pattern for this.
 /* eslint-disable @typescript-eslint/no-require-imports */

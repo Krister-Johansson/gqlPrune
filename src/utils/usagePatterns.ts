@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import { OperationInfo } from '../types/OperationInfo.js';
 import { capitalizeFirstLetter } from './stringHelpers.js';
 

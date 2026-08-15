@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import * as fs from 'fs';
 import { ASTNode, parse, visit } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';

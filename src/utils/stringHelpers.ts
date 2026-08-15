@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 /**
  * Capitalizes the first letter of a given string.
  *

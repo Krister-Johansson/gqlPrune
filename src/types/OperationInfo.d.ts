@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 export type OperationInfo = {
   name: string;
   type: 'query' | 'mutation' | 'subscription';

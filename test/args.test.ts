@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import { formatHelp, parseArgs } from '../src/utils/args';
 
 describe('parseArgs', () => {

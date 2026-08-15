@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
