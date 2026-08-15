@@ -69,7 +69,7 @@ The list is advisory. It prints after the other sections, adds `unusedFields` to
 
 Read it as a starting shortlist, not a verdict. A string search cannot see how your code consumes data, and this check errs in both directions:
 
-- It flags fields you do use. A field read through a renamed binding (`const { avatarUrl: avatar } = user`), spread into props (`<Avatar {...user} />`), serialized whole, or consumed by a different repository never appears by name in `srcDir`.
+- It flags fields you do use. A field reached through a computed key (`user[fieldKey]`, where the key comes from a variable or a list of column names), spread into props (`<Avatar {...user} />`), serialized whole, or consumed by a different repository never appears by name in `srcDir`. Renaming while destructuring is safe, though: `const { avatarUrl: avatar } = user` still writes `avatarUrl` out, so the match finds it.
 - It stays quiet about fields you don't use. A field with a common name (`id`, `name`, `title`, `url`) matches somewhere in any real codebase, so it can never be flagged, even when it is genuinely dead.
 
 Removing a field also changes the response shape for every consumer of that operation, which no schema-free tool can check for you. Verify each candidate by hand before trimming it.
@@ -88,7 +88,7 @@ Add it to `exclude` (for example `'**/*.generated.ts'`) and re-run, or run `gqlp
 
 ### Operations and fragments, not fields
 
-gqlPrune reports whole operations and fragments that nothing references. It does not look inside an operation that is used, so a field the operation selects but the app never reads (over-fetching) is not reported. Deciding that requires a schema and data-flow analysis, which is why it sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
+gqlPrune reports whole operations and fragments that nothing references. The default scan stops there: it does not inspect the fields inside an operation that is used, so over-fetching goes unreported. The opt-in `--fields` / `checkFields` heuristic covers exactly that ground, but what it produces is an advisory shortlist of candidates rather than a verdict (see [Field candidates (opt-in)](#field-candidates-opt-in)). Deciding it precisely requires a schema and data-flow analysis, which is why that sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
 
 ### Results are candidates, not proof
 

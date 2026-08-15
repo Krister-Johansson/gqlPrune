@@ -256,8 +256,8 @@ function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
   );
   console.log(
     kleur.dim(
-      'These are string-search candidates, not proof: a field renamed while ' +
-        'destructuring, spread into props, or read by another repository looks ' +
+      'These are string-search candidates, not proof: a field read through a ' +
+        'computed key, spread into props, or read by another repository looks ' +
         'the same, and a field with a common name never reaches this list. ' +
         'Verify each one before trimming it.',
     ),

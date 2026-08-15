@@ -70,8 +70,8 @@ function collectResponseKeys(
  * application sees. `__typename` is always skipped.
  *
  * The verdict is a plain string search, so it inherits the same limits as the
- * rest of the tool and then some: a key destructured under a new name, spread
- * wholesale into props, or read by another repository still looks unread, while
+ * rest of the tool and then some: a key reached through a computed property,
+ * spread wholesale into props, or read by another repository still looks unread, while
  * a key with a common name (`id`, `name`) will match somewhere and can never be
  * flagged even when it is genuinely dead.
  *
