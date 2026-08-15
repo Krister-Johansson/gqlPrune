@@ -50,6 +50,12 @@ New functionality and bug fixes must come with tests (`test/`, Jest). Cover the
 pure logic: pattern expansion, folder exclusion, operation extraction, usage
 detection.
 
+Run the suite locally with `npm test` (or `npm run coverage` for the coverage
+report). CI runs the same suite, plus build, typecheck, and lint, on Node 20
+and 22 for every pull request, and those checks must pass before a merge. A
+failing test names the spec and assertion that broke; the specs live next to
+the module they cover, one file per source module.
+
 ## Commit messages
 
 This repo uses [Conventional Commits](https://www.conventionalcommits.org/);

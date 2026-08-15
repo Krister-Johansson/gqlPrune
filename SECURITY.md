@@ -10,6 +10,34 @@ latest published version, so upgrade before reporting.
 | latest release | Yes       |
 | older releases | No        |
 
+Support covers bug fixes and security updates for the latest release only. A
+release stops receiving security updates the moment a newer release is
+published; there are no long-term support branches.
+
+## Verifying a release
+
+Every npm release is published from GitHub Actions through OIDC trusted
+publishing with provenance, so you can check both integrity and origin:
+
+```bash
+npm audit signatures
+```
+
+The command verifies the registry signatures and Sigstore provenance
+attestations of your installed packages, `gqlprune` included, and reports how
+many packages have verified attestations. You can also inspect the provenance
+on the package's npm page, which shows the source commit, workflow, and build
+log for each version.
+
+The expected identity in the attestation is this repository:
+`Krister-Johansson/gqlPrune`, built by GitHub Actions from the
+release-please workflow. Treat any version whose provenance names a different
+repository or builder as compromised, and report it.
+
+Starting with the next release, each GitHub release also carries a CycloneDX
+software bill of materials (`gqlprune-<version>.cdx.json`) as an asset, listing
+the exact runtime dependency tree the release shipped with.
+
 ## Reporting a vulnerability
 
 Do not open a public issue for security problems.
@@ -37,3 +65,7 @@ The most relevant reports concern parsing of untrusted input (the YAML config or
 GraphQL documents) or path handling that escapes the configured directories. The
 published package ships only `dist/`. Report issues in dependencies (graphql,
 the `@inquirer` packages, js-yaml) to their respective projects.
+
+How the project handles findings from dependency and static analysis scanners,
+including remediation thresholds and the exploitability (VEX) assessments, is
+documented in [docs/security-policies.md](./docs/security-policies.md).
