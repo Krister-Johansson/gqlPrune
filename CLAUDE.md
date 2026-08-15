@@ -27,6 +27,7 @@ src/
     fileUtils.ts          findFilesWithExtension, readFileContents, exclusions
     operations.ts         extractOperations (graphql parse) → OperationInfo[]
     fragments.ts          findUnusedFragmentsInCorpus (cross-file spread graph)
+    orphans.ts            findOrphanedFiles (whole-file dead documents)
     fields.ts             findUnusedFieldCandidates (opt-in `--fields`, advisory)
     usagePatterns.ts      DEFAULT_*_PATTERNS, buildUsagePatterns, expandPattern
     stringHelpers.ts      small string utilities

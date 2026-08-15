@@ -29,6 +29,7 @@ import {
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
+import { findOrphanedFiles } from '../utils/orphans.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -262,6 +263,26 @@ function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
     ),
   );
 }
+/** Prints the list of orphaned GraphQL files. */
+function reportOrphanedFiles(orphanedFiles: string[]): void {
+  console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
+  console.log('File');
+  orphanedFiles.forEach((file) => console.log(kleur.magenta(file)));
+  console.log(kleur.blue('------------------------------'));
+  console.log(
+    kleur.red(
+      `Found ${orphanedFiles.length} orphaned GraphQL files. Every definition in them is unused and no document imports them, so they can likely be deleted.`,
+    ),
+  );
+}
+
+/**
+ * Closing line of the human-readable report. Usage is detected by string search,
+ * so a finding is a candidate rather than proof: names built dynamically, or
+ * referenced outside `srcDir` or from another repository, look unused here.
+ */
+export const CANDIDATE_REMINDER =
+  'These are candidates from a string search. Verify each one before deleting.';
 
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
@@ -272,6 +293,8 @@ export type JsonReport = {
     line?: number;
   }[];
   unusedFragments: { name: string; file: string; line?: number }[];
+  /** Files whose every definition is unused and which nothing imports. */
+  orphanedFiles: string[];
   /**
    * Field candidates. Present only when the opt-in check ran, so an absent key
    * means "not checked" rather than "nothing found".
@@ -282,6 +305,7 @@ export type JsonReport = {
   summary: {
     unusedOperations: number;
     unusedFragments: number;
+    orphanedFiles: number;
     unusedFields?: number;
   };
 };
@@ -295,6 +319,7 @@ export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
+  orphanedFiles: string[] = [],
   unusedFields?: UnusedFieldInfo[],
 ): JsonReport {
   return {
@@ -309,11 +334,13 @@ export function buildJsonReport(
       file: fragment.filePath,
       line: fragment.line,
     })),
+    orphanedFiles,
     ...(unusedFields ? { unusedFields } : {}),
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
+      orphanedFiles: orphanedFiles.length,
       ...(unusedFields ? { unusedFields: unusedFields.length } : {}),
     },
   };
@@ -339,12 +366,14 @@ function escapeAnnotationProperty(value: string): string {
 
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
- * fragments, so they surface inline on a PR. Omits the line when unknown. Field
- * candidates get one annotation each, pinned to their first selection.
+ * fragments and for each orphaned file, so they surface inline on a PR. Omits
+ * the line when unknown. Field candidates get one annotation each, pinned to
+ * their first selection.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
+  orphanedFiles: string[] = [],
   unusedFields: UnusedFieldInfo[] = [],
 ): string[] {
   const annotate = (
@@ -371,6 +400,13 @@ export function formatAnnotations(
         fragment.filePath,
         fragment.line,
         `Unused GraphQL fragment "${fragment.name}"`,
+      ),
+    ),
+    ...orphanedFiles.map((file) =>
+      annotate(
+        file,
+        undefined,
+        'Orphaned GraphQL file: every definition is unused and no document imports it',
       ),
     ),
     ...unusedFields.map((candidate) =>
@@ -603,6 +639,8 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /** Files whose every definition is unused and which no document imports. */
+  orphanedFiles: string[];
   /**
    * Advisory field candidates. Always empty unless `checkFields` is on: the
    * detection does not run at all when the option is off.
@@ -722,6 +760,11 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationUsages,
     unusedOperations,
     unusedFragments,
+    orphanedFiles: findOrphanedFiles(
+      parsedFiles,
+      unusedOperations,
+      unusedFragments,
+    ),
     unusedFieldCandidates,
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
@@ -800,6 +843,7 @@ export function mainFunction(
     operationCount,
     unusedOperations,
     unusedFragments,
+    orphanedFiles,
     unusedFieldCandidates,
     duplicateWarnings,
     generatedWarnings,
@@ -848,6 +892,7 @@ export function mainFunction(
     for (const line of formatAnnotations(
       unusedOperations,
       unusedFragments,
+      orphanedFiles,
       unusedFieldCandidates,
     )) {
       console.error(line);
@@ -861,6 +906,7 @@ export function mainFunction(
           unusedOperations,
           unusedFragments,
           advisoryWarnings,
+          orphanedFiles,
           fieldCandidates,
         ),
         null,
@@ -874,24 +920,36 @@ export function mainFunction(
     return;
   }
 
+  if (unusedOperations.length === 0 && unusedFragments.length === 0) {
+    console.log(
+      kleur.green('\n✓ No unused GraphQL operations or fragments found.'),
+    );
+    // Advisory only, so it still prints on the all-clear path — and, having its
+    // own caveat, without the closing reminder that the exit paths carry.
+    if (unusedFieldCandidates.length > 0) {
+      reportUnusedFieldCandidates(unusedFieldCandidates);
+    }
+    return;
+  }
+
   if (unusedOperations.length > 0) {
     reportUnusedOperations(unusedOperations);
   }
   if (unusedFragments.length > 0) {
     reportUnusedFragments(unusedFragments);
   }
-  if (unusedOperations.length === 0 && unusedFragments.length === 0) {
-    console.log(
-      kleur.green('\n✓ No unused GraphQL operations or fragments found.'),
-    );
+  // An orphaned file always implies unused definitions, so this section only
+  // ever follows one of the two above; it never carries the exit code alone.
+  if (orphanedFiles.length > 0) {
+    reportOrphanedFiles(orphanedFiles);
   }
   // Advisory, so it prints last and never contributes to the exit code.
   if (unusedFieldCandidates.length > 0) {
     reportUnusedFieldCandidates(unusedFieldCandidates);
   }
+  // Covers every candidate class above, so it closes the report.
+  console.log(kleur.dim(CANDIDATE_REMINDER));
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
-  if (unusedOperations.length > 0 || unusedFragments.length > 0) {
-    process.exitCode = 1;
-  }
+  process.exitCode = 1;
 }

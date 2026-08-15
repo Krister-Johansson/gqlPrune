@@ -12,7 +12,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/13364/baseline)](https://www.bestpractices.dev/projects/13364)
 
-`gqlPrune` finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by an operation or referenced in source. It does not need a running server or a schema.
+`gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
 
 ## Migrating from 1.x to 2.0
 
@@ -45,6 +45,14 @@ If your project uses a different convention (urql, react-query, graphql-request,
 
 A fragment spread only by another unused fragment is reported too. Note that a fragment is kept alive by any operation that spreads it, even an unused one. That operation is reported separately, so the fragment surfaces on the next run once you remove the operation.
 
+### Orphaned files
+
+A `.gql`/`.graphql` file is orphaned when every operation and fragment it defines is unused and no other document pulls it in with an `#import "./file.gql"` comment. gqlPrune lists these files in their own section, because the whole file is a deletion candidate rather than a few definitions inside it.
+
+Import comments are read from the raw file text (the convention used by graphql-tag and the webpack GraphQL loaders) and resolved against the importing file's directory, so `#import "./fields.gql"` keeps the `fields.gql` next to it off the list. Two cases never get flagged: a file that defines nothing, including one that fails to parse, and a file containing an anonymous operation, whose usage gqlPrune cannot track by name.
+
+Orphaned files are candidates like everything else gqlPrune reports. A file may still be read by another repository, a runtime loader, or tooling this scan cannot see, so check before you delete it. The JSON report lists the paths under `orphanedFiles` and counts them in `summary.orphanedFiles`. They never change the exit code on their own: an orphaned file always holds unused definitions, and those already exit 1.
+
 ### Field candidates (opt-in)
 
 Operations and fragments are the default unit of detection. Pass `--fields` (or set `checkFields: true` in the config) to also get an advisory list of individual fields your app may be selecting without ever reading:
@@ -76,6 +84,26 @@ gqlPrune guards against this. When one source file alone references most of your
 
 Add it to `exclude` (for example `'**/*.generated.ts'`) and re-run, or run `gqlprune init`, which detects such a file and pre-fills it into `exclude` for you. The warning goes to stderr (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
 
+## Limitations
+
+### Operations and fragments, not fields
+
+gqlPrune reports whole operations and fragments that nothing references. It does not look inside an operation that is used, so a field the operation selects but the app never reads (over-fetching) is not reported. Deciding that requires a schema and data-flow analysis, which is why it sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
+
+### Results are candidates, not proof
+
+Usage detection is a string search over `srcDir`. An operation is reported as unused when none of its search strings appear there, and that is not the same as the operation being unreachable. Three cases produce false positives:
+
+- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the literal name never appears in the source.
+- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not read (it reads `.ts`, `.tsx`, `.js`, and `.jsx`).
+- Another repository consumes it, for example a shared GraphQL package that several applications import.
+
+Check each finding before you delete it. `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
+
+### Generated code can hide findings
+
+The opposite failure also happens: codegen output inside `srcDir` references every operation, so everything looks used and nothing is reported. gqlPrune warns you when it spots this; see [Avoiding false "all clear" results](#avoiding-false-all-clear-results).
+
 ## Setup
 
 ### Installation
@@ -97,6 +125,8 @@ npx gqlprune init
 ```text
 ✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.
 ```
+
+If your files sit under several top-level directories, as in a monorepo, `init` shows a checklist of those directories instead of defaulting to the project root. Every entry starts ticked; untick the ones you do not want. One directory is written as a string, several as a list. Untick everything and you get the plain path question back, with the project root as the default.
 
 If a `gqlPrune.config.yaml` already exists, `init` asks before overwriting it (defaulting to No), so an existing hand-tuned config is never clobbered by accident.
 
@@ -196,8 +226,9 @@ npx gqlprune --json
   "unusedFragments": [
     { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
   ],
+  "orphanedFiles": ["graphql/user.gql"],
   "warnings": [],
-  "summary": { "unusedOperations": 1, "unusedFragments": 1 }
+  "summary": { "unusedOperations": 1, "unusedFragments": 1, "orphanedFiles": 1 }
 }
 ```
 
@@ -213,7 +244,12 @@ With `--fields`, the report gains an `unusedFields` array and a matching `summar
       "locations": [{ "file": "graphql/user.gql", "line": 4 }]
     }
   ],
-  "summary": { "unusedOperations": 0, "unusedFragments": 0, "unusedFields": 1 }
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 0,
+    "orphanedFiles": 0,
+    "unusedFields": 1
+  }
 }
 ```
 
@@ -255,7 +291,7 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line) and at each orphaned file, so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate
@@ -269,7 +305,7 @@ gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to
 
 ## Output
 
-Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file.
+Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and `--fields` adds a fourth with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row.
 
 ```bash
 --- Unused GraphQL Operations ---
@@ -279,16 +315,20 @@ query    OperationName   operationFile.gql
 --- Unused GraphQL Fragments ---
 Fragment        File
 FragmentName    fragmentFile.gql
-```
 
-With `--fields`, a third section follows with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row:
+--- Orphaned GraphQL Files ---
+File
+graphql/deadFile.gql
 
-```bash
 --- Unused Field Candidates ---
 Field       Selected in
 avatarUrl   graphql/user.gql:4
             graphql/post.gql:9
+
+These are candidates from a string search. Verify each one before deleting.
 ```
+
+The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints only when an operation or fragment is reported (the field-candidate section carries its own caveat), and never in `--json` mode.
 
 ## Contributing
 
