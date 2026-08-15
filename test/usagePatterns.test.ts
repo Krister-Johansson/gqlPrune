@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import {
   DEFAULT_USAGE_PATTERNS,
   buildFragmentPatterns,

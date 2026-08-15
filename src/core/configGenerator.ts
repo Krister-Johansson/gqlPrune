@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import confirm from '@inquirer/confirm';
 import input from '@inquirer/input';
 import * as yaml from 'js-yaml';

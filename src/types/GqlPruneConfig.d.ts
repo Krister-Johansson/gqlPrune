@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 export interface GqlPruneConfig {
   /** Directory (or directories) containing your `.gql`/`.graphql` files. */
   graphqlDir: string | string[];

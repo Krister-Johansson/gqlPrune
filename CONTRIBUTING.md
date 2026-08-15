@@ -69,6 +69,25 @@ release-please derives versions and the changelog from them. Use `feat:`, `fix:`
 2. Make sure it passes locally: `npm run build && npm run typecheck && npm run lint && npm test`.
 3. Open the PR with a clear description. CI must be green before merge.
 
+## Code review
+
+Every pull request gets an automated review (CodeRabbit) plus the maintainer's
+review before merge. A review checks four things:
+
+- Correctness: the change does what it claims, edge cases included, and comes
+  with tests that fail without it.
+- Fit: the code matches the surrounding style and the design rule in
+  [docs/architecture.md](./docs/architecture.md) (pure functions wired by
+  `mainFunction`), and the change stays focused on one issue.
+- Security: no new execution of scanned input, no path handling that escapes
+  the configured directories, no new dependencies without need (see
+  [docs/security-policies.md](./docs/security-policies.md)).
+- Documentation: user-visible changes update the README in the same pull
+  request.
+
+Review comments are resolved by fixing the code or by replying with a reason;
+the branch ruleset requires every conversation resolved before merge.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the

@@ -20,12 +20,12 @@ module.exports = {
     '!src/utils/pkgInfo.ts',
   ],
   coverageReporters: ['text', 'lcov'],
-  // Floor below current coverage (~97% stmts / 81% branches) so CI catches
+  // Floor below current coverage (~99% stmts / 93% branches) so CI catches
   // regressions without failing on minor branch changes.
   coverageThreshold: {
     global: {
       statements: 90,
-      branches: 75,
+      branches: 80,
       functions: 90,
       lines: 90,
     },

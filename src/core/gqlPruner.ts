@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import fs from 'fs';
 import kleur from 'kleur';
 import * as yaml from 'js-yaml';

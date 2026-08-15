@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import kleur from 'kleur';
 import { generateConfig } from './core/configGenerator.js';
 import { escapeAnnotationMessage, mainFunction } from './core/gqlPruner.js';

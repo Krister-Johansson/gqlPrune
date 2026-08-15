@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
 import { CliConfig } from '../types/GqlPruneConfig.js';
 
 export type CliOptions = {
