@@ -2,7 +2,7 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
-import { ASTNode, parse, visit } from 'graphql';
+import { ASTNode, DocumentNode, parse, Source, visit } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 
@@ -13,6 +13,12 @@ export type GraphqlFileEntities = {
   operationSpreads: string[];
   /** Per-fragment direct fragment-spread dependencies. */
   fragmentSpreads: { name: string; spreads: string[] }[];
+  /**
+   * The parsed document, tagged with the file path as its source name, or
+   * `null` when the file failed to parse. Kept so the opt-in schema checks can
+   * validate the corpus and map findings back to the right file.
+   */
+  document: DocumentNode | null;
 };
 
 /**
@@ -42,7 +48,9 @@ export function getFragmentSpreads(node: ASTNode): string[] {
 export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const ast = parse(content);
+    // Naming the Source after the file makes every node's location carry the
+    // path, so validation errors can be reported against the right file.
+    const ast = parse(new Source(content, filePath));
     const operations: OperationInfo[] = [];
     const fragments: FragmentInfo[] = [];
     const operationSpreads = new Set<string>();
@@ -79,6 +87,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragments,
       operationSpreads: [...operationSpreads],
       fragmentSpreads,
+      document: ast,
     };
   } catch (error) {
     console.error(`Error parsing GraphQL file: ${filePath}`);
@@ -92,6 +101,7 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
       fragments: [],
       operationSpreads: [],
       fragmentSpreads: [],
+      document: null,
     };
   }
 }

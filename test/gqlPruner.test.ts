@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
+import { buildSchema, parse, Source } from 'graphql';
 import * as fileUtils from '../src/utils/fileUtils';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
@@ -62,9 +63,25 @@ const entitiesOf = (operations: OperationInfo[]) => ({
   fragments: [],
   operationSpreads: [],
   fragmentSpreads: [],
+  document: null,
 });
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
+
+// SDL and a matching parsed file, for the opt-in deprecated-field checks.
+const SDL = [
+  'type User { id: ID!, nickname: String @deprecated(reason: "use displayName")',
+  '  legacyName: String @deprecated(reason: "use displayName") }',
+  'type Query { user: User }',
+].join('\n');
+const entitiesWithDocument = (filePath: string, content: string) => ({
+  operations: [],
+  fragments: [],
+  operationSpreads: [],
+  fragmentSpreads: [],
+  document: parse(new Source(content, filePath)),
+});
+const DEPRECATED_QUERY = 'query GetUser {\n  user {\n    nickname\n  }\n}';
 
 describe('gqlPruner', () => {
   describe('resolveExcludePatterns', () => {
@@ -316,6 +333,16 @@ describe('gqlPruner', () => {
       expect(text).toContain('exclude: **/dist, node_modules, .git');
       expect(text).toContain('usagePatterns: {Name}Doc');
       expect(text).toContain('fragmentUsagePatterns: {Name}FragmentDoc');
+      expect(text).not.toContain('schemaFile');
+    });
+
+    it('adds a schemaFile line only when one is configured', () => {
+      const lines = formatVerboseConfigLines({
+        graphqlDir: './g',
+        srcDir: './s',
+        schemaFile: './schema.graphql',
+      });
+      expect(lines.join('\n')).toContain('schemaFile: ./schema.graphql');
     });
   });
 
@@ -327,6 +354,7 @@ describe('gqlPruner', () => {
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
+      deprecatedUsages: [],
       duplicateWarnings: [],
       generatedWarnings: [],
       generatedFiles: [],
@@ -375,6 +403,7 @@ describe('gqlPruner', () => {
       fragments,
       operationSpreads: [],
       fragmentSpreads: [],
+      document: null,
     });
 
     it('warns when an operation name is defined in two files', () => {
@@ -445,8 +474,13 @@ describe('gqlPruner', () => {
           { name: 'A', type: 'query', file: 'a.gql', line: 3 },
         ],
         unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        deprecatedUsages: [],
         warnings: [],
-        summary: { unusedOperations: 1, unusedFragments: 1 },
+        summary: {
+          unusedOperations: 1,
+          unusedFragments: 1,
+          deprecatedUsages: 0,
+        },
       });
     });
 
@@ -454,8 +488,13 @@ describe('gqlPruner', () => {
       expect(buildJsonReport([], [])).toEqual({
         unusedOperations: [],
         unusedFragments: [],
+        deprecatedUsages: [],
         warnings: [],
-        summary: { unusedOperations: 0, unusedFragments: 0 },
+        summary: {
+          unusedOperations: 0,
+          unusedFragments: 0,
+          deprecatedUsages: 0,
+        },
       });
     });
 
@@ -463,6 +502,29 @@ describe('gqlPruner', () => {
       expect(buildJsonReport([], [], ['heads up']).warnings).toEqual([
         'heads up',
       ]);
+    });
+
+    it('serializes deprecated usages and counts them in the summary', () => {
+      const report = buildJsonReport(
+        [],
+        [],
+        [],
+        [
+          {
+            message: 'The field User.nickname is deprecated. use displayName',
+            file: 'graphql/user.gql',
+            line: 3,
+          },
+        ],
+      );
+      expect(report.deprecatedUsages).toEqual([
+        {
+          message: 'The field User.nickname is deprecated. use displayName',
+          file: 'graphql/user.gql',
+          line: 3,
+        },
+      ]);
+      expect(report.summary.deprecatedUsages).toBe(1);
     });
   });
 
@@ -508,6 +570,26 @@ describe('gqlPruner', () => {
 
     it('returns [] when nothing is unused', () => {
       expect(formatAnnotations([], [])).toEqual([]);
+    });
+
+    it('formats one ::warning per deprecated usage', () => {
+      expect(
+        formatAnnotations(
+          [],
+          [],
+          [
+            {
+              message: 'The field User.nickname is deprecated. use displayName',
+              file: 'graphql/user.gql',
+              line: 3,
+            },
+            { message: 'The field Query.old is deprecated.', file: 'a.gql' },
+          ],
+        ),
+      ).toEqual([
+        '::warning file=graphql/user.gql,line=3::The field User.nickname is deprecated. use displayName',
+        '::warning file=a.gql::The field Query.old is deprecated.',
+      ]);
     });
   });
 
@@ -881,6 +963,43 @@ describe('gqlPruner', () => {
       ]);
       expect(result.generatedWarnings).toHaveLength(1);
     });
+
+    it('reports no deprecated usages when no schema is given', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.deprecatedUsages).toEqual([]);
+    });
+
+    it('reports deprecated usages when a schema is given', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      const result = scanProject(
+        { graphqlDir: './g', srcDir: './s' },
+        buildSchema(SDL),
+      );
+
+      expect(result.deprecatedUsages).toEqual([
+        {
+          message: 'The field User.nickname is deprecated. use displayName',
+          file: 'a.gql',
+          line: 3,
+        },
+      ]);
+    });
   });
 
   describe('mainFunction', () => {
@@ -1061,6 +1180,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 1,
         unusedFragments: 1,
+        deprecatedUsages: 0,
       });
     });
 
@@ -1087,6 +1207,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        deprecatedUsages: 0,
       });
     });
 
@@ -1232,6 +1353,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        deprecatedUsages: 0,
       });
       // …and the verbose detail went to stderr.
       const errs = errorSpy.mock.calls.flat().join('\n');
@@ -1328,6 +1450,177 @@ describe('gqlPruner', () => {
       ).not.toThrow();
       expect(exitSpy).not.toHaveBeenCalled();
       expect(logged()).toContain('No unused');
+    });
+
+    // The opt-in SDL check reads two files: the config and the schema.
+    const readsConfigAndSchema = (yamlText: string, sdl: string | Error) => {
+      (fs.readFileSync as jest.Mock).mockImplementation((file: string) => {
+        if (file !== './schema.graphql') return yamlText;
+        if (sdl instanceof Error) throw sdl;
+        return sdl;
+      });
+    };
+    const scansOneDeprecatedQuery = () => {
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+    };
+
+    it('skips the deprecated check entirely when no schemaFile is configured', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      scansOneDeprecatedQuery();
+
+      mainFunction({ json: true });
+
+      const report = JSON.parse(logged());
+      expect(report.deprecatedUsages).toEqual([]);
+      expect(report.summary.deprecatedUsages).toBe(0);
+    });
+
+    it('reports deprecated usages in the JSON report when a schemaFile is set', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      scansOneDeprecatedQuery();
+
+      mainFunction({ json: true });
+
+      const report = JSON.parse(logged());
+      expect(report.deprecatedUsages).toEqual([
+        {
+          message: 'The field User.nickname is deprecated. use displayName',
+          file: 'a.gql',
+          line: 3,
+        },
+      ]);
+      expect(report.summary.deprecatedUsages).toBe(1);
+    });
+
+    it('prints a deprecated section and stays at exit code 0 when nothing is unused', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      scansOneDeprecatedQuery();
+
+      mainFunction();
+
+      expect(process.exitCode).toBe(0);
+      expect(exitSpy).not.toHaveBeenCalled();
+      const out = logged();
+      expect(out).toContain('Deprecated Field Usage');
+      expect(out).toContain('a.gql');
+      expect(out).toContain('The field User.nickname is deprecated.');
+      expect(out).toContain('Found 1 selection of deprecated');
+      expect(out).toContain('No unused');
+    });
+
+    it('lists every deprecated selection in the section', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument(
+          'a.gql',
+          'query GetUser {\n  user {\n    nickname\n    legacyName\n  }\n}',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      const out = logged();
+      expect(out).toContain('The field User.legacyName is deprecated.');
+      expect(out).toContain('Found 2 selections of deprecated');
+    });
+
+    it('prints no deprecated section when the schema flags nothing', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument(
+          'a.gql',
+          'query GetUser {\n  user {\n    id\n  }\n}',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      expect(logged()).not.toContain('Deprecated Field Usage');
+    });
+
+    it('emits a ::warning annotation per deprecated usage', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      scansOneDeprecatedQuery();
+
+      mainFunction({ annotate: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain(
+        '::warning file=a.gql,line=3::The field User.nickname is deprecated. use displayName',
+      );
+    });
+
+    it('logs the resolved schemaFile with --verbose', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      scansOneDeprecatedQuery();
+
+      mainFunction({ verbose: true });
+
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+        'schemaFile: ./schema.graphql',
+      );
+    });
+
+    it('exits 2 when the schema file cannot be read', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        new Error('ENOENT: no such file'),
+      );
+      mockedDirExists.mockReturnValue(true);
+
+      expect(() => mainFunction()).toThrow('process.exit:2');
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('./schema.graphql');
+    });
+
+    it('exits 2 when the schema file is not valid SDL', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        'type Query {',
+      );
+      mockedDirExists.mockReturnValue(true);
+
+      expect(() => mainFunction()).toThrow('process.exit:2');
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+        './schema.graphql',
+      );
     });
 
     it('exits 2 with guidance when neither a config file nor flags supply dirs', () => {

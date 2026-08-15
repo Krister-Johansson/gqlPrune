@@ -55,6 +55,54 @@ gqlPrune guards against this. When one source file alone references most of your
 
 Add it to `exclude` (for example `'**/*.generated.ts'`) and re-run, or run `gqlprune init`, which detects such a file and pre-fills it into `exclude` for you. The warning goes to stderr (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
 
+### Deprecated fields (opt-in)
+
+gqlPrune can also tell you where your operations still select fields or enum values the schema marks `@deprecated`. This is the one check that needs a schema, so it is opt-in: point gqlPrune at a local SDL file with `schemaFile` in the config or `--schema` on the command line.
+
+```yaml
+schemaFile: ./schema.graphql
+```
+
+```bash
+npx gqlprune --schema ./schema.graphql
+```
+
+The file is read from disk. gqlPrune still never starts a server and never runs introspection, and with no `schemaFile` the check does not run at all, so the default scan stays schema-free.
+
+Every `.gql`/`.graphql` file in the scan is validated against the schema as one document, so a fragment spread resolves even when the fragment lives in another file. Only the deprecation rule runs: fields the schema does not define, duplicate names, and other mismatches are ignored rather than reported.
+
+Findings are advisory. They print after the unused sections, they are emitted as `::warning` annotations under GitHub Actions, and they never change the exit code, which keeps meaning "unused operations or fragments were found".
+
+```text
+--- Deprecated Field Usage ---
+
+File               Line Message
+graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
+------------------------------
+Found 1 selection of deprecated schema fields or enum values. They are advisory and do not affect the exit code.
+```
+
+In `--json` mode they appear as a `deprecatedUsages` array with a matching count in `summary`:
+
+```json
+{
+  "deprecatedUsages": [
+    {
+      "message": "The field User.nickname is deprecated. Use displayName",
+      "file": "graphql/user.gql",
+      "line": 3
+    }
+  ],
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 0,
+    "deprecatedUsages": 1
+  }
+}
+```
+
+If the file named by `schemaFile` cannot be read or is not valid SDL, the run stops with exit code 2 rather than skipping the check silently.
+
 ## Setup
 
 ### Installation
@@ -104,6 +152,7 @@ fragmentUsagePatterns:
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
+- `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-field check](#deprecated-fields-opt-in); omit it and no schema is read.
 
 For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a list of directories:
 
@@ -132,6 +181,7 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--ignore <folder>` _(repeatable, deprecated in favor of `--exclude`)_ | `excludedFolders`       |
 | `--pattern <template>` _(repeatable)_                                  | `usagePatterns`         |
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
+| `--schema <file>`                                                      | `schemaFile`            |
 
 Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
 
@@ -170,12 +220,17 @@ npx gqlprune --json
   "unusedFragments": [
     { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
   ],
+  "deprecatedUsages": [],
   "warnings": [],
-  "summary": { "unusedOperations": 1, "unusedFragments": 1 }
+  "summary": {
+    "unusedOperations": 1,
+    "unusedFragments": 1,
+    "deprecatedUsages": 0
+  }
 }
 ```
 
-Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none.
+Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none. `deprecatedUsages` stays empty unless you configure a [schema file](#deprecated-fields-opt-in).
 
 ### Verbose output
 
@@ -213,7 +268,7 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), so they show up on the PR's Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment, and at each [deprecated selection](#deprecated-fields-opt-in) when a schema is configured (file and line), so they show up on the PR's Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate

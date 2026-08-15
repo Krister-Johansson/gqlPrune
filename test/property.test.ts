@@ -304,6 +304,7 @@ describe('property-based invariants', () => {
                 })),
                 operationSpreads: [],
                 fragmentSpreads: [],
+                document: null,
               },
             ];
             const contents = [

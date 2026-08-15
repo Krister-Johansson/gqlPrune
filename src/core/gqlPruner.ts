@@ -5,6 +5,7 @@ import fs from 'fs';
 import kleur from 'kleur';
 import * as yaml from 'js-yaml';
 import path from 'path';
+import { buildSchema, GraphQLSchema } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FragmentInfo } from '../types/FragmentInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
@@ -27,6 +28,7 @@ import {
   GraphqlFileEntities,
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
 
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
@@ -207,6 +209,31 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
+/** Prints the deprecated field/enum selections found against the local SDL. */
+function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
+  const maxFileLength = Math.max(
+    'File'.length,
+    ...deprecatedUsages.map((usage) => usage.file.length),
+  );
+
+  console.log(kleur.blue('\n--- Deprecated Field Usage ---\n'));
+  console.log('File'.padEnd(maxFileLength), 'Line', 'Message');
+  deprecatedUsages.forEach((usage) => {
+    console.log(
+      `${kleur.magenta(usage.file.padEnd(maxFileLength))} ${kleur.cyan(
+        String(usage.line ?? '-').padEnd(4),
+      )} ${usage.message}`,
+    );
+  });
+  console.log(kleur.blue('------------------------------'));
+  const count = deprecatedUsages.length;
+  console.log(
+    kleur.yellow(
+      `Found ${count} ${count === 1 ? 'selection' : 'selections'} of deprecated schema fields or enum values. They are advisory and do not affect the exit code.`,
+    ),
+  );
+}
+
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
   unusedOperations: {
@@ -216,9 +243,15 @@ export type JsonReport = {
     line?: number;
   }[];
   unusedFragments: { name: string; file: string; line?: number }[];
+  /** Selections of `@deprecated` fields/enum values; empty without a schema. */
+  deprecatedUsages: DeprecatedUsage[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
-  summary: { unusedOperations: number; unusedFragments: number };
+  summary: {
+    unusedOperations: number;
+    unusedFragments: number;
+    deprecatedUsages: number;
+  };
 };
 
 /** Builds the structured report for `--json` output. */
@@ -226,6 +259,7 @@ export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
+  deprecatedUsages: DeprecatedUsage[] = [],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -239,10 +273,12 @@ export function buildJsonReport(
       file: fragment.filePath,
       line: fragment.line,
     })),
+    deprecatedUsages,
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
+      deprecatedUsages: deprecatedUsages.length,
     },
   };
 }
@@ -267,11 +303,13 @@ function escapeAnnotationProperty(value: string): string {
 
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
- * fragments, so they surface inline on a PR. Omits the line when unknown.
+ * fragments and for each deprecated selection, so they surface inline on a PR.
+ * Omits the line when unknown.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
+  deprecatedUsages: DeprecatedUsage[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -298,6 +336,11 @@ export function formatAnnotations(
         fragment.line,
         `Unused GraphQL fragment "${fragment.name}"`,
       ),
+    ),
+    // The validator's message already names the deprecated field or enum value
+    // and its replacement, so it stands on its own as the annotation text.
+    ...deprecatedUsages.map((usage) =>
+      annotate(usage.file, usage.line, usage.message),
     ),
   ];
 }
@@ -522,6 +565,11 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /**
+   * Selections of `@deprecated` schema fields or enum values. Always empty
+   * unless the caller passed a schema (see `schemaFile`).
+   */
+  deprecatedUsages: DeprecatedUsage[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -539,6 +587,9 @@ export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
     `exclude: ${list(resolveExcludePatterns(config))}`,
     `usagePatterns: ${list(resolveUsagePatterns(config))}`,
     `fragmentUsagePatterns: ${list(resolveFragmentUsagePatterns(config))}`,
+    // Only when configured: the deprecated check is off by default, and an
+    // empty line would suggest a setting that isn't in play.
+    ...(config.schemaFile ? [`schemaFile: ${config.schemaFile}`] : []),
   ];
 }
 
@@ -566,8 +617,17 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
  * Runs one full scan for the given config and returns the results without
  * printing anything. Shared by `mainFunction` (which presents the results) and
  * `gqlprune init`'s preview, so the preview always reflects the real run.
+ *
+ * The optional `schema` enables the deprecated-field check. It is passed in
+ * already built rather than read from `config.schemaFile` here, so that reading
+ * and building it (and failing the run when it is unusable) stays in
+ * `mainFunction`, and callers such as `init`'s preview keep a scan that never
+ * touches a schema.
  */
-export function scanProject(config: GqlPruneConfig): ScanResult {
+export function scanProject(
+  config: GqlPruneConfig,
+  schema?: GraphQLSchema,
+): ScanResult {
   const isExcluded = createConfigExcludeMatcher(config);
   const usagePatterns = resolveUsagePatterns(config);
   const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
@@ -627,6 +687,7 @@ export function scanProject(config: GqlPruneConfig): ScanResult {
     operationUsages,
     unusedOperations,
     unusedFragments,
+    deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -684,11 +745,16 @@ export function mainFunction(
     process.exit(2);
   }
 
+  // Optional and off unless configured: a path to a local SDL file.
+  const schemaFile =
+    typeof resolved.schemaFile === 'string' ? resolved.schemaFile.trim() : '';
+
   // All directories exist; carry the normalized lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
     graphqlDir: graphqlDirs,
     srcDir: srcDirs,
+    schemaFile: schemaFile === '' ? undefined : schemaFile,
   };
 
   // ---------------- Main Logic ----------------
@@ -697,13 +763,30 @@ export function mainFunction(
     logVerbose(formatVerboseConfigLines(config));
   }
 
-  const result = scanProject(config);
+  // Build the schema here rather than inside the scan: a schema the user asked
+  // for but that cannot be read or parsed is a broken run (exit 2), like a
+  // missing directory, not a silently skipped check.
+  let schema: GraphQLSchema | undefined;
+  if (schemaFile !== '') {
+    try {
+      schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
+    } catch (e) {
+      console.error(
+        kleur.red(`Could not read the GraphQL schema file: ${schemaFile}.`),
+      );
+      console.error(e);
+      process.exit(2);
+    }
+  }
+
+  const result = scanProject(config, schema);
   const {
     gqlFileCount,
     sourceFileCount,
     operationCount,
     unusedOperations,
     unusedFragments,
+    deprecatedUsages,
     duplicateWarnings,
     generatedWarnings,
   } = result;
@@ -743,7 +826,11 @@ export function mainFunction(
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
   if (annotate) {
-    for (const line of formatAnnotations(unusedOperations, unusedFragments)) {
+    for (const line of formatAnnotations(
+      unusedOperations,
+      unusedFragments,
+      deprecatedUsages,
+    )) {
       console.error(line);
     }
   }
@@ -751,7 +838,12 @@ export function mainFunction(
   if (json) {
     console.log(
       JSON.stringify(
-        buildJsonReport(unusedOperations, unusedFragments, advisoryWarnings),
+        buildJsonReport(
+          unusedOperations,
+          unusedFragments,
+          advisoryWarnings,
+          deprecatedUsages,
+        ),
         null,
         2,
       ),
@@ -763,20 +855,29 @@ export function mainFunction(
     return;
   }
 
-  if (unusedOperations.length === 0 && unusedFragments.length === 0) {
+  const nothingUnused =
+    unusedOperations.length === 0 && unusedFragments.length === 0;
+  if (nothingUnused) {
     console.log(
       kleur.green('\n✓ No unused GraphQL operations or fragments found.'),
     );
-    return;
+  } else {
+    if (unusedOperations.length > 0) {
+      reportUnusedOperations(unusedOperations);
+    }
+    if (unusedFragments.length > 0) {
+      reportUnusedFragments(unusedFragments);
+    }
   }
 
-  if (unusedOperations.length > 0) {
-    reportUnusedOperations(unusedOperations);
-  }
-  if (unusedFragments.length > 0) {
-    reportUnusedFragments(unusedFragments);
+  // Advisory, so it prints after the unused sections (and after the all-clear
+  // line) and never carries the exit code on its own.
+  if (deprecatedUsages.length > 0) {
+    reportDeprecatedUsages(deprecatedUsages);
   }
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
-  process.exitCode = 1;
+  if (!nothingUnused) {
+    process.exitCode = 1;
+  }
 }

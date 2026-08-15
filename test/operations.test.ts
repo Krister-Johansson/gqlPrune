@@ -56,6 +56,10 @@ describe('operationUtils', () => {
         { name: 'Inner', filePath: 'f.gql', line: 3 },
       ]);
       expect(r.operationSpreads).toEqual(['UserFields']);
+      // The document is kept for the opt-in schema checks, tagged with the file
+      // so validation errors map back to it.
+      expect(r.document?.definitions).toHaveLength(3);
+      expect(r.document?.loc?.source.name).toBe('f.gql');
       expect(r.fragmentSpreads).toEqual(
         expect.arrayContaining([
           { name: 'UserFields', spreads: ['Inner'] },
@@ -80,6 +84,7 @@ describe('operationUtils', () => {
         fragments: [],
         operationSpreads: [],
         fragmentSpreads: [],
+        document: null,
       });
     });
   });
