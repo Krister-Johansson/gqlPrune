@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.11.2](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.1...gqlprune-v2.11.2) (2026-08-15)
+
+
+### Miscellaneous Chores
+
+* release 2.11.2 ([#123](https://github.com/Krister-Johansson/gqlPrune/issues/123)) ([1153b53](https://github.com/Krister-Johansson/gqlPrune/commit/1153b536fc19b61a9bc821267655dc8486fa87c2)), closes [#122](https://github.com/Krister-Johansson/gqlPrune/issues/122)
+
 ## [2.11.1](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.0...gqlprune-v2.11.1) (2026-08-15)
 
 
