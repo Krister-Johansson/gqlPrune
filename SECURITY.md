@@ -34,9 +34,21 @@ The expected identity in the attestation is this repository:
 release-please workflow. Treat any version whose provenance names a different
 repository or builder as compromised, and report it.
 
-Starting with the next release, each GitHub release also carries a CycloneDX
-software bill of materials (`gqlprune-<version>.cdx.json`) as an asset, listing
-the exact runtime dependency tree the release shipped with.
+Each GitHub release also carries a CycloneDX software bill of materials
+(`gqlprune-<version>.cdx.json`) as an asset, listing the exact runtime
+dependency tree the release shipped with, along with a keyless Sigstore
+signature bundle over it (`.sigstore.json`). Verify the SBOM with:
+
+```bash
+cosign verify-blob \
+  --bundle gqlprune-<version>.cdx.json.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/Krister-Johansson/gqlPrune/\.github/workflows/sbom\.yml@refs/tags/gqlprune-v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  gqlprune-<version>.cdx.json
+```
+
+The certificate identity must be this repository's sbom.yml workflow running
+on a release tag; treat anything else as compromised, and report it.
 
 ## Reporting a vulnerability
 
