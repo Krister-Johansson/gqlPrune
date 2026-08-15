@@ -58,11 +58,14 @@ const mockedExtract = extractGraphqlEntities as jest.Mock;
 
 // The parsed-file shape extractGraphqlEntities returns for a file whose only
 // contents are the given operations.
-const entitiesOf = (operations: OperationInfo[]) => ({
+const entitiesOf = (operations: OperationInfo[], filePath = 'a.gql') => ({
   operations,
   fragments: [],
   operationSpreads: [],
   fragmentSpreads: [],
+  filePath,
+  imports: [],
+  hasAnonymousOperation: false,
 });
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
@@ -328,6 +331,7 @@ describe('gqlPruner', () => {
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
+      orphanedFiles: [],
       duplicateWarnings: [],
       generatedWarnings: [],
       generatedFiles: [],
@@ -376,6 +380,9 @@ describe('gqlPruner', () => {
       fragments,
       operationSpreads: [],
       fragmentSpreads: [],
+      filePath: operations[0]?.filePath ?? fragments[0]?.filePath ?? 'a.gql',
+      imports: [],
+      hasAnonymousOperation: false,
     });
 
     it('warns when an operation name is defined in two files', () => {
@@ -446,8 +453,13 @@ describe('gqlPruner', () => {
           { name: 'A', type: 'query', file: 'a.gql', line: 3 },
         ],
         unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        orphanedFiles: [],
         warnings: [],
-        summary: { unusedOperations: 1, unusedFragments: 1 },
+        summary: {
+          unusedOperations: 1,
+          unusedFragments: 1,
+          orphanedFiles: 0,
+        },
       });
     });
 
@@ -455,8 +467,13 @@ describe('gqlPruner', () => {
       expect(buildJsonReport([], [])).toEqual({
         unusedOperations: [],
         unusedFragments: [],
+        orphanedFiles: [],
         warnings: [],
-        summary: { unusedOperations: 0, unusedFragments: 0 },
+        summary: {
+          unusedOperations: 0,
+          unusedFragments: 0,
+          orphanedFiles: 0,
+        },
       });
     });
 
@@ -464,6 +481,17 @@ describe('gqlPruner', () => {
       expect(buildJsonReport([], [], ['heads up']).warnings).toEqual([
         'heads up',
       ]);
+    });
+
+    it('lists the orphaned files and counts them in the summary', () => {
+      const report = buildJsonReport(
+        [{ name: 'A', type: 'query', filePath: 'dead.gql' }],
+        [],
+        [],
+        ['dead.gql'],
+      );
+      expect(report.orphanedFiles).toEqual(['dead.gql']);
+      expect(report.summary.orphanedFiles).toBe(1);
     });
   });
 
@@ -504,6 +532,12 @@ describe('gqlPruner', () => {
         ),
       ).toEqual([
         '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query)',
+      ]);
+    });
+
+    it('annotates an orphaned file without a line', () => {
+      expect(formatAnnotations([], [], ['graphql/dead.gql'])).toEqual([
+        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it',
       ]);
     });
 
@@ -882,6 +916,39 @@ describe('gqlPruner', () => {
       ]);
       expect(result.generatedWarnings).toHaveLength(1);
     });
+
+    it('surfaces a file whose every definition is unused as orphaned', () => {
+      mockedFind
+        .mockReturnValueOnce(['dead.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'dead.gql' }],
+          'dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.orphanedFiles).toEqual(['dead.gql']);
+    });
+
+    it('leaves orphanedFiles empty when every definition is used', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.orphanedFiles).toEqual([]);
+    });
   });
 
   describe('mainFunction', () => {
@@ -1049,6 +1116,83 @@ describe('gqlPruner', () => {
       expect(logged()).not.toContain(CANDIDATE_REMINDER);
     });
 
+    it('lists orphaned files after the fragments section', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['g/dead.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'g/dead.gql' }],
+          'g/dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      const output = logged();
+      expect(process.exitCode).toBe(1);
+      expect(output).toContain('Orphaned GraphQL Files');
+      expect(output).toContain('g/dead.gql');
+      expect(output.indexOf('Unused GraphQL Operations')).toBeLessThan(
+        output.indexOf('Orphaned GraphQL Files'),
+      );
+    });
+
+    it('omits the orphaned section when only some definitions in a file are unused', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Dead', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction();
+
+      expect(logged()).toContain('Unused GraphQL Operations');
+      expect(logged()).not.toContain('Orphaned GraphQL Files');
+    });
+
+    it('reports orphaned files in the JSON report and as annotations', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['g/dead.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'g/dead.gql' }],
+          'g/dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction({ json: true, annotate: true });
+
+      const report = JSON.parse(logged());
+      expect(report.orphanedFiles).toEqual(['g/dead.gql']);
+      expect(report.summary.orphanedFiles).toBe(1);
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+        '::warning file=g/dead.gql::Orphaned GraphQL file',
+      );
+    });
+
     it('passes gqlFiles, source contents, and fragment patterns to the corpus scan', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'graphqlDir: ./g\nsrcDir: ./s\nfragmentUsagePatterns:\n  - "{Name}FragmentDoc"\n',
@@ -1107,6 +1251,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 1,
         unusedFragments: 1,
+        orphanedFiles: 0,
       });
     });
 
@@ -1133,6 +1278,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        orphanedFiles: 0,
       });
     });
 
@@ -1278,6 +1424,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        orphanedFiles: 0,
       });
       // …and the verbose detail went to stderr.
       const errs = errorSpy.mock.calls.flat().join('\n');
