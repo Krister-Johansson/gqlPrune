@@ -224,6 +224,29 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --schema as the config schemaFile', () => {
+    expect(parseArgs(['--schema', './schema.graphql']).config).toEqual({
+      schemaFile: './schema.graphql',
+    });
+    expect(parseArgs(['--schema=./schema.graphql']).config).toEqual({
+      schemaFile: './schema.graphql',
+    });
+  });
+
+  it('keeps the last --schema when it is given twice', () => {
+    expect(
+      parseArgs(['--schema', './a.graphql', '--schema', './b.graphql']).config,
+    ).toEqual({
+      schemaFile: './b.graphql',
+    });
+  });
+
+  it('reports a missing value for --schema', () => {
+    const result = parseArgs(['--schema']);
+    expect(result.config).toEqual({});
+    expect(result.errors).toEqual(['Missing value for --schema']);
+  });
+
   it('collects repeatable --exclude into config.exclude', () => {
     expect(
       parseArgs([
@@ -314,10 +337,10 @@ describe('CLI metadata tables', () => {
     }
   });
 
-  it('marks the directory flags as path-valued', () => {
+  it('marks the directory and schema flags as path-valued', () => {
     expect(
       FLAGS.filter((f) => f.valueKind === 'path').map((f) => f.flag),
-    ).toEqual(['--graphql', '--src']);
+    ).toEqual(['--graphql', '--src', '--schema']);
   });
 });
 
@@ -332,6 +355,7 @@ describe('formatHelp', () => {
       '--ignore',
       '--pattern',
       '--fragment-pattern',
+      '--schema',
       '--json',
       '--annotate',
       '--verbose',

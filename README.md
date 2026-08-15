@@ -12,7 +12,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/13364/baseline)](https://www.bestpractices.dev/projects/13364)
 
-`gqlPrune` finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments in your project. It scans `.gql`/`.graphql` files and checks whether each operation is referenced in your TypeScript/JavaScript source, and whether each fragment is spread by an operation or referenced in source. It does not need a running server or a schema.
+`gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
 
 ## Migrating from 1.x to 2.0
 
@@ -45,6 +45,14 @@ If your project uses a different convention (urql, react-query, graphql-request,
 
 A fragment spread only by another unused fragment is reported too. Note that a fragment is kept alive by any operation that spreads it, even an unused one. That operation is reported separately, so the fragment surfaces on the next run once you remove the operation.
 
+### Orphaned files
+
+A `.gql`/`.graphql` file is orphaned when every operation and fragment it defines is unused and no other document pulls it in with an `#import "./file.gql"` comment. gqlPrune lists these files in their own section, because the whole file is a deletion candidate rather than a few definitions inside it.
+
+Import comments are read from the raw file text (the convention used by graphql-tag and the webpack GraphQL loaders) and resolved against the importing file's directory, so `#import "./fields.gql"` keeps the `fields.gql` next to it off the list. Two cases never get flagged: a file that defines nothing, including one that fails to parse, and a file containing an anonymous operation, whose usage gqlPrune cannot track by name.
+
+Orphaned files are candidates like everything else gqlPrune reports. A file may still be read by another repository, a runtime loader, or tooling this scan cannot see, so check before you delete it. The JSON report lists the paths under `orphanedFiles` and counts them in `summary.orphanedFiles`. They never change the exit code on their own: an orphaned file always holds unused definitions, and those already exit 1.
+
 ### Avoiding false "all clear" results
 
 Because usage is detected by string-matching `srcDir`, GraphQL Code Generator output that lives inside `srcDir` is a trap: a single generated file (such as `src/gql/graphql.ts`) references every operation, so everything looks used and nothing is ever reported unused, with no error to tell you so.
@@ -54,6 +62,74 @@ gqlPrune guards against this. When one source file alone references most of your
 > ⚠ Suspected generated file "src/gql/graphql.ts" references 100% of all operations (50/50) and looks generated — add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.
 
 Add it to `exclude` (for example `'**/*.generated.ts'`) and re-run, or run `gqlprune init`, which detects such a file and pre-fills it into `exclude` for you. The warning goes to stderr (so it also surfaces in `--json` mode) and is included in the JSON report's `warnings` array; it does not change the exit code.
+
+### Deprecated selections (opt-in)
+
+gqlPrune can also tell you where your operations still select fields or enum values the schema marks `@deprecated`. This is the one check that needs a schema, so it is opt-in: point gqlPrune at a local SDL file with `schemaFile` in the config or `--schema` on the command line.
+
+```yaml
+schemaFile: ./schema.graphql
+```
+
+```bash
+npx gqlprune --schema ./schema.graphql
+```
+
+The file is read from disk. gqlPrune still never starts a server and never runs introspection, and with no `schemaFile` the check does not run at all, so the default scan stays schema-free.
+
+Every `.gql`/`.graphql` file that parsed successfully is validated against the schema as one document, so a fragment spread resolves even when the fragment lives in another file. Only the deprecation rule runs: fields the schema does not define, duplicate names, and other mismatches are ignored rather than reported.
+
+Findings are advisory. They print after the unused sections, they are emitted as `::warning` annotations under GitHub Actions, and they never change the exit code, which keeps meaning "unused operations or fragments were found".
+
+```text
+--- Deprecated Field Usage ---
+
+File               Line Message
+graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
+------------------------------
+Found 1 selection of deprecated schema fields or enum values. They are advisory and do not affect the exit code.
+```
+
+In `--json` mode they appear as a `deprecatedUsages` array with a matching count in `summary`:
+
+```json
+{
+  "deprecatedUsages": [
+    {
+      "message": "The field User.nickname is deprecated. Use displayName",
+      "file": "graphql/user.gql",
+      "line": 3
+    }
+  ],
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 0,
+    "deprecatedUsages": 1
+  }
+}
+```
+
+If the file named by `schemaFile` cannot be read or is not valid SDL, the run stops with exit code 2 rather than skipping the check silently.
+
+## Limitations
+
+### Operations and fragments, not fields
+
+gqlPrune reports whole operations and fragments that nothing references. It does not look inside an operation that is used, so a field the operation selects but the app never reads (over-fetching) is not reported. Deciding that requires a schema and data-flow analysis, which is why it sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
+
+### Results are candidates, not proof
+
+Usage detection is a string search over `srcDir`. An operation is reported as unused when none of its search strings appear there, and that is not the same as the operation being unreachable. Three cases produce false positives:
+
+- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the literal name never appears in the source.
+- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not read (it reads `.ts`, `.tsx`, `.js`, and `.jsx`).
+- Another repository consumes it, for example a shared GraphQL package that several applications import.
+
+Check each finding before you delete it. `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
+
+### Generated code can hide findings
+
+The opposite failure also happens: codegen output inside `srcDir` references every operation, so everything looks used and nothing is reported. gqlPrune warns you when it spots this; see [Avoiding false "all clear" results](#avoiding-false-all-clear-results).
 
 ## Setup
 
@@ -77,6 +153,8 @@ npx gqlprune init
 ✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.
 ```
 
+If your files sit under several top-level directories, as in a monorepo, `init` shows a checklist of those directories instead of defaulting to the project root. Every entry starts ticked; untick the ones you do not want. One directory is written as a string, several as a list. Untick everything and you get the plain path question back, with the project root as the default.
+
 If a `gqlPrune.config.yaml` already exists, `init` asks before overwriting it (defaulting to No), so an existing hand-tuned config is never clobbered by accident.
 
 ```yaml
@@ -98,12 +176,13 @@ fragmentUsagePatterns:
   - '{Name}FragmentDoc'
 ```
 
-- `graphqlDir`: directory, or an array of directories, containing your `.gql`/`.graphql` files.
-- `srcDir`: directory, or an array of directories, containing your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
+- `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
+- `srcDir`: directory, array of directories, or glob pattern covering your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
 - `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere by basename (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
+- `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-usage check](#deprecated-selections-opt-in); omit it and no schema is read.
 
 For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a list of directories:
 
@@ -115,6 +194,15 @@ srcDir:
   - ./packages/web/src
   - ./packages/admin/src
 ```
+
+An entry can also be a glob pattern, which gqlPrune expands to the directories it matches before scanning. That covers every package without naming them one by one, and picks up new packages on its own:
+
+```yaml
+graphqlDir: 'packages/*/graphql'
+srcDir: 'packages/*/src'
+```
+
+`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
 ### Without a config file (CLI flags)
 
@@ -132,6 +220,9 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--ignore <folder>` _(repeatable, deprecated in favor of `--exclude`)_ | `excludedFolders`       |
 | `--pattern <template>` _(repeatable)_                                  | `usagePatterns`         |
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
+| `--schema <file>`                                                      | `schemaFile`            |
+
+`--graphql` and `--src` take the same glob patterns as their YAML fields; quote them (`--graphql 'packages/*/graphql'`) so the shell passes the pattern through instead of expanding it first.
 
 Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
 
@@ -145,7 +236,7 @@ This prints any unused GraphQL operations and fragments. The command exits with:
 
 - 0 when the scan completes and nothing unused is found (suitable for CI gates).
 - 1 when the scan completes and unused operations or fragments are found. Exit code 1 always means findings, nothing else.
-- 2 when the run itself fails: an unknown flag or command, a flag missing its value, no configuration, an unreadable config file, or a configured directory that doesn't exist. This lets a pipeline tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2).
+- 2 when the run itself fails: an unknown flag or command, a flag missing its value, no configuration, an unreadable config file, a configured directory that doesn't exist, or a directory pattern that matches nothing. This lets a pipeline tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2).
 
 Print the installed version with `gqlprune --version` (or `-v`), and the full list of commands and flags with `gqlprune --help` (or `-h`).
 
@@ -170,12 +261,19 @@ npx gqlprune --json
   "unusedFragments": [
     { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
   ],
+  "orphanedFiles": ["graphql/user.gql"],
+  "deprecatedUsages": [],
   "warnings": [],
-  "summary": { "unusedOperations": 1, "unusedFragments": 1 }
+  "summary": {
+    "unusedOperations": 1,
+    "unusedFragments": 1,
+    "orphanedFiles": 1,
+    "deprecatedUsages": 0
+  }
 }
 ```
 
-Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none.
+Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none. `deprecatedUsages` stays empty unless you configure a [schema file](#deprecated-selections-opt-in).
 
 ### Verbose output
 
@@ -213,7 +311,7 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), so they show up on the PR's Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), at each orphaned file, and at each [deprecated selection](#deprecated-selections-opt-in) when a schema is configured, so they show up on the PR's Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate
@@ -227,7 +325,7 @@ gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to
 
 ### Shell completion
 
-`gqlprune completion <shell>` prints a tab-completion script for bash, zsh, or fish. It completes the commands, every flag, and the shell names for `completion` itself; `--graphql` and `--src` fall back to your shell's own file completion.
+`gqlprune completion <shell>` prints a tab-completion script for bash, zsh, or fish. It completes the commands, every flag, and the shell names for `completion` itself; `--graphql`, `--src` and `--schema` fall back to your shell's own file completion.
 
 Load it by adding one line to your shell config:
 
@@ -252,7 +350,7 @@ Completion needs `gqlprune` on your `PATH`, so it applies to global installs (`n
 
 ## Output
 
-Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file.
+Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and a fourth when a [schema](#deprecated-selections-opt-in) is configured and something selects a deprecated field or enum value.
 
 ```bash
 --- Unused GraphQL Operations ---
@@ -262,7 +360,19 @@ query    OperationName   operationFile.gql
 --- Unused GraphQL Fragments ---
 Fragment        File
 FragmentName    fragmentFile.gql
+
+--- Orphaned GraphQL Files ---
+File
+graphql/deadFile.gql
+
+--- Deprecated Field Usage ---
+File               Line Message
+graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
+
+These are candidates from a string search. Verify each one before deleting.
 ```
+
+The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints only when there is something to report, and never in `--json` mode.
 
 ## Contributing
 

@@ -19,7 +19,8 @@ export type ValueTarget =
   | 'exclude'
   | 'excludedFolders'
   | 'usagePatterns'
-  | 'fragmentUsagePatterns';
+  | 'fragmentUsagePatterns'
+  | 'schemaFile';
 
 /**
  * One row of the CLI's flag table. `parseArgs`, `formatHelp` and the shell
@@ -36,14 +37,14 @@ export type FlagSpec = {
   valuePlaceholder?: string;
   /** `path` hands value completion to the shell's own file picker. */
   valueKind?: 'path';
-  /** Whether repeating the flag accumulates values. */
+  /** Whether repeating the flag accumulates values; otherwise the last wins. */
   repeatable?: boolean;
   description: string;
   /** Boolean flags: the `CliOptions` field this sets to true. */
   option?: BooleanOption;
   /** Value flags: the `CliConfig` field collected values land in. */
   target?: ValueTarget;
-  /** Keep a lone value a plain string instead of a one-element array. */
+  /** Repeatable flags: keep a lone value a plain string, not a 1-element array. */
   collapseSingle?: boolean;
 };
 
@@ -110,6 +111,14 @@ export const FLAGS: readonly FlagSpec[] = [
     repeatable: true,
     target: 'fragmentUsagePatterns',
     description: 'Fragment usage pattern, e.g. {Name}FragmentDoc (repeatable)',
+  },
+  {
+    flag: '--schema',
+    takesValue: true,
+    valuePlaceholder: '<file>',
+    valueKind: 'path',
+    target: 'schemaFile',
+    description: 'Local SDL file; also flags @deprecated field and enum usage',
   },
   {
     flag: '--json',
@@ -235,9 +244,9 @@ Docs: https://github.com/Krister-Johansson/gqlPrune#readme`;
 
 /**
  * Writes a collected value onto the config. The cast narrows the union of
- * property types down to what the table already guarantees: only targets
- * marked `collapseSingle` are handed a bare string, and those fields accept
- * `string | string[]`.
+ * property types down to what the table already guarantees: a bare string only
+ * reaches a target whose field accepts one, and every list target accepts
+ * `string[]`.
  */
 function setConfigValue(
   config: CliConfig,
@@ -252,9 +261,11 @@ function setConfigValue(
  *
  * Commands and flags come from the {@link COMMANDS} and {@link FLAGS} tables.
  * Value flags accept both `--flag value` and `--flag=value`, in any order, and
- * a value is never mistaken for the positional command. A command listed with
- * `argValues` (today only `completion`) takes one further positional, kept as
- * `commandArg`. Unknown flags, flags missing their value, and stray positional
+ * a value is never mistaken for the positional command. Repeating a flag the
+ * table marks repeatable builds a list; repeating any other value flag replaces
+ * the earlier value. A command listed with `argValues` (today only
+ * `completion`) takes one further positional, kept as `commandArg`. Unknown
+ * flags, flags missing their value, and stray positional
  * arguments are collected into `errors` rather than silently dropped — the
  * caller decides how to report them.
  *
@@ -329,24 +340,27 @@ export function parseArgs(argv: string[]): CliOptions {
       continue;
     }
     if (spec.target !== undefined) {
-      const values = collected.get(spec.target) ?? [];
+      // Repeating a flag the table does not mark repeatable replaces the
+      // earlier value: a scan validates against one schema, not several.
+      const values =
+        spec.repeatable === true ? (collected.get(spec.target) ?? []) : [];
       values.push(value);
       collected.set(spec.target, values);
     }
   }
 
   // A single value keeps the plain-string shape where the config allows it;
-  // repeats become an array, matching the schema (`string | string[]`).
+  // repeats become an array, matching the schema (`string | string[]`). A
+  // non-repeatable flag holds exactly one value, so it is always a string.
   const config: CliConfig = {};
   for (const spec of FLAGS) {
     if (spec.target === undefined) continue;
     const values = collected.get(spec.target);
     if (values === undefined || values.length === 0) continue;
-    setConfigValue(
-      config,
-      spec.target,
-      spec.collapseSingle === true && values.length === 1 ? values[0] : values,
-    );
+    const collapse =
+      spec.repeatable !== true ||
+      (spec.collapseSingle === true && values.length === 1);
+    setConfigValue(config, spec.target, collapse ? values[0] : values);
   }
 
   return { command, commandArg, ...options, errors, config };
