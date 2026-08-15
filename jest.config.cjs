@@ -1,6 +1,10 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
+  // Agent tooling creates temporary git worktrees under .claude/; without this,
+  // a bare test run also compiles those trees' stale sources and fails there.
+  testPathIgnorePatterns: ['/node_modules/', '/\\.claude/'],
+  modulePathIgnorePatterns: ['/\\.claude/'],
   // ts-jest suggests isolatedModules for node16 modules, but enabling it breaks
   // type-only imports from our `.d.ts` files under per-file transpilation. The
   // full `tsc` build covers type-checking, so silence the advisory here.

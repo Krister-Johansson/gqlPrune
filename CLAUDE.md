@@ -72,7 +72,7 @@ npm run build && npm run typecheck && npm run lint && npm test
 ```
 
 Coverage thresholds live in `jest.config.cjs` (statements/functions/lines ≥ 90,
-branches ≥ 75). New code must not drop coverage below the floor.
+branches ≥ 80). New code must not drop coverage below the floor.
 
 ## How we work
 
