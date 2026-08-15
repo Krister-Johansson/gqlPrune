@@ -225,6 +225,31 @@ Annotations go to stderr, so they don't interfere with `--json` output on stdout
 
 gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to stderr when a newer version is available. It stays silent in CI and when stdout isn't a TTY, never writes to stdout (so `--json` stays clean), and never affects the exit code. Opt out with `NO_UPDATE_NOTIFIER=1`; the check is also skipped whenever `CI` is set.
 
+### Shell completion
+
+`gqlprune completion <shell>` prints a tab-completion script for bash, zsh, or fish. It completes the commands, every flag, and the shell names for `completion` itself; `--graphql` and `--src` fall back to your shell's own file completion.
+
+Load it by adding one line to your shell config:
+
+```bash
+# ~/.bashrc
+eval "$(gqlprune completion bash)"
+```
+
+```zsh
+# ~/.zshrc
+eval "$(gqlprune completion zsh)"
+```
+
+```fish
+# ~/.config/fish/config.fish
+gqlprune completion fish | source
+```
+
+gqlPrune never edits your rc files; the line above is yours to add and remove. The script only defines a completion function and registers it for the `gqlprune` command.
+
+Completion needs `gqlprune` on your `PATH`, so it applies to global installs (`npm i -g gqlprune`) and to `npm link`. An `npx gqlprune` run and an npm script such as `npm run gql:prune` go through their own wrappers, which shells do not complete.
+
 ## Output
 
 Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file.
