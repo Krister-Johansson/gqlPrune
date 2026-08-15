@@ -8,6 +8,7 @@ import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import {
   buildJsonReport,
+  CANDIDATE_REMINDER,
   createConfigExcludeMatcher,
   DEFAULT_EXCLUDED_FOLDERS,
   detectGeneratedFiles,
@@ -58,11 +59,14 @@ const mockedExtract = extractGraphqlEntities as jest.Mock;
 
 // The parsed-file shape extractGraphqlEntities returns for a file whose only
 // contents are the given operations.
-const entitiesOf = (operations: OperationInfo[]) => ({
+const entitiesOf = (operations: OperationInfo[], filePath = 'a.gql') => ({
   operations,
   fragments: [],
   operationSpreads: [],
   fragmentSpreads: [],
+  filePath,
+  imports: [],
+  hasAnonymousOperation: false,
   document: null,
 });
 const mockedUnusedFragments =
@@ -79,6 +83,9 @@ const entitiesWithDocument = (filePath: string, content: string) => ({
   fragments: [],
   operationSpreads: [],
   fragmentSpreads: [],
+  filePath,
+  imports: [],
+  hasAnonymousOperation: false,
   document: parse(new Source(content, filePath)),
 });
 const DEPRECATED_QUERY = 'query GetUser {\n  user {\n    nickname\n  }\n}';
@@ -354,6 +361,7 @@ describe('gqlPruner', () => {
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
+      orphanedFiles: [],
       deprecatedUsages: [],
       duplicateWarnings: [],
       generatedWarnings: [],
@@ -403,6 +411,9 @@ describe('gqlPruner', () => {
       fragments,
       operationSpreads: [],
       fragmentSpreads: [],
+      filePath: operations[0]?.filePath ?? fragments[0]?.filePath ?? 'a.gql',
+      imports: [],
+      hasAnonymousOperation: false,
       document: null,
     });
 
@@ -474,11 +485,13 @@ describe('gqlPruner', () => {
           { name: 'A', type: 'query', file: 'a.gql', line: 3 },
         ],
         unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        orphanedFiles: [],
         deprecatedUsages: [],
         warnings: [],
         summary: {
           unusedOperations: 1,
           unusedFragments: 1,
+          orphanedFiles: 0,
           deprecatedUsages: 0,
         },
       });
@@ -488,11 +501,13 @@ describe('gqlPruner', () => {
       expect(buildJsonReport([], [])).toEqual({
         unusedOperations: [],
         unusedFragments: [],
+        orphanedFiles: [],
         deprecatedUsages: [],
         warnings: [],
         summary: {
           unusedOperations: 0,
           unusedFragments: 0,
+          orphanedFiles: 0,
           deprecatedUsages: 0,
         },
       });
@@ -504,8 +519,20 @@ describe('gqlPruner', () => {
       ]);
     });
 
+    it('lists the orphaned files and counts them in the summary', () => {
+      const report = buildJsonReport(
+        [{ name: 'A', type: 'query', filePath: 'dead.gql' }],
+        [],
+        [],
+        ['dead.gql'],
+      );
+      expect(report.orphanedFiles).toEqual(['dead.gql']);
+      expect(report.summary.orphanedFiles).toBe(1);
+    });
+
     it('serializes deprecated usages and counts them in the summary', () => {
       const report = buildJsonReport(
+        [],
         [],
         [],
         [],
@@ -568,6 +595,12 @@ describe('gqlPruner', () => {
       ]);
     });
 
+    it('annotates an orphaned file without a line', () => {
+      expect(formatAnnotations([], [], ['graphql/dead.gql'])).toEqual([
+        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it',
+      ]);
+    });
+
     it('returns [] when nothing is unused', () => {
       expect(formatAnnotations([], [])).toEqual([]);
     });
@@ -575,6 +608,7 @@ describe('gqlPruner', () => {
     it('formats one ::warning per deprecated usage', () => {
       expect(
         formatAnnotations(
+          [],
           [],
           [],
           [
@@ -964,6 +998,39 @@ describe('gqlPruner', () => {
       expect(result.generatedWarnings).toHaveLength(1);
     });
 
+    it('surfaces a file whose every definition is unused as orphaned', () => {
+      mockedFind
+        .mockReturnValueOnce(['dead.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'dead.gql' }],
+          'dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.orphanedFiles).toEqual(['dead.gql']);
+    });
+
+    it('leaves orphanedFiles empty when every definition is used', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql']) // gql files
+        .mockReturnValueOnce(['App.tsx']); // source files
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      const result = scanProject({ graphqlDir: './g', srcDir: './s' });
+
+      expect(result.orphanedFiles).toEqual([]);
+    });
+
     it('reports no deprecated usages when no schema is given', () => {
       mockedFind
         .mockReturnValueOnce(['a.gql'])
@@ -1122,6 +1189,126 @@ describe('gqlPruner', () => {
       expect(process.exitCode).toBe(1);
       expect(logged()).toContain('DeadFragment');
       expect(logged()).toContain('unused GraphQL fragments');
+      expect(logged()).toContain(CANDIDATE_REMINDER);
+    });
+
+    it('reminds that findings are candidates once there are findings', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+      const lines = logSpy.mock.calls.flat().map(String);
+      const reminders = lines.filter((line) =>
+        line.includes(CANDIDATE_REMINDER),
+      );
+      expect(reminders).toHaveLength(1);
+      // It closes the report, after the table it qualifies.
+      expect(lines.indexOf(reminders[0])).toBe(lines.length - 1);
+    });
+
+    it('omits the candidates reminder when nothing is unused', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction();
+      expect(logged()).not.toContain(CANDIDATE_REMINDER);
+    });
+
+    it('lists orphaned files after the fragments section', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['g/dead.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'g/dead.gql' }],
+          'g/dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      const output = logged();
+      expect(process.exitCode).toBe(1);
+      expect(output).toContain('Orphaned GraphQL Files');
+      expect(output).toContain('g/dead.gql');
+      expect(output.indexOf('Unused GraphQL Operations')).toBeLessThan(
+        output.indexOf('Orphaned GraphQL Files'),
+      );
+    });
+
+    it('omits the orphaned section when only some definitions in a file are unused', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf([
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+          { name: 'Dead', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
+      mockedReadSources.mockReturnValue([
+        { file: 'App.tsx', content: 'useGetUserQuery()' },
+      ]);
+
+      mainFunction();
+
+      expect(logged()).toContain('Unused GraphQL Operations');
+      expect(logged()).not.toContain('Orphaned GraphQL Files');
+    });
+
+    it('reports orphaned files in the JSON report and as annotations', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['g/dead.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesOf(
+          [{ name: 'Dead', type: 'query', filePath: 'g/dead.gql' }],
+          'g/dead.gql',
+        ),
+      );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction({ json: true, annotate: true });
+
+      const report = JSON.parse(logged());
+      expect(report.orphanedFiles).toEqual(['g/dead.gql']);
+      expect(report.summary.orphanedFiles).toBe(1);
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+        '::warning file=g/dead.gql::Orphaned GraphQL file',
+      );
     });
 
     it('passes gqlFiles, source contents, and fragment patterns to the corpus scan', () => {
@@ -1170,6 +1357,8 @@ describe('gqlPruner', () => {
       expect(process.exitCode).toBe(1);
       const out = logged();
       expect(out).not.toContain('Found ');
+      // stdout stays pure JSON: no human-readable reminder leaks into it.
+      expect(out).not.toContain(CANDIDATE_REMINDER);
       const report = JSON.parse(out);
       expect(report.unusedOperations).toEqual([
         { name: 'Unused', type: 'query', file: 'a.gql', line: 2 },
@@ -1180,6 +1369,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 1,
         unusedFragments: 1,
+        orphanedFiles: 0,
         deprecatedUsages: 0,
       });
     });
@@ -1207,6 +1397,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        orphanedFiles: 0,
         deprecatedUsages: 0,
       });
     });
@@ -1353,6 +1544,7 @@ describe('gqlPruner', () => {
       expect(report.summary).toEqual({
         unusedOperations: 0,
         unusedFragments: 0,
+        orphanedFiles: 0,
         deprecatedUsages: 0,
       });
       // …and the verbose detail went to stderr.
@@ -1521,6 +1713,39 @@ describe('gqlPruner', () => {
       expect(out).toContain('The field User.nickname is deprecated.');
       expect(out).toContain('Found 1 selection of deprecated');
       expect(out).toContain('No unused');
+    });
+
+    it('prints the deprecated section last, before the candidates reminder', () => {
+      readsConfigAndSchema(
+        'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        SDL,
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      // One unused operation in a file that also selects a deprecated field, so
+      // every section of the report appears at once.
+      mockedExtract.mockReturnValue({
+        ...entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+        operations: [{ name: 'GetUser', type: 'query', filePath: 'a.gql' }],
+      });
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      const lines = logSpy.mock.calls.flat().map(String);
+      const at = (needle: string) =>
+        lines.findIndex((line) => line.includes(needle));
+      expect(at('Unused GraphQL Operations')).toBeGreaterThan(-1);
+      expect(at('Unused GraphQL Operations')).toBeLessThan(
+        at('Orphaned GraphQL Files'),
+      );
+      expect(at('Orphaned GraphQL Files')).toBeLessThan(
+        at('Deprecated Field Usage'),
+      );
+      expect(at(CANDIDATE_REMINDER)).toBe(lines.length - 1);
+      expect(process.exitCode).toBe(1);
     });
 
     it('lists every deprecated selection in the section', () => {

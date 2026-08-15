@@ -28,6 +28,7 @@ import {
   GraphqlFileEntities,
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
 
 // Folders that are always excluded from traversal, regardless of config.
@@ -209,6 +210,19 @@ function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
   );
 }
 
+/** Prints the list of orphaned GraphQL files. */
+function reportOrphanedFiles(orphanedFiles: string[]): void {
+  console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
+  console.log('File');
+  orphanedFiles.forEach((file) => console.log(kleur.magenta(file)));
+  console.log(kleur.blue('------------------------------'));
+  console.log(
+    kleur.red(
+      `Found ${orphanedFiles.length} orphaned GraphQL files. Every definition in them is unused and no document imports them, so they can likely be deleted.`,
+    ),
+  );
+}
+
 /** Prints the deprecated field/enum selections found against the local SDL. */
 function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
   const maxFileLength = Math.max(
@@ -234,6 +248,14 @@ function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
   );
 }
 
+/**
+ * Closing line of the human-readable report. Usage is detected by string search,
+ * so a finding is a candidate rather than proof: names built dynamically, or
+ * referenced outside `srcDir` or from another repository, look unused here.
+ */
+export const CANDIDATE_REMINDER =
+  'These are candidates from a string search. Verify each one before deleting.';
+
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
   unusedOperations: {
@@ -243,6 +265,8 @@ export type JsonReport = {
     line?: number;
   }[];
   unusedFragments: { name: string; file: string; line?: number }[];
+  /** Files whose every definition is unused and which nothing imports. */
+  orphanedFiles: string[];
   /** Selections of `@deprecated` fields/enum values; empty without a schema. */
   deprecatedUsages: DeprecatedUsage[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
@@ -250,6 +274,7 @@ export type JsonReport = {
   summary: {
     unusedOperations: number;
     unusedFragments: number;
+    orphanedFiles: number;
     deprecatedUsages: number;
   };
 };
@@ -259,6 +284,7 @@ export function buildJsonReport(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
   warnings: string[] = [],
+  orphanedFiles: string[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
 ): JsonReport {
   return {
@@ -273,11 +299,13 @@ export function buildJsonReport(
       file: fragment.filePath,
       line: fragment.line,
     })),
+    orphanedFiles,
     deprecatedUsages,
     warnings,
     summary: {
       unusedOperations: unusedOperations.length,
       unusedFragments: unusedFragments.length,
+      orphanedFiles: orphanedFiles.length,
       deprecatedUsages: deprecatedUsages.length,
     },
   };
@@ -303,12 +331,13 @@ function escapeAnnotationProperty(value: string): string {
 
 /**
  * Formats GitHub Actions `::warning` annotations for the unused operations and
- * fragments and for each deprecated selection, so they surface inline on a PR.
- * Omits the line when unknown.
+ * fragments, for each orphaned file and for each deprecated selection, so they
+ * surface inline on a PR. Omits the line when unknown.
  */
 export function formatAnnotations(
   unusedOperations: OperationInfo[],
   unusedFragments: FragmentInfo[],
+  orphanedFiles: string[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
 ): string[] {
   const annotate = (
@@ -335,6 +364,13 @@ export function formatAnnotations(
         fragment.filePath,
         fragment.line,
         `Unused GraphQL fragment "${fragment.name}"`,
+      ),
+    ),
+    ...orphanedFiles.map((file) =>
+      annotate(
+        file,
+        undefined,
+        'Orphaned GraphQL file: every definition is unused and no document imports it',
       ),
     ),
     // The validator's message already names the deprecated field or enum value
@@ -565,6 +601,8 @@ export type ScanResult = {
   operationUsages: OperationUsage[];
   unusedOperations: OperationInfo[];
   unusedFragments: FragmentInfo[];
+  /** Files whose every definition is unused and which no document imports. */
+  orphanedFiles: string[];
   /**
    * Selections of `@deprecated` schema fields or enum values. Always empty
    * unless the caller passed a schema (see `schemaFile`).
@@ -687,6 +725,11 @@ export function scanProject(
     operationUsages,
     unusedOperations,
     unusedFragments,
+    orphanedFiles: findOrphanedFiles(
+      parsedFiles,
+      unusedOperations,
+      unusedFragments,
+    ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
@@ -788,6 +831,7 @@ export function mainFunction(
     operationCount,
     unusedOperations,
     unusedFragments,
+    orphanedFiles,
     deprecatedUsages,
     duplicateWarnings,
     generatedWarnings,
@@ -831,6 +875,7 @@ export function mainFunction(
     for (const line of formatAnnotations(
       unusedOperations,
       unusedFragments,
+      orphanedFiles,
       deprecatedUsages,
     )) {
       console.error(line);
@@ -844,6 +889,7 @@ export function mainFunction(
           unusedOperations,
           unusedFragments,
           advisoryWarnings,
+          orphanedFiles,
           deprecatedUsages,
         ),
         null,
@@ -870,6 +916,11 @@ export function mainFunction(
     if (unusedFragments.length > 0) {
       reportUnusedFragments(unusedFragments);
     }
+    // An orphaned file always implies unused definitions, so this section only
+    // ever follows one of the two above; it never carries the exit code alone.
+    if (orphanedFiles.length > 0) {
+      reportOrphanedFiles(orphanedFiles);
+    }
   }
 
   // Advisory, so it prints after the unused sections (and after the all-clear
@@ -880,6 +931,9 @@ export function mainFunction(
 
   // Use exitCode (not process.exit) so all report output flushes before exit.
   if (!nothingUnused) {
+    // Closes a report that named something: everything above is a candidate.
+    // The all-clear path has nothing to qualify, so it stays silent.
+    console.log(kleur.dim(CANDIDATE_REMINDER));
     process.exitCode = 1;
   }
 }

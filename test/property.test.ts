@@ -297,6 +297,7 @@ describe('property-based invariants', () => {
             const referenced = names[pick % names.length];
             const parsed: GraphqlFileEntities[] = [
               {
+                filePath: 'generated.gql',
                 operations: [],
                 fragments: names.map((name) => ({
                   name,
@@ -304,6 +305,8 @@ describe('property-based invariants', () => {
                 })),
                 operationSpreads: [],
                 fragmentSpreads: [],
+                imports: [],
+                hasAnonymousOperation: false,
                 document: null,
               },
             ];

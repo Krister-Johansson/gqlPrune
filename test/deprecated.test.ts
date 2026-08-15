@@ -28,10 +28,13 @@ const parsedFile = (
   filePath: string,
   content: string,
 ): GraphqlFileEntities => ({
+  filePath,
   operations: [],
   fragments: [],
   operationSpreads: [],
   fragmentSpreads: [],
+  imports: [],
+  hasAnonymousOperation: false,
   document: parse(new Source(content, filePath)),
 });
 
@@ -101,10 +104,13 @@ describe('findDeprecatedUsages', () => {
 
   it('skips files that failed to parse', () => {
     const unparsed: GraphqlFileEntities = {
+      filePath: 'graphql/broken.gql',
       operations: [],
       fragments: [],
       operationSpreads: [],
       fragmentSpreads: [],
+      imports: [],
+      hasAnonymousOperation: false,
       document: null,
     };
     const usages = findDeprecatedUsages(schema, [
@@ -122,10 +128,13 @@ describe('findDeprecatedUsages', () => {
     expect(
       findDeprecatedUsages(schema, [
         {
+          filePath: 'graphql/broken.gql',
           operations: [],
           fragments: [],
           operationSpreads: [],
           fragmentSpreads: [],
+          imports: [],
+          hasAnonymousOperation: false,
           document: null,
         },
       ]),
