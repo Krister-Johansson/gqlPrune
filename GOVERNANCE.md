@@ -17,6 +17,14 @@ There are currently no other committer roles. If the project grows enough that
 review becomes a bottleneck, the maintainer will invite regular contributors to
 become committers and update this document.
 
+Nobody is granted escalated permissions (write access, merge approval, access
+to repository settings or secrets) without review first. Before any such grant,
+the maintainer reviews the person's contribution history in this project,
+confirms the account's identity well enough to trust it (for example an
+established public track record or a known affiliation), and records the grant
+and its reasoning in an issue. The same applies to revocation: access that is
+no longer needed is removed.
+
 ## How decisions are made
 
 Decisions about scope, design, and releases are made by the maintainer, in

@@ -1,0 +1,35 @@
+# Attaches a CycloneDX SBOM to every GitHub release, so each published
+# version ships with a machine-readable inventory of its runtime
+# dependency tree (see docs/security-policies.md).
+name: SBOM
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: generate + attach
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload the SBOM as a release asset
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Generate CycloneDX SBOM for the production tree
+        run: npm sbom --sbom-format cyclonedx --omit dev > "gqlprune-${TAG#gqlprune-v}.cdx.json"
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+      - name: Attach SBOM to the release
+        run: gh release upload "$TAG" gqlprune-*.cdx.json --clobber
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
