@@ -14,6 +14,7 @@ import {
   findDuplicateNameWarnings,
   findUnusedOperations,
   formatAnnotations,
+  formatExpandedDirLines,
   formatGeneratedFileWarnings,
   formatVerboseConfigLines,
   formatVerboseScanLines,
@@ -316,6 +317,25 @@ describe('gqlPruner', () => {
       expect(text).toContain('exclude: **/dist, node_modules, .git');
       expect(text).toContain('usagePatterns: {Name}Doc');
       expect(text).toContain('fragmentUsagePatterns: {Name}FragmentDoc');
+    });
+  });
+
+  describe('formatExpandedDirLines', () => {
+    it('lists the directories a pattern expanded to', () => {
+      expect(
+        formatExpandedDirLines(
+          'graphqlDir',
+          ['packages/*/graphql'],
+          ['packages/web/graphql', 'packages/admin/graphql'],
+        ),
+      ).toEqual([
+        'graphqlDir (expanded): packages/web/graphql, packages/admin/graphql',
+      ]);
+    });
+
+    it('says nothing when expansion changed nothing', () => {
+      expect(formatExpandedDirLines('srcDir', ['./s'], ['./s'])).toEqual([]);
+      expect(formatExpandedDirLines('srcDir', [], [])).toEqual([]);
     });
   });
 
@@ -1328,6 +1348,105 @@ describe('gqlPruner', () => {
       ).not.toThrow();
       expect(exitSpy).not.toHaveBeenCalled();
       expect(logged()).toContain('No unused');
+    });
+
+    // A directory tree for the glob expansion below: each key is a directory,
+    // each value the names of its (directory) children.
+    const mockDirTree = (tree: Record<string, string[]>) => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        (tree[p] ?? []).map((name) => ({
+          name,
+          isDirectory: () => true,
+          isSymbolicLink: () => false,
+        })),
+      );
+    };
+
+    it('expands a directory glob and scans the matching directories', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: packages/*/graphql\nsrcDir: ./s\n',
+      );
+      mockDirTree({
+        packages: ['web', 'admin'],
+        'packages/web': ['graphql'],
+        'packages/admin': ['graphql'],
+      });
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['web.gql'])
+        .mockReturnValueOnce(['admin.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      // scanProject sees literal directories, never the pattern.
+      const scanned = mockedFind.mock.calls.map((call) => call[0]);
+      expect(scanned).toEqual([
+        'packages/web/graphql',
+        'packages/admin/graphql',
+        './s',
+      ]);
+      expect(logged()).toContain('No unused');
+    });
+
+    it('exits 2 when a directory glob matches nothing', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: packages/*/graphql\nsrcDir: ./s\n',
+      );
+      mockDirTree({ packages: ['web'], 'packages/web': ['src'] });
+      mockedDirExists.mockReturnValue(true);
+
+      expect(() => mainFunction()).toThrow('process.exit:2');
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('packages/*/graphql');
+      expect(mockedFind).not.toHaveBeenCalled();
+    });
+
+    it('does not touch the filesystem for a config without globs', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockDirTree({});
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction();
+
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+      expect(mockedFind.mock.calls.map((call) => call[0])).toEqual([
+        './g',
+        './s',
+      ]);
+    });
+
+    it('reports both the configured pattern and its expansion under --verbose', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: packages/*/graphql\nsrcDir: ./s\n',
+      );
+      mockDirTree({ packages: ['web'], 'packages/web': ['graphql'] });
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['web.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+      mainFunction({ verbose: true });
+
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('graphqlDir: packages/*/graphql');
+      expect(errs).toContain('graphqlDir (expanded): packages/web/graphql');
+      // srcDir has no glob, so it gets no expansion line.
+      expect(errs).not.toContain('srcDir (expanded)');
     });
 
     it('exits 2 with guidance when neither a config file nor flags supply dirs', () => {

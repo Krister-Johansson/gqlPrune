@@ -10,8 +10,10 @@ import { FragmentInfo } from '../types/FragmentInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
+  DEFAULT_EXCLUDED_FOLDERS,
   directoryExists,
   ExcludeMatcher,
+  expandDirPatterns,
   findFilesWithExtension,
   isOperationUsedInContents,
   readSourceFiles,
@@ -28,8 +30,9 @@ import {
 } from '../utils/operations.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 
-// Folders that are always excluded from traversal, regardless of config.
-export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
+// Defined in fileUtils (the directory walks need it too) and re-exported here,
+// where the exclude handling lives.
+export { DEFAULT_EXCLUDED_FOLDERS };
 
 /**
  * Collects every exclude pattern: the `exclude` globs, the deprecated
@@ -543,6 +546,23 @@ export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
 }
 
 /**
+ * Renders the `--verbose` line naming the directories a `graphqlDir`/`srcDir`
+ * list expanded to. Returns nothing when expansion changed nothing, since
+ * {@link formatVerboseConfigLines} already prints the configured values and a
+ * repeated line would only add noise.
+ */
+export function formatExpandedDirLines(
+  field: string,
+  configured: string[],
+  expanded: string[],
+): string[] {
+  const unchanged =
+    configured.length === expanded.length &&
+    configured.every((dir, index) => dir === expanded[index]);
+  return unchanged ? [] : [`${field} (expanded): ${expanded.join(', ')}`];
+}
+
+/**
  * Renders the scan's findings as `--verbose` lines: the files scanned, then one
  * verdict per operation — with the matching pattern and file for used ones, and
  * the searched-but-unmatched patterns for unused ones.
@@ -672,9 +692,27 @@ export function mainFunction(
     process.exit(2);
   }
 
-  const missingDirs = [...graphqlDirs, ...srcDirs].filter(
-    (dir) => !directoryExists(dir),
-  );
+  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches;
+  // plain paths pass through and are checked for existence just below.
+  const expandedGraphqlDirs = expandDirPatterns(graphqlDirs);
+  const expandedSrcDirs = expandDirPatterns(srcDirs);
+  const emptyPatterns = [
+    ...expandedGraphqlDirs.unmatched,
+    ...expandedSrcDirs.unmatched,
+  ];
+  if (emptyPatterns.length > 0) {
+    console.error(
+      kleur.red(
+        `These configured directory patterns match no directories: ${emptyPatterns.join(', ')}.`,
+      ),
+    );
+    process.exit(2);
+  }
+
+  const missingDirs = [
+    ...expandedGraphqlDirs.dirs,
+    ...expandedSrcDirs.dirs,
+  ].filter((dir) => !directoryExists(dir));
   if (missingDirs.length > 0) {
     console.error(
       kleur.red(
@@ -684,17 +722,32 @@ export function mainFunction(
     process.exit(2);
   }
 
-  // All directories exist; carry the normalized lists forward.
+  // All directories exist; carry the expanded lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
-    graphqlDir: graphqlDirs,
-    srcDir: srcDirs,
+    graphqlDir: expandedGraphqlDirs.dirs,
+    srcDir: expandedSrcDirs.dirs,
   };
 
   // ---------------- Main Logic ----------------
 
   if (verbose) {
-    logVerbose(formatVerboseConfigLines(config));
+    // Report what was configured, then what any glob among it expanded to.
+    logVerbose(
+      formatVerboseConfigLines({
+        ...config,
+        graphqlDir: graphqlDirs,
+        srcDir: srcDirs,
+      }),
+    );
+    logVerbose([
+      ...formatExpandedDirLines(
+        'graphqlDir',
+        graphqlDirs,
+        expandedGraphqlDirs.dirs,
+      ),
+      ...formatExpandedDirLines('srcDir', srcDirs, expandedSrcDirs.dirs),
+    ]);
   }
 
   const result = scanProject(config);

@@ -2,9 +2,16 @@
 // Copyright (c) 2023 Krister Johansson
 
 export interface GqlPruneConfig {
-  /** Directory (or directories) containing your `.gql`/`.graphql` files. */
+  /**
+   * Directory (or directories) containing your `.gql`/`.graphql` files. An
+   * entry may also be a glob pattern, expanded to the directories it matches
+   * before the scan (see the README for examples).
+   */
   graphqlDir: string | string[];
-  /** Directory (or directories) containing your source files. */
+  /**
+   * Directory (or directories) containing your source files. Accepts glob
+   * patterns like `graphqlDir`.
+   */
   srcDir: string | string[];
   /**
    * Glob patterns (gitignore-flavored) for files and folders to skip during

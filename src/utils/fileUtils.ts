@@ -7,6 +7,9 @@ import picomatch from 'picomatch';
 
 const baseDir = path.resolve('./');
 
+// Folders that are always excluded from traversal, regardless of config.
+export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
+
 /** Tests a project-root-relative path against the configured exclude patterns. */
 export type ExcludeMatcher = (relativePath: string) => boolean;
 
@@ -115,6 +118,118 @@ export function findFilesWithExtension(
   }
 
   return files;
+}
+
+/** The outcome of expanding a list of configured directory patterns. */
+export type DirExpansion = {
+  /** Literal directories, in configuration order, de-duplicated. */
+  dirs: string[];
+  /** The patterns that contain glob magic but matched no directory. */
+  unmatched: string[];
+};
+
+/**
+ * Walks `base` and returns every directory whose base-relative posix path
+ * matches `glob`, with `prefix` (a `./`, if the pattern carried one) and `base`
+ * put back in front so the result reads like the configured pattern.
+ *
+ * `node_modules` and `.git` are never entered. Directory symlinks are followed
+ * as {@link findFilesWithExtension} follows them, with `visited` tracking real
+ * paths so a cycle terminates. A glob without `**` (or a brace, whose segments
+ * cannot be counted this way) only needs as many levels as it has segments, so
+ * the walk stops there rather than reading the whole tree.
+ */
+function findMatchingDirs(
+  base: string,
+  glob: string,
+  prefix: string,
+): string[] {
+  const isMatch = picomatch(glob, { dot: true });
+  const depthLimit = /\*\*|\{/.test(glob) ? Infinity : glob.split('/').length;
+  const matches: string[] = [];
+  const visited = new Set<string>();
+
+  const walk = (dir: string, relative: string, depth: number): void => {
+    let items: fs.Dirent[];
+    try {
+      const realDir = fs.realpathSync(dir);
+      if (visited.has(realDir)) return; // symlink cycle or aliased directory
+      visited.add(realDir);
+      items = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // an unreadable directory simply contributes no matches
+    }
+
+    for (const item of items) {
+      if (DEFAULT_EXCLUDED_FOLDERS.includes(item.name)) continue;
+      const itemPath = path.join(dir, item.name);
+
+      let isDirectory = item.isDirectory();
+      if (!isDirectory && item.isSymbolicLink()) {
+        try {
+          isDirectory = fs.statSync(itemPath).isDirectory();
+        } catch {
+          continue; // broken symlink
+        }
+      }
+      if (!isDirectory) continue;
+
+      const itemRelative =
+        relative === '' ? item.name : `${relative}/${item.name}`;
+      if (isMatch(itemRelative)) {
+        matches.push(
+          `${prefix}${base === '' ? '' : `${base}/`}${itemRelative}`,
+        );
+      }
+      if (depth + 1 < depthLimit) walk(itemPath, itemRelative, depth + 1);
+    }
+  };
+
+  walk(base === '' ? '.' : base, '', 0);
+  return matches;
+}
+
+/**
+ * Expands the glob patterns in a `graphqlDir`/`srcDir` list into the directories
+ * they match, leaving plain paths alone.
+ *
+ * An entry without glob magic passes through untouched whether or not it exists,
+ * so the caller's missing-directory check still reports it. An entry with glob
+ * magic is expanded against the filesystem, and is returned in `unmatched` when
+ * it matches nothing, because a pattern that quietly scans zero directories is a
+ * configuration mistake rather than a clean run.
+ *
+ * @param {string[]} patterns - The configured directories and glob patterns.
+ * @returns {DirExpansion} - The literal directories plus any empty patterns.
+ */
+export function expandDirPatterns(patterns: string[]): DirExpansion {
+  const dirs: string[] = [];
+  const unmatched: string[] = [];
+  const seen = new Set<string>();
+  const add = (dir: string): void => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    dirs.push(dir);
+  };
+
+  for (const pattern of patterns) {
+    // `scan` splits a pattern into its static base and the glob that follows,
+    // and normalizes a leading `./` into `prefix`, so `./packages/*/graphql`
+    // and `packages/*/graphql` match identically.
+    const { isGlob, base, glob, prefix } = picomatch.scan(pattern);
+    if (!isGlob) {
+      add(pattern);
+      continue;
+    }
+    const matches = findMatchingDirs(base, glob, prefix);
+    if (matches.length === 0) {
+      unmatched.push(pattern);
+      continue;
+    }
+    matches.forEach(add);
+  }
+
+  return { dirs, unmatched };
 }
 
 /** A source file path paired with its contents. */

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import {
   createExcludeMatcher,
   directoryExists,
+  expandDirPatterns,
   findFilesWithExtension,
   isOperationUsedInContents,
   readSourceFiles,
@@ -25,6 +26,16 @@ afterAll(() => {
   console.error = originalConsoleError;
 });
 
+// A minimal fs.Dirent stand-in, as returned by readdirSync withFileTypes.
+const dirent = (
+  name: string,
+  opts: { dir?: boolean; link?: boolean } = {},
+) => ({
+  name,
+  isDirectory: () => opts.dir === true,
+  isSymbolicLink: () => opts.link === true,
+});
+
 describe('fileUtils', () => {
   afterEach(() => {
     jest.resetAllMocks();
@@ -33,16 +44,6 @@ describe('fileUtils', () => {
   describe('findFilesWithExtension', () => {
     afterEach(() => {
       jest.resetAllMocks();
-    });
-
-    // A minimal fs.Dirent stand-in, as returned by readdirSync withFileTypes.
-    const dirent = (
-      name: string,
-      opts: { dir?: boolean; link?: boolean } = {},
-    ) => ({
-      name,
-      isDirectory: () => opts.dir === true,
-      isSymbolicLink: () => opts.link === true,
     });
 
     // Unless a test says otherwise, every path is its own real path.
@@ -190,6 +191,199 @@ describe('fileUtils', () => {
       const matcher = createExcludeMatcher(['gen', '!gen/keep.ts']);
       expect(findFilesWithExtension('./', ['.ts'], matcher)).toEqual([
         'app.ts',
+      ]);
+    });
+  });
+
+  describe('expandDirPatterns', () => {
+    afterEach(() => {
+      jest.resetAllMocks();
+    });
+
+    // Builds a fake directory tree: each key is a directory path, each value the
+    // names of its children. A name carrying a file extension (`graphql.ts`) is
+    // a file; everything else, dotfolders included, is a directory.
+    const mockTree = (tree: Record<string, string[]>) => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        (tree[p] ?? []).map((name) =>
+          dirent(name, { dir: !/[^.]\.[a-z]+$/.test(name) }),
+        ),
+      );
+    };
+
+    it('passes a pattern without glob magic through untouched', () => {
+      mockTree({});
+      expect(expandDirPatterns(['./graphql', 'src/api'])).toEqual({
+        dirs: ['./graphql', 'src/api'],
+        unmatched: [],
+      });
+      // A literal path needs no walk: the missing-directory check handles it.
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('passes a non-existent literal path through rather than reporting it', () => {
+      mockTree({});
+      expect(expandDirPatterns(['./nope'])).toEqual({
+        dirs: ['./nope'],
+        unmatched: [],
+      });
+    });
+
+    it('expands a glob to every matching directory', () => {
+      mockTree({
+        packages: ['web', 'admin'],
+        'packages/web': ['graphql', 'src'],
+        'packages/admin': ['graphql'],
+      });
+      expect(expandDirPatterns(['packages/*/graphql'])).toEqual({
+        dirs: ['packages/web/graphql', 'packages/admin/graphql'],
+        unmatched: [],
+      });
+    });
+
+    it('matches at any depth with **', () => {
+      mockTree({
+        apps: ['graphql', 'a'],
+        'apps/a': ['nested'],
+        'apps/a/nested': ['graphql'],
+      });
+      expect(expandDirPatterns(['apps/**/graphql']).dirs).toEqual([
+        'apps/graphql',
+        'apps/a/nested/graphql',
+      ]);
+    });
+
+    it('walks from the project root when the pattern has no static base', () => {
+      mockTree({ '.': ['web', 'admin'], web: ['graphql'], admin: ['graphql'] });
+      expect(expandDirPatterns(['*/graphql']).dirs).toEqual([
+        'web/graphql',
+        'admin/graphql',
+      ]);
+    });
+
+    it('normalizes a "./" prefix and keeps it on the expanded paths', () => {
+      mockTree({ packages: ['web'], 'packages/web': ['graphql'] });
+      expect(expandDirPatterns(['./packages/*/graphql']).dirs).toEqual([
+        './packages/web/graphql',
+      ]);
+      expect(expandDirPatterns(['packages/*/graphql']).dirs).toEqual([
+        'packages/web/graphql',
+      ]);
+    });
+
+    it('matches directories only, never files', () => {
+      mockTree({
+        packages: ['web'],
+        'packages/web': ['graphql', 'graphql.ts'],
+      });
+      expect(expandDirPatterns(['packages/*/*']).dirs).toEqual([
+        'packages/web/graphql',
+      ]);
+    });
+
+    it('never descends into node_modules or .git', () => {
+      mockTree({
+        '.': ['node_modules', '.git', 'packages'],
+        node_modules: ['dep'],
+        'node_modules/dep': ['graphql'],
+        '.git': ['graphql'],
+        packages: ['web'],
+        'packages/web': ['graphql'],
+      });
+      expect(expandDirPatterns(['**/graphql']).dirs).toEqual([
+        'packages/web/graphql',
+      ]);
+      expect(fs.readdirSync).not.toHaveBeenCalledWith(
+        'node_modules',
+        expect.anything(),
+      );
+    });
+
+    it('de-duplicates matches while keeping walk order', () => {
+      mockTree({ packages: ['web'], 'packages/web': ['graphql'] });
+      expect(
+        expandDirPatterns([
+          'packages/*/graphql',
+          'packages/**/graphql',
+          './src',
+          './src',
+        ]),
+      ).toEqual({
+        dirs: ['packages/web/graphql', './src'],
+        unmatched: [],
+      });
+    });
+
+    it('reports a glob that matches no directory', () => {
+      mockTree({ packages: ['web'], 'packages/web': ['src'] });
+      expect(expandDirPatterns(['packages/*/graphql', './src'])).toEqual({
+        dirs: ['./src'],
+        unmatched: ['packages/*/graphql'],
+      });
+    });
+
+    it('reports a glob whose static base cannot be read', () => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      expect(expandDirPatterns(['missing/*/graphql']).unmatched).toEqual([
+        'missing/*/graphql',
+      ]);
+    });
+
+    it('does not walk deeper than a glob without ** can match', () => {
+      mockTree({
+        packages: ['web'],
+        'packages/web': ['graphql'],
+        'packages/web/graphql': ['deep'],
+      });
+      expandDirPatterns(['packages/*/graphql']);
+      expect(fs.readdirSync).not.toHaveBeenCalledWith(
+        'packages/web/graphql',
+        expect.anything(),
+      );
+    });
+
+    it('follows a directory symlink and terminates on a cycle', () => {
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === 'packages'
+          ? [dirent('web', { link: true })]
+          : p === 'packages/web'
+            ? [dirent('graphql', { dir: true }), dirent('loop', { link: true })]
+            : [],
+      );
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      // `loop` points back at the directory it lives in.
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => (p === 'packages/web/loop' ? 'packages/web' : p),
+      );
+
+      expect(expandDirPatterns(['packages/**/graphql']).dirs).toEqual([
+        'packages/web/graphql',
+      ]);
+    });
+
+    it('skips a broken symlink and keeps walking', () => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === 'packages'
+          ? [dirent('broken', { link: true }), dirent('web', { dir: true })]
+          : [dirent('graphql', { dir: true })],
+      );
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw new Error('ENOENT: dangling link');
+      });
+
+      expect(expandDirPatterns(['packages/*/graphql']).dirs).toEqual([
+        'packages/web/graphql',
       ]);
     });
   });
