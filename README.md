@@ -189,7 +189,7 @@ npm install --save-dev gqlprune
 
 ### Configuration
 
-Run the `init` command to generate `gqlPrune.config.yaml` at the root of your project. It auto-detects your GraphQL and source directories (scanning the project and skipping `node_modules`, `.git`, and `dist`) and offers them as defaults you can accept or override. It also detects a generated file that would mask your results (the [false "all clear"](#avoiding-false-all-clear-results) trap) and pre-fills it into `exclude`, so your first run is truthful. After writing the file it prints a preview of what a real run would find:
+Run the `init` command to generate `gqlPrune.config.yaml` at the root of your project. It auto-detects your GraphQL and source directories (scanning the project and skipping `node_modules`, `.git`, and `dist`) and offers them as defaults you can accept or override. If the project has a [GraphQL Code Generator config](#reading-your-codegen-config), `init` takes the defaults from there instead, says which file they came from, and writes all of them into `gqlPrune.config.yaml`, `usagePatterns` and `inline` included. It has to: a config that names `graphqlDir` and `srcDir` stops gqlPrune from reading your codegen config on later runs, so a derived setting left out of the file would be gone. The one exception is a derived `schemaFile` whose path is not on disk yet, because it is downloaded or generated at build time. `init` leaves that one out, and does not list it either, rather than writing a path that would end every later run with exit code 2. It also detects a generated file that would mask your results (the [false "all clear"](#avoiding-false-all-clear-results) trap) and pre-fills it into `exclude`, so your first run is truthful. After writing the file it prints a preview of what a real run would find:
 
 ```bash
 npx gqlprune init
@@ -235,6 +235,7 @@ inline: true
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 - `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-usage check](#deprecated-selections-opt-in); omit it and no schema is read.
+- `codegenConfig` (optional): path to a GraphQL Code Generator config to derive settings from, for a config that does not sit in the project root. See [reading your codegen config](#reading-your-codegen-config).
 - `checkFields` (optional): set to `true` to add the advisory [field candidates](#field-candidates-opt-in) list. Off by default.
 - `inline` (optional): set to `true` to also scan [inline documents](#inline-documents-opt-in) in `srcDir`. Off by default.
 
@@ -258,6 +259,61 @@ srcDir: 'packages/*/src'
 
 `*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
+### Reading your codegen config
+
+If your project already uses GraphQL Code Generator, most of what gqlPrune needs is written down in its config. gqlPrune reads it so you do not have to restate the same facts.
+
+It looks in the current directory for the first of these that exists: `codegen.ts`, `codegen.mts`, `codegen.cts`, `codegen.js`, `codegen.mjs`, `codegen.cjs`, `codegen.yml`, `codegen.yaml`, `codegen.json`, and finally a `codegen` key in `package.json`. Point it at a config somewhere else with `--codegen <file>` or `codegenConfig` in `gqlPrune.config.yaml`.
+
+This happens automatically only when nothing else says which directories to scan: no `graphqlDir`/`srcDir` in `gqlPrune.config.yaml` and no `--graphql`/`--src` on the command line. That is the run that would otherwise stop with "No configuration found", so reading a codegen config can only turn a refusal into a working scan. A project that is already configured behaves exactly as before. When you name a file with `--codegen`, it is read whichever way the rest of the project is configured, and a file that cannot be read ends the run with exit code 2.
+
+What gqlPrune takes from each part:
+
+| Codegen setting                          | Becomes                                                                                            |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `documents` globs                        | `graphqlDir` and `srcDir` (the file-name part of the glob is dropped)                              |
+| `documents` globs starting `!`           | `exclude` entries                                                                                  |
+| `documents` in `.ts`/`.tsx`/`.js`/`.jsx` | `inline: true`, so [inline documents](#inline-documents-opt-in) are scanned                        |
+| `schema`, when it is a local SDL file    | `schemaFile`, which turns on the [deprecated-usage check](#deprecated-selections-opt-in)           |
+| `generates` output paths                 | `exclude` entries, so generated code cannot [mask your results](#avoiding-false-all-clear-results) |
+| preset and plugin names                  | `usagePatterns` and `fragmentUsagePatterns` (see the table below)                                  |
+
+A `schema` that is a URL, an introspection endpoint, a glob covering several files, or a value with a `${...}` in it is ignored: `schemaFile` takes one local SDL file.
+
+Explicit configuration fails loudly, and inference degrades gracefully. A setting you wrote in `gqlPrune.config.yaml` or passed as a flag ends the run with exit code 2 when it does not resolve, because you asked for it. A setting gqlPrune worked out from your codegen config never does: it is dropped, gqlPrune warns you which one and which file it came from, and the scan carries on. So a `schema` path that is not on disk yet, because it is downloaded or generated at build time, costs you the deprecated-selection check and a warning, not a failed run. Same for a `documents` glob pointing at a directory this checkout does not have: gqlPrune scans the directories that do exist and names the one it skipped. Only when nothing derived is left to scan does the run stop, and then the message names the codegen config so you know where the paths came from.
+
+Precedence runs in one direction: CLI flags beat `gqlPrune.config.yaml`, which beats anything derived from your codegen config, which beats the built-in defaults. An inferred setting is never silent. In a normal run gqlPrune names the file and the settings that came from it, and `--verbose` prints every derived value.
+
+Because deriving stops once a config names the directories, `gqlprune init` writes the settings it derived into the file it generates (see [Configuration](#configuration)). Run it on an apollo-angular project and the generated config carries `usagePatterns: ['{Name}GQL', '{Name}Document']`, so your operations keep matching the code your plugin generates.
+
+A `codegen.ts` (or any other JavaScript or TypeScript config) is read as text, never executed. Running your config would mean running arbitrary code to produce values that are only ever defaults, so gqlPrune pulls out the string literals it needs instead. A value that is computed, imported, spread, or built from a template with `${...}` in it cannot be read this way and is skipped, which costs you one suggestion and nothing else. YAML and JSON configs are parsed normally.
+
+#### Which naming conventions are recognized
+
+Each plugin generates code under its own naming convention, and that convention is what `usagePatterns` has to match. Recognizing one **replaces** the built-in patterns rather than adding to them: every extra pattern is another way for a dead operation to look used, and a silent all clear is the worst result this tool can give you.
+
+| Plugin or preset            | Derived `usagePatterns`                                                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript-react-apollo`   | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `use{Name}Suspense{Type}`, `{Name}Document`                                                    |
+| `typescript-urql`           | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-vue-apollo`     | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `{Name}Document`                                                                               |
+| `typescript-vue-urql`       | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-react-query`    | `use{Name}{Type}`, `useInfinite{Name}{Type}`, `useSuspense{Name}{Type}`, `useSuspenseInfinite{Name}{Type}`, `{Name}Document`             |
+| `typescript-solid-query`    | `create{Name}{Type}`, `createInfinite{Name}{Type}`, `createSuspense{Name}{Type}`, `createSuspenseInfinite{Name}{Type}`, `{Name}Document` |
+| `typescript-apollo-angular` | `{Name}GQL`, `{Name}Document`                                                                                                            |
+| `typed-document-node`       | `{Name}Document`                                                                                                                         |
+| `client` preset             | no patterns; sets `inline: true` instead                                                                                                 |
+
+Every plugin in the table also derives `fragmentUsagePatterns: ['{Name}FragmentDoc']`, which is what all of them call a fragment constant. The `client` preset is the exception to the whole idea of a pattern: your code writes `const q = graphql('query GetUser ...')` and then passes `q` around, so the operation's name never appears at the call site and no pattern could find it. The inline scan follows the constant instead.
+
+Four conventions are left out on purpose, and a project using them keeps the built-in patterns:
+
+- `typescript-document-nodes` names its constant after the operation and nothing else (`GetUser`), and `typescript-graphql-request` calls its SDK method the same way (`sdk.GetUser(...)`). A bare `{Name}` pattern matches any identifier that happens to share the name, so it would report far too much as used.
+- `typescript-operations` generates types only. Importing the `GetUserQuery` type says nothing about whether the operation still runs.
+- `near-operation-file` changes where the output files are written, not what anything is called.
+
+Two codegen options change the generated names in a way gqlPrune does not follow: `omitOperationSuffix` drops the `Query`/`Mutation`/`Subscription` suffix, and `dedupeOperationSuffix` drops it when the operation name already ends with it. If you use either, set `usagePatterns` yourself.
+
 ### Without a config file (CLI flags)
 
 Every config field has a matching flag, so you can run gqlPrune without a `gqlPrune.config.yaml`. That makes a one-off `npx` run possible with no setup:
@@ -275,6 +331,7 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--pattern <template>` _(repeatable)_                                  | `usagePatterns`         |
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
 | `--schema <file>`                                                      | `schemaFile`            |
+| `--codegen <file>`                                                     | `codegenConfig`         |
 | `--fields`                                                             | `checkFields`           |
 | `--inline`                                                             | `inline`                |
 
