@@ -1,0 +1,13 @@
+# The project's only finding, and a low-confidence one: src/useLedger.ts names
+# GetArchivedLedger in a telemetry string, so something in ordinary source knows
+# the name even though no usage pattern matches it. Nothing imports this file,
+# so it is reported orphaned too and inherits that same low grade.
+#
+# There is deliberately no high or medium finding here: --min-confidence high
+# has to leave nothing behind, which is what turns the exit code from 1 to 0.
+query GetArchivedLedger {
+  ledger {
+    id
+    archivedAt
+  }
+}

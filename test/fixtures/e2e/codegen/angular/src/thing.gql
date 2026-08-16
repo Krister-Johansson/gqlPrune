@@ -1,0 +1,8 @@
+# Used through the Angular convention only: src/thing.service.ts names
+# GetThingGQL and nothing else. The built-in defaults would call this unused.
+query GetThing {
+  thing {
+    id
+    label
+  }
+}

@@ -58,13 +58,31 @@ failing test names the spec and assertion that broke; the specs live next to
 the module they cover, one file per source module.
 
 `test/e2e/` is a second, separate suite. It spawns the built CLI as a real
-process against the static project tree in `test/fixtures/e2e/`, and it packs
+process against the static project trees in `test/fixtures/e2e/`, and it packs
 and installs the tarball to check the shipped artifact. Run it with
 `npm run test:e2e`, which builds first. It is excluded from `npm test` and from
 the coverage thresholds, which describe the unit suite. Assert there on section
 headers, finding names, parsed JSON keys and exit codes, not on whole-output
 equality: the report gains columns over time and a byte-exact expectation would
 have to be rewritten for each one.
+
+What it covers: the core scan and its report sections, `--json` stdout purity,
+`--annotate`, `--schema`, directory globs, the shell completion scripts, and the
+packaged binary. On top of that, one spec per option the tool grew recently:
+inline documents (`--inline`), settings derived from a GraphQL Code Generator
+config, and confidence grading with `--min-confidence`. A further spec turns all
+of them on against a single project, and `contract.e2e.test.ts` pins the exact
+shape of the JSON report and the full exit-code matrix. That last one is the
+deliberate exception to the assertion style above: a changed key is a breaking
+change for anyone consuming the report, so it has to fail loudly.
+
+To add a fixture, extend `test/fixtures/e2e/` rather than editing an existing
+project, and give a scenario its own sub-project when it needs a config of its
+own. Both `gqlPrune.config.yaml` and the codegen config are looked up in the
+process's working directory, so any project carrying one must be run with `cwd`
+set to itself. Fixture files are input data: they are deliberately written the
+way a real consumer's tree looks, they are never compiled or linted, and they
+are excluded from the published package.
 
 ## Commit messages
 

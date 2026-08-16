@@ -1,0 +1,7 @@
+# Dead: nothing references useGetDerivedDeadOrderQuery.
+query GetDerivedDeadOrder {
+  order(id: "1") {
+    id
+    reference
+  }
+}

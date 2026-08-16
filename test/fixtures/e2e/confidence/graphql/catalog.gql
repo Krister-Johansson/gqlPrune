@@ -1,0 +1,61 @@
+# Eight used operations. The count matters: the suspected-generated heuristic
+# only applies from five operations up and needs one file to reference at least
+# 70% of them. Eight of the eleven operations in this project are referenced by
+# src/generated/graphql.ts, which is 73%. Adding a dead operation here without
+# adding a used one would drop it under the bar and the "medium" grade below
+# would quietly become "high".
+query GetCatalogItem($id: ID!) {
+  catalogItem(id: $id) {
+    id
+    title
+  }
+}
+
+query GetCatalogList {
+  catalogList {
+    id
+    title
+  }
+}
+
+query GetCatalogFacets {
+  catalogFacets {
+    id
+    label
+  }
+}
+
+query GetCatalogBrands {
+  catalogBrands {
+    id
+    name
+  }
+}
+
+query GetCatalogStock {
+  catalogStock {
+    id
+    quantity
+  }
+}
+
+query GetCatalogPrices {
+  catalogPrices {
+    id
+    amount
+  }
+}
+
+query GetCatalogReviews {
+  catalogReviews {
+    id
+    rating
+  }
+}
+
+mutation UpdateCatalogItem($id: ID!, $title: String!) {
+  updateCatalogItem(id: $id, title: $title) {
+    id
+    title
+  }
+}

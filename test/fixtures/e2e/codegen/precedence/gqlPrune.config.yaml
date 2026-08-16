@@ -1,0 +1,3 @@
+# FIXTURE gqlPrune config. It wins over the codegen.yml beside it.
+graphqlDir: ./graphql
+srcDir: ./src

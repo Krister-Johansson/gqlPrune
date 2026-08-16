@@ -1,0 +1,32 @@
+# Fixture SDL for the combined project. Only the deprecation rule runs against
+# it, but it covers every selection in the corpus, inline documents included.
+
+type Query {
+  user(id: ID!): User
+  dashboard: Dashboard
+  legacyExport: LegacyExport
+  ghost: Ghost
+}
+
+type User {
+  id: ID!
+  name: String
+  legacyEmail: String @deprecated(reason: "Use contact.email instead.")
+  internalNotes: String
+}
+
+type Dashboard {
+  id: ID!
+  headline: String
+  refreshedAt: String
+}
+
+type LegacyExport {
+  id: ID!
+  generatedAt: String
+}
+
+type Ghost {
+  id: ID!
+  seenAt: String
+}

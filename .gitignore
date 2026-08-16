@@ -1,5 +1,8 @@
 .DS_Store
 gqlPrune.config.yaml
+# The e2e fixtures ship configs of their own; without this the suite passes
+# locally and fails on a fresh clone, because the files never got committed.
+!test/fixtures/**/gqlPrune.config.yaml
 # Logs
 logs
 *.log

@@ -39,7 +39,15 @@ src/
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)
 test/                     Jest specs, one per source module
   e2e/                    Separate suite: spawns the built CLI as a process
-  fixtures/e2e/           Static project tree the e2e cases scan
+    cli.e2e.test.ts       Core scan: sections, --json, --annotate, --schema, globs
+    inline.e2e.test.ts    --inline, including the two self-usage invariants
+    codegen.e2e.test.ts   Derivation, precedence, degradation, init
+    confidence.e2e.test.ts  Grades, reasons, --min-confidence
+    interactions.e2e.test.ts  Every option at once, on one project
+    contract.e2e.test.ts  The JSON shape and the exit-code matrix, pinned
+    completion.e2e.test.ts  The shell completion scripts
+    packaging.e2e.test.ts   Pack, install, run the installed binary
+  fixtures/e2e/           Static project trees the e2e cases scan
 ```
 
 **Design pattern that matters:** keep logic in small **pure, exported
@@ -106,6 +114,19 @@ A change moves through these stages. Don't skip ahead.
   purity, the packaged artifact — belongs in `test/e2e/` instead. Assert there on
   section headers, finding names, parsed JSON keys and exit codes; never on
   whole-output equality, which breaks on every added column.
+  `contract.e2e.test.ts` is the one deliberate exception: it compares the JSON
+  report's key sets exactly, because a changed key is a breaking change for
+  every consumer, and it gathers the whole exit-code matrix in one place.
+- Adding an e2e fixture: extend `test/fixtures/e2e/`, and give a scenario its
+  own sub-project whenever it needs a config of its own. `gqlPrune.config.yaml`
+  and the codegen config are both looked up in the process's working directory,
+  so a project that carries either one must be run with `cwd` set to itself, or
+  it will configure some other project's scan. Label every fixture file as a
+  fixture in a comment; they are input data, never compiled. They stay out of
+  the unit suite (`testPathIgnorePatterns`), out of coverage
+  (`collectCoverageFrom`), out of lint (the `ignores` list in
+  `eslint.config.js`) and out of the published package (`files` in
+  `package.json`), and the packaging spec asserts the last of those.
 
 ### 3. Branch & commit
 

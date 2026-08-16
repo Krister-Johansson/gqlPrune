@@ -1,0 +1,10 @@
+# FIXTURE codegen config using a plugin whose naming convention differs from
+# gqlPrune's built-in defaults: typescript-apollo-angular generates {Name}GQL
+# service classes, not use{Name}{Type} hooks. The schema is a URL on purpose, so
+# no schemaFile is derived and the deprecated check stays out of this scenario.
+schema: https://example.test/graphql
+documents: ./src/**/*.gql
+generates:
+  ./src/generated/graphql.ts:
+    plugins:
+      - typescript-apollo-angular

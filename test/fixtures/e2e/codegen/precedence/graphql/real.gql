@@ -1,0 +1,6 @@
+# Dead: nothing in ./src references useGetRealThingQuery.
+query GetRealThing {
+  thing {
+    id
+  }
+}

@@ -1,0 +1,8 @@
+# The reverse direction: this fragment is defined in a .gql file and spread only
+# by an inline document in src/badges.ts. Nothing imports this file and no
+# source file names a GqlReportMetaFieldsFragmentDoc, so with the inline pass
+# off it is unused and the file is orphaned.
+fragment GqlReportMetaFields on Report {
+  id
+  updatedAt
+}

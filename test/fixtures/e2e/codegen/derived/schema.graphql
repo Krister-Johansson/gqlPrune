@@ -1,0 +1,11 @@
+# Fixture SDL for the derived-settings project.
+type Query {
+  order(id: ID!): Order
+}
+
+type Order {
+  id: ID!
+  reference: String
+  legacyStatus: String @deprecated(reason: "Use state instead.")
+  state: String
+}

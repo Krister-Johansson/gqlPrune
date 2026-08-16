@@ -1,0 +1,10 @@
+# Used: inline/src/useNotes.ts calls useGetNotesQuery. It keeps the run without
+# --inline meaningful: the scan still has a definition to judge, and finds it
+# used, so "nothing is reported when the inline pass is off" is a real result
+# rather than an empty scan.
+query GetNotes {
+  note {
+    id
+    body
+  }
+}

@@ -1,0 +1,9 @@
+# Used: inline-fragments/src/useReport.ts calls useGetReportQuery.
+# It spreads InlineBadgeFields, which is defined inline in src/badges.ts. That
+# spread is the only thing keeping the inline fragment alive.
+query GetReport {
+  report {
+    id
+    ...InlineBadgeFields
+  }
+}

@@ -7,7 +7,8 @@
 // where the shipped artifact, the stream discipline and the exit-code contract
 // are actually exercised.
 //
-// The fixture is the static tree under test/fixtures/e2e/:
+// This file covers the core scan. The projects it uses, under
+// test/fixtures/e2e/:
 //
 //   app/       one used query, one dead query (a whole orphaned file), a dead
 //              fragment kept off the orphan list by an #import, a deprecated
@@ -18,6 +19,12 @@
 //   packages/  two workspaces, for `packages/*/graphql` glob expansion
 //   schema.graphql / schema-invalid.graphql
 //
+// The rest of the fixture tree belongs to the other spec files, each of which
+// documents its own projects: inline.e2e.test.ts (inline/, inline-fragments/),
+// codegen.e2e.test.ts (codegen/*), confidence.e2e.test.ts (confidence/,
+// confidence-low/, bad-config/), interactions.e2e.test.ts and
+// contract.e2e.test.ts (combined/).
+//
 // On assertions: the human report is checked for section headers, their
 // relative order and the names of specific findings — never whole-output
 // equality, because columns and header lines get added to it over time. The
@@ -27,22 +34,11 @@
 import {
   assertCliBuilt,
   expectInOrder,
+  parseReport,
   runCli,
   toPosix,
   type CliResult,
 } from './helpers';
-
-type JsonReport = {
-  unusedOperations: { name: string; type: string; file: string }[];
-  unusedFragments: { name: string; file: string }[];
-  orphanedFiles: { file: string; confidence: string; reason: string }[];
-  deprecatedUsages: { message: string; file: string; line?: number }[];
-  unusedFields?: { field: string }[];
-  warnings: string[];
-  summary: Record<string, number> & {
-    byConfidence: Record<string, number>;
-  };
-};
 
 const APP_SCAN = ['--graphql', 'app/graphql', '--src', 'app/src'];
 const CLEAN_SCAN = ['--graphql', 'clean/graphql', '--src', 'clean/src'];
@@ -53,17 +49,6 @@ const GLOB_SCAN = [
   '--src',
   'packages/*/src',
 ];
-
-/** Parses stdout as the JSON report, failing loudly on anything else. */
-function parseReport(result: CliResult): JsonReport {
-  try {
-    return JSON.parse(result.stdout) as JsonReport;
-  } catch {
-    throw new Error(
-      `Expected stdout to be a JSON document, got:\n${result.stdout}`,
-    );
-  }
-}
 
 beforeAll(() => {
   assertCliBuilt();

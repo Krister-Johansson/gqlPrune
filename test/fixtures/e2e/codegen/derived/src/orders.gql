@@ -1,0 +1,9 @@
+# Used: src/useOrder.ts calls useGetOrderQuery. Selects a deprecated field, so
+# the schema derived from codegen.yml has a visible effect.
+query GetOrder($id: ID!) {
+  order(id: $id) {
+    id
+    reference
+    legacyStatus
+  }
+}

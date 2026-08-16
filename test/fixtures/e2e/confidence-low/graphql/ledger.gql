@@ -1,0 +1,7 @@
+# Used: src/useLedger.ts calls useGetLedgerQuery.
+query GetLedger {
+  ledger {
+    id
+    balance
+  }
+}
