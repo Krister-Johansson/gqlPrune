@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Krister Johansson
 
+import { ConfidenceLevel } from './Confidence.js';
+
 export interface GqlPruneConfig {
   /**
    * Directory (or directories) containing your `.gql`/`.graphql` files. An
@@ -71,6 +73,13 @@ export interface GqlPruneConfig {
    * `.gql`/`.graphql` files. Set to `true`, or pass `--inline`.
    */
   inline?: boolean;
+  /**
+   * Report only findings graded at this confidence or above (`high`, `medium`
+   * or `low`). Omit it and every finding is reported, which is the default.
+   * Because it decides what gets reported, it also decides the exit code: a CI
+   * job can gate on `high` while a local run still shows the rest.
+   */
+  minConfidence?: ConfidenceLevel;
 }
 
 /**
@@ -90,5 +99,6 @@ export type CliConfig = Partial<
     | 'codegenConfig'
     | 'checkFields'
     | 'inline'
+    | 'minConfidence'
   >
 > & { excludedFolders?: string[] };

@@ -7,8 +7,6 @@ import * as yaml from 'js-yaml';
 import path from 'path';
 import { buildSchema, GraphQLSchema } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
-import { FragmentInfo } from '../types/FragmentInfo.js';
-import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
@@ -48,6 +46,22 @@ import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
+import {
+  CONFIDENCE_LEVELS,
+  countByConfidence,
+  describeConfidence,
+  filterByConfidence,
+  GradedField,
+  GradedFragment,
+  GradedOperation,
+  gradeFieldCandidates,
+  gradeFragments,
+  gradeOperations,
+  gradeOrphanedFiles,
+  isConfidenceLevel,
+  OrphanedFile,
+} from '../utils/confidence.js';
+import { ConfidenceLevel } from '../types/Confidence.js';
 
 // Defined in fileUtils (the directory walks need it too) and re-exported here,
 // where the exclude handling lives.
@@ -226,8 +240,27 @@ export function applyInlineIdentifierUsage(
   });
 }
 
+/** Header of the confidence column, and the width every such column takes. */
+const CONFIDENCE_HEADER = 'Confidence';
+
+/**
+ * Colours one grade for the tables: the strongest evidence stands out and the
+ * weakest recedes, so a table of nothing but `high` still reads as a plain
+ * column rather than a wall of colour.
+ */
+function paintConfidence(text: string, level: ConfidenceLevel): string {
+  if (level === 'high') return kleur.red(text);
+  if (level === 'medium') return kleur.yellow(text);
+  return kleur.dim(text);
+}
+
+/** One padded, coloured confidence cell. */
+function confidenceCell(level: ConfidenceLevel): string {
+  return paintConfidence(level.padEnd(CONFIDENCE_HEADER.length), level);
+}
+
 /** Prints the aligned table of unused operations. */
-function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
+function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
   const maxTypeLength = Math.max(
     'Type'.length,
     ...unusedOperations.map((op) => op.type.length),
@@ -241,13 +274,14 @@ function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
   console.log(
     'Type'.padEnd(maxTypeLength),
     'Operation'.padEnd(maxNameLength),
+    CONFIDENCE_HEADER,
     'File',
   );
   unusedOperations.forEach((op) => {
     console.log(
       `${kleur.yellow(op.type.padEnd(maxTypeLength))} ${kleur.cyan(
         op.name.padEnd(maxNameLength),
-      )} ${kleur.magenta(path.basename(op.filePath))}`,
+      )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
     );
   });
   console.log(kleur.blue('---------------------------------'));
@@ -259,19 +293,19 @@ function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
 }
 
 /** Prints the aligned table of unused fragments. */
-function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
+function reportUnusedFragments(unusedFragments: GradedFragment[]): void {
   const maxNameLength = Math.max(
     'Fragment'.length,
     ...unusedFragments.map((fragment) => fragment.name.length),
   );
 
   console.log(kleur.blue('\n--- Unused GraphQL Fragments ---\n'));
-  console.log('Fragment'.padEnd(maxNameLength), 'File');
+  console.log('Fragment'.padEnd(maxNameLength), CONFIDENCE_HEADER, 'File');
   unusedFragments.forEach((fragment) => {
     console.log(
-      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${kleur.magenta(
-        path.basename(fragment.filePath),
-      )}`,
+      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${confidenceCell(
+        fragment.confidence,
+      )} ${kleur.magenta(path.basename(fragment.filePath))}`,
     );
   });
   console.log(kleur.blue('--------------------------------'));
@@ -294,19 +328,25 @@ function formatFieldLocation(location: {
  * Prints the advisory table of field candidates: one row per selection, with
  * the key shown on its first row only.
  */
-function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
+function reportUnusedFieldCandidates(candidates: GradedField[]): void {
   const maxFieldLength = Math.max(
     'Field'.length,
     ...candidates.map((candidate) => candidate.field.length),
   );
 
   console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
-  console.log('Field'.padEnd(maxFieldLength), 'Selected in');
+  console.log('Field'.padEnd(maxFieldLength), CONFIDENCE_HEADER, 'Selected in');
   candidates.forEach((candidate) => {
     candidate.locations.forEach((location, index) => {
       const label = index === 0 ? candidate.field : '';
+      // The grade belongs to the key, not to each of its selections, so it sits
+      // on the first row with the key and the rest stay blank.
+      const grade =
+        index === 0
+          ? confidenceCell(candidate.confidence)
+          : ''.padEnd(CONFIDENCE_HEADER.length);
       console.log(
-        `${kleur.cyan(label.padEnd(maxFieldLength))} ${kleur.magenta(
+        `${kleur.cyan(label.padEnd(maxFieldLength))} ${grade} ${kleur.magenta(
           formatFieldLocation(location),
         )}`,
       );
@@ -328,10 +368,14 @@ function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
   );
 }
 /** Prints the list of orphaned GraphQL files. */
-function reportOrphanedFiles(orphanedFiles: string[]): void {
+function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
   console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
-  console.log('File');
-  orphanedFiles.forEach((file) => console.log(kleur.magenta(file)));
+  console.log(CONFIDENCE_HEADER, 'File');
+  orphanedFiles.forEach((orphan) =>
+    console.log(
+      `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
+    ),
+  );
   console.log(kleur.blue('------------------------------'));
   console.log(
     kleur.red(
@@ -380,17 +424,25 @@ export type JsonReport = {
     type: string;
     file: string;
     line?: number;
+    confidence: ConfidenceLevel;
+    reason: string;
   }[];
-  unusedFragments: { name: string; file: string; line?: number }[];
+  unusedFragments: {
+    name: string;
+    file: string;
+    line?: number;
+    confidence: ConfidenceLevel;
+    reason: string;
+  }[];
   /** Files whose every definition is unused and which nothing imports. */
-  orphanedFiles: string[];
+  orphanedFiles: OrphanedFile[];
   /** Selections of `@deprecated` fields/enum values; empty without a schema. */
   deprecatedUsages: DeprecatedUsage[];
   /**
    * Field candidates. Present only when the opt-in check ran, so an absent key
    * means "not checked" rather than "nothing found".
    */
-  unusedFields?: UnusedFieldInfo[];
+  unusedFields?: GradedField[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
   summary: {
@@ -399,6 +451,8 @@ export type JsonReport = {
     orphanedFiles: number;
     deprecatedUsages: number;
     unusedFields?: number;
+    /** Every graded finding in this report, counted per level. */
+    byConfidence: Record<ConfidenceLevel, number>;
   };
 };
 
@@ -406,14 +460,19 @@ export type JsonReport = {
  * Builds the structured report for `--json` output. `unusedFields` is omitted
  * entirely when the opt-in field check did not run. An empty array would claim
  * a clean result the scan never looked for.
+ *
+ * Every candidate kind carries its `confidence` and the `reason` behind it;
+ * `summary.byConfidence` counts them all together. Deprecated selections are
+ * left ungraded: they are validated against a real schema, so they are facts
+ * rather than candidates.
  */
 export function buildJsonReport(
-  unusedOperations: OperationInfo[],
-  unusedFragments: FragmentInfo[],
+  unusedOperations: GradedOperation[],
+  unusedFragments: GradedFragment[],
   warnings: string[] = [],
-  orphanedFiles: string[] = [],
+  orphanedFiles: OrphanedFile[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
-  unusedFields?: UnusedFieldInfo[],
+  unusedFields?: GradedField[],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -421,11 +480,15 @@ export function buildJsonReport(
       type: op.type,
       file: op.filePath,
       line: op.line,
+      confidence: op.confidence,
+      reason: op.reason,
     })),
     unusedFragments: unusedFragments.map((fragment) => ({
       name: fragment.name,
       file: fragment.filePath,
       line: fragment.line,
+      confidence: fragment.confidence,
+      reason: fragment.reason,
     })),
     orphanedFiles,
     deprecatedUsages,
@@ -437,6 +500,12 @@ export function buildJsonReport(
       orphanedFiles: orphanedFiles.length,
       deprecatedUsages: deprecatedUsages.length,
       ...(unusedFields ? { unusedFields: unusedFields.length } : {}),
+      byConfidence: countByConfidence([
+        ...unusedOperations,
+        ...unusedFragments,
+        ...orphanedFiles,
+        ...(unusedFields ?? []),
+      ]),
     },
   };
 }
@@ -464,13 +533,17 @@ function escapeAnnotationProperty(value: string): string {
  * fragments, for each orphaned file and for each deprecated selection, so they
  * surface inline on a PR. Omits the line when unknown. Field candidates get one
  * annotation each, pinned to their first selection.
+ *
+ * Every candidate annotation ends with its confidence grade, so a reviewer can
+ * triage straight from the Files changed tab. Deprecated selections carry no
+ * grade: the schema already settled them.
  */
 export function formatAnnotations(
-  unusedOperations: OperationInfo[],
-  unusedFragments: FragmentInfo[],
-  orphanedFiles: string[] = [],
+  unusedOperations: GradedOperation[],
+  unusedFragments: GradedFragment[],
+  orphanedFiles: OrphanedFile[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
-  unusedFields: UnusedFieldInfo[] = [],
+  unusedFields: GradedField[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -483,26 +556,37 @@ export function formatAnnotations(
       : `file=${escapedFile}`;
     return `::warning ${location}::${escapeAnnotationMessage(message)}`;
   };
+  const graded = (message: string, level: ConfidenceLevel): string =>
+    `${message} [confidence: ${level}]`;
   return [
     ...unusedOperations.map((op) =>
       annotate(
         op.filePath,
         op.line,
-        `Unused GraphQL operation "${op.name}" (${op.type})`,
+        graded(
+          `Unused GraphQL operation "${op.name}" (${op.type})`,
+          op.confidence,
+        ),
       ),
     ),
     ...unusedFragments.map((fragment) =>
       annotate(
         fragment.filePath,
         fragment.line,
-        `Unused GraphQL fragment "${fragment.name}"`,
+        graded(
+          `Unused GraphQL fragment "${fragment.name}"`,
+          fragment.confidence,
+        ),
       ),
     ),
-    ...orphanedFiles.map((file) =>
+    ...orphanedFiles.map((orphan) =>
       annotate(
-        file,
+        orphan.file,
         undefined,
-        'Orphaned GraphQL file: every definition is unused and no document imports it',
+        graded(
+          'Orphaned GraphQL file: every definition is unused and no document imports it',
+          orphan.confidence,
+        ),
       ),
     ),
     // The validator's message already names the deprecated field or enum value
@@ -514,7 +598,10 @@ export function formatAnnotations(
       annotate(
         candidate.locations[0].file,
         candidate.locations[0].line,
-        `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+        graded(
+          `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+          candidate.confidence,
+        ),
       ),
     ),
   ];
@@ -940,10 +1027,10 @@ export type ScanResult = {
   gqlFiles: string[];
   /** Per-operation verdicts with the matching pattern/file (see `--verbose`). */
   operationUsages: OperationUsage[];
-  unusedOperations: OperationInfo[];
-  unusedFragments: FragmentInfo[];
+  unusedOperations: GradedOperation[];
+  unusedFragments: GradedFragment[];
   /** Files whose every definition is unused and which no document imports. */
-  orphanedFiles: string[];
+  orphanedFiles: OrphanedFile[];
   /**
    * Selections of `@deprecated` schema fields or enum values. Always empty
    * unless the caller passed a schema (see `schemaFile`).
@@ -953,7 +1040,7 @@ export type ScanResult = {
    * Advisory field candidates. Always empty unless `checkFields` is on: the
    * detection does not run at all when the option is off.
    */
-  unusedFieldCandidates: UnusedFieldInfo[];
+  unusedFieldCandidates: GradedField[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -975,6 +1062,40 @@ export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
     // empty line would suggest a setting that isn't in play.
     ...(config.schemaFile ? [`schemaFile: ${config.schemaFile}`] : []),
     ...(resolveInline(config) ? ['inline: true'] : []),
+    ...(config.minConfidence ? [`minConfidence: ${config.minConfidence}`] : []),
+  ];
+}
+
+/**
+ * Renders the `--verbose` line for every graded finding: which grade it got and
+ * the evidence behind it. Built from the unfiltered scan, so a `minConfidence`
+ * run still explains what it decided to hide.
+ */
+export function formatVerboseConfidenceLines(
+  result: Pick<
+    ScanResult,
+    | 'unusedOperations'
+    | 'unusedFragments'
+    | 'orphanedFiles'
+    | 'unusedFieldCandidates'
+  >,
+): string[] {
+  return [
+    ...result.unusedOperations.map(
+      (op) => `confidence: operation "${op.name}" is ${describeConfidence(op)}`,
+    ),
+    ...result.unusedFragments.map(
+      (fragment) =>
+        `confidence: fragment "${fragment.name}" is ${describeConfidence(fragment)}`,
+    ),
+    ...result.orphanedFiles.map(
+      (orphan) =>
+        `confidence: orphaned file "${orphan.file}" is ${describeConfidence(orphan)}`,
+    ),
+    ...result.unusedFieldCandidates.map(
+      (candidate) =>
+        `confidence: field "${candidate.field}" is ${describeConfidence(candidate)}`,
+    ),
   ];
 }
 
@@ -1118,6 +1239,21 @@ export function scanProject(
       )
     : [];
 
+  // Grade what the scan found. The bare-name search is the extra evidence the
+  // usage sweep above never gathers, and it only runs over the findings, which
+  // are few by construction.
+  const generatedPaths = new Set(generatedFiles.map((warning) => warning.file));
+  const gradedOperations = gradeOperations(
+    unusedOperations,
+    sources,
+    generatedPaths,
+  );
+  const gradedFragments = gradeFragments(
+    unusedFragments,
+    sources,
+    generatedPaths,
+  );
+
   return {
     gqlFileCount: gqlFiles.length,
     sourceFileCount: tsFiles.length,
@@ -1133,15 +1269,19 @@ export function scanProject(
     ),
     gqlFiles,
     operationUsages,
-    unusedOperations,
-    unusedFragments,
-    orphanedFiles: findOrphanedFiles(
-      parsedFiles,
-      unusedOperations,
-      unusedFragments,
+    unusedOperations: gradedOperations,
+    unusedFragments: gradedFragments,
+    orphanedFiles: gradeOrphanedFiles(
+      findOrphanedFiles(parsedFiles, unusedOperations, unusedFragments),
+      gradedOperations,
+      gradedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
-    unusedFieldCandidates,
+    unusedFieldCandidates: gradeFieldCandidates(
+      unusedFieldCandidates,
+      sources,
+      generatedPaths,
+    ),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -1224,6 +1364,19 @@ export function mainFunction(
   const schemaFile =
     typeof resolved.schemaFile === 'string' ? resolved.schemaFile.trim() : '';
 
+  // The gate decides what is reported and therefore the exit code, so a value
+  // outside the three levels stops the run instead of quietly gating on
+  // nothing. The CLI rejects its own bad values; this catches the config file.
+  const minConfidence = resolved.minConfidence;
+  if (minConfidence !== undefined && !isConfidenceLevel(minConfidence)) {
+    console.error(
+      kleur.red(
+        `Invalid minConfidence: ${String(minConfidence)}. Expected one of ${CONFIDENCE_LEVELS.join(', ')}.`,
+      ),
+    );
+    process.exit(2);
+  }
+
   // Every remaining directory exists; carry the expanded lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
@@ -1281,14 +1434,26 @@ export function mainFunction(
     sourceFileCount,
     operationCount,
     inlineDocumentCount,
-    unusedOperations,
-    unusedFragments,
-    orphanedFiles,
     deprecatedUsages,
-    unusedFieldCandidates,
     duplicateWarnings,
     generatedWarnings,
   } = result;
+  // The gate decides what is reported, and reporting is what sets the exit
+  // code: a CI job can fail on high-confidence findings alone while a local run
+  // still reviews the rest. Without it every finding is reported, as before.
+  const unusedOperations = filterByConfidence(
+    result.unusedOperations,
+    minConfidence,
+  );
+  const unusedFragments = filterByConfidence(
+    result.unusedFragments,
+    minConfidence,
+  );
+  const orphanedFiles = filterByConfidence(result.orphanedFiles, minConfidence);
+  const unusedFieldCandidates = filterByConfidence(
+    result.unusedFieldCandidates,
+    minConfidence,
+  );
   // Absent (not empty) in the JSON when the check is off, so a consumer can
   // tell "nothing found" from "never looked".
   const fieldCandidates = resolveCheckFields(config)
@@ -1304,6 +1469,8 @@ export function mainFunction(
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
+    // From the unfiltered scan, so a gated run still explains what it hid.
+    logVerbose(formatVerboseConfidenceLines(result));
   }
 
   if (!json) {

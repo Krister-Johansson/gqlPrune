@@ -35,11 +35,13 @@ import {
 type JsonReport = {
   unusedOperations: { name: string; type: string; file: string }[];
   unusedFragments: { name: string; file: string }[];
-  orphanedFiles: string[];
+  orphanedFiles: { file: string; confidence: string; reason: string }[];
   deprecatedUsages: { message: string; file: string; line?: number }[];
   unusedFields?: { field: string }[];
   warnings: string[];
-  summary: Record<string, number>;
+  summary: Record<string, number> & {
+    byConfidence: Record<string, number>;
+  };
 };
 
 const APP_SCAN = ['--graphql', 'app/graphql', '--src', 'app/src'];
@@ -138,7 +140,7 @@ describe('--json', () => {
     expect(report.unusedFragments.map((fragment) => fragment.name)).toEqual([
       'AbandonedTeaserFields',
     ]);
-    expect(report.orphanedFiles.map(toPosix)).toEqual([
+    expect(report.orphanedFiles.map((orphan) => toPosix(orphan.file))).toEqual([
       'app/graphql/legacyReport.gql',
     ]);
     expect(report.summary.unusedOperations).toBe(1);
@@ -151,9 +153,9 @@ describe('--json', () => {
 
     // teaserFields.gql holds nothing but the dead fragment, so only the
     // `#import` in user.gql saves it from being called orphaned.
-    expect(report.orphanedFiles.map(toPosix)).not.toContain(
-      'app/graphql/fragments/teaserFields.gql',
-    );
+    expect(
+      report.orphanedFiles.map((orphan) => toPosix(orphan.file)),
+    ).not.toContain('app/graphql/fragments/teaserFields.gql');
   });
 });
 
