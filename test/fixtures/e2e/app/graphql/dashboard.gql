@@ -1,0 +1,8 @@
+# Used: app/src/Dashboard.tsx calls useGetDashboardQuery.
+query GetDashboard {
+  dashboard {
+    id
+    headline
+    refreshedAt
+  }
+}

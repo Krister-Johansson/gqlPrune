@@ -58,6 +58,15 @@ export interface GqlPruneConfig {
    */
   checkFields?: boolean;
   /**
+   * Path to a GraphQL Code Generator config (e.g. `./tools/codegen.yml`) to
+   * derive settings from. Only needed when the config sits somewhere gqlPrune
+   * does not look: a `codegen.ts`/`.yml`/`.json` (or a `codegen` key in
+   * `package.json`) in the project root is picked up on its own, and only when
+   * nothing else configures the directories to scan. Anything set here or in
+   * `gqlPrune.config.yaml` wins over what the codegen config suggests.
+   */
+  codegenConfig?: string;
+  /**
    * Opt in to scanning inline GraphQL documents in your source files: ``gql`...` ``
    * and ``graphql`...` `` tagged templates, and `gql('...')` / `graphql('...')`
    * helper calls. Off by default, which keeps a scan limited to
@@ -87,6 +96,7 @@ export type CliConfig = Partial<
     | 'usagePatterns'
     | 'fragmentUsagePatterns'
     | 'schemaFile'
+    | 'codegenConfig'
     | 'checkFields'
     | 'inline'
     | 'minConfidence'

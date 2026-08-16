@@ -282,6 +282,27 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --codegen as the config codegenConfig', () => {
+    expect(parseArgs(['--codegen', './tools/codegen.yml']).config).toEqual({
+      codegenConfig: './tools/codegen.yml',
+    });
+    expect(parseArgs(['--codegen=./tools/codegen.yml']).config).toEqual({
+      codegenConfig: './tools/codegen.yml',
+    });
+  });
+
+  it('keeps the last --codegen when it is given twice', () => {
+    expect(
+      parseArgs(['--codegen', './a.yml', '--codegen', './b.yml']).config,
+    ).toEqual({ codegenConfig: './b.yml' });
+  });
+
+  it('reports a missing value for --codegen', () => {
+    const result = parseArgs(['--codegen']);
+    expect(result.config).toEqual({});
+    expect(result.errors).toEqual(['Missing value for --codegen']);
+  });
+
   it('reports a missing value for --schema', () => {
     const result = parseArgs(['--schema']);
     expect(result.config).toEqual({});
@@ -409,10 +430,10 @@ describe('CLI metadata tables', () => {
     }
   });
 
-  it('marks the directory and schema flags as path-valued', () => {
+  it('marks the flags that take a file or directory as path-valued', () => {
     expect(
       FLAGS.filter((f) => f.valueKind === 'path').map((f) => f.flag),
-    ).toEqual(['--graphql', '--src', '--schema']);
+    ).toEqual(['--graphql', '--src', '--schema', '--codegen']);
   });
 
   it('gives every boolean flag exactly one destination', () => {

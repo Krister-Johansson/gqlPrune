@@ -75,5 +75,11 @@ jobs:
             }
           " "$V"
       - run: npm ci
+      # Last gate before the registry: the e2e suite packs this exact tree with
+      # `npm pack`, installs the tarball into a throwaway directory and runs the
+      # installed binary. A broken bin mapping, a file missing from "files", or
+      # a lost shebang gets through every other check and is unfixable once
+      # published, since npm versions are immutable.
+      - run: npm run test:e2e
       # prepublishOnly (build + tests) runs as the pre-publish gate.
       - run: npm publish --access public

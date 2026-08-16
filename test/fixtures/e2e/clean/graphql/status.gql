@@ -1,0 +1,7 @@
+# Used: clean/src/useServiceStatus.ts calls useGetServiceStatusQuery.
+query GetServiceStatus {
+  serviceStatus {
+    id
+    state
+  }
+}

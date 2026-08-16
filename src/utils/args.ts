@@ -29,6 +29,7 @@ export type ValueTarget =
   | 'usagePatterns'
   | 'fragmentUsagePatterns'
   | 'schemaFile'
+  | 'codegenConfig'
   | 'minConfidence';
 
 /**
@@ -132,6 +133,14 @@ export const FLAGS: readonly FlagSpec[] = [
     valueKind: 'path',
     target: 'schemaFile',
     description: 'Local SDL file; also flags @deprecated field and enum usage',
+  },
+  {
+    flag: '--codegen',
+    takesValue: true,
+    valuePlaceholder: '<file>',
+    valueKind: 'path',
+    target: 'codegenConfig',
+    description: 'GraphQL Code Generator config to derive settings from',
   },
   {
     flag: '--fields',

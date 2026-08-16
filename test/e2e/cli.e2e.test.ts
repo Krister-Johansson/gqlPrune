@@ -1,0 +1,287 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Krister Johansson
+
+// End-to-end cases: every one of these spawns `node dist/cli.js` and inspects
+// what a user would see — stdout, stderr, and the exit code. The unit suite
+// mocks the filesystem and never runs the CLI as a process, so this layer is
+// where the shipped artifact, the stream discipline and the exit-code contract
+// are actually exercised.
+//
+// The fixture is the static tree under test/fixtures/e2e/:
+//
+//   app/       one used query, one dead query (a whole orphaned file), a dead
+//              fragment kept off the orphan list by an #import, a deprecated
+//              selection, and one field nothing in app/src names
+//   clean/     nothing unused; used for the exit-0 and advisory-only cases
+//   masked/    six operations plus a codegen-shaped graphql.ts covering all of
+//              them, which is what the masking warning is about
+//   packages/  two workspaces, for `packages/*/graphql` glob expansion
+//   schema.graphql / schema-invalid.graphql
+//
+// On assertions: the human report is checked for section headers, their
+// relative order and the names of specific findings — never whole-output
+// equality, because columns and header lines get added to it over time. The
+// JSON report is parsed and queried key by key for the same reason. Exit codes
+// and `--json` stdout purity are pinned exactly; those are stable contracts.
+
+import {
+  assertCliBuilt,
+  expectInOrder,
+  runCli,
+  toPosix,
+  type CliResult,
+} from './helpers';
+
+type JsonReport = {
+  unusedOperations: { name: string; type: string; file: string }[];
+  unusedFragments: { name: string; file: string }[];
+  orphanedFiles: { file: string; confidence: string; reason: string }[];
+  deprecatedUsages: { message: string; file: string; line?: number }[];
+  unusedFields?: { field: string }[];
+  warnings: string[];
+  summary: Record<string, number> & {
+    byConfidence: Record<string, number>;
+  };
+};
+
+const APP_SCAN = ['--graphql', 'app/graphql', '--src', 'app/src'];
+const CLEAN_SCAN = ['--graphql', 'clean/graphql', '--src', 'clean/src'];
+const MASKED_SCAN = ['--graphql', 'masked/graphql', '--src', 'masked/src'];
+const GLOB_SCAN = [
+  '--graphql',
+  'packages/*/graphql',
+  '--src',
+  'packages/*/src',
+];
+
+/** Parses stdout as the JSON report, failing loudly on anything else. */
+function parseReport(result: CliResult): JsonReport {
+  try {
+    return JSON.parse(result.stdout) as JsonReport;
+  } catch {
+    throw new Error(
+      `Expected stdout to be a JSON document, got:\n${result.stdout}`,
+    );
+  }
+}
+
+beforeAll(() => {
+  assertCliBuilt();
+});
+
+describe('a clean project', () => {
+  it('reports the all-clear and exits 0', async () => {
+    const result = await runCli(CLEAN_SCAN);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      'No unused GraphQL operations or fragments found.',
+    );
+    expect(result.stdout).not.toContain('--- Unused GraphQL Operations ---');
+  });
+});
+
+describe('a project with findings', () => {
+  let result: CliResult;
+
+  beforeAll(async () => {
+    result = await runCli([
+      ...APP_SCAN,
+      '--schema',
+      'schema.graphql',
+      '--fields',
+    ]);
+  });
+
+  it('exits 1', () => {
+    expect(result.code).toBe(1);
+  });
+
+  it('prints every section in report order, closing with the reminder', () => {
+    expectInOrder(result.stdout, [
+      '--- Unused GraphQL Operations ---',
+      '--- Unused GraphQL Fragments ---',
+      '--- Orphaned GraphQL Files ---',
+      '--- Deprecated Field Usage ---',
+      '--- Unused Field Candidates ---',
+      'These are candidates from a string search.',
+    ]);
+  });
+
+  it('names the dead operation, the dead fragment and the orphaned file', () => {
+    // Presence, not position: each of these also appears in the File column of
+    // an earlier section, so their first occurrence carries no meaning.
+    expect(result.stdout).toContain('GetLegacyReport');
+    expect(result.stdout).toContain('AbandonedTeaserFields');
+    expect(result.stdout).toContain('app/graphql/legacyReport.gql');
+    expect(result.stdout).toContain('internalAuditTrail');
+  });
+});
+
+describe('--json', () => {
+  it('puts nothing but the report on stdout', async () => {
+    const result = await runCli([...APP_SCAN, '--json']);
+
+    // The whole stream, byte for byte, has to be the JSON document: a stray
+    // info line or warning ahead of it would break every consumer piping this
+    // into jq. Everything human-readable belongs on stderr.
+    expect(result.stdout.trimEnd().startsWith('{')).toBe(true);
+    expect(result.stdout.trimEnd().endsWith('}')).toBe(true);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    expect(result.code).toBe(1);
+  });
+
+  it('reports the findings and their counts', async () => {
+    const report = parseReport(await runCli([...APP_SCAN, '--json']));
+
+    expect(report.unusedOperations.map((op) => op.name)).toEqual([
+      'GetLegacyReport',
+    ]);
+    expect(report.unusedFragments.map((fragment) => fragment.name)).toEqual([
+      'AbandonedTeaserFields',
+    ]);
+    expect(report.orphanedFiles.map((orphan) => toPosix(orphan.file))).toEqual([
+      'app/graphql/legacyReport.gql',
+    ]);
+    expect(report.summary.unusedOperations).toBe(1);
+    expect(report.summary.unusedFragments).toBe(1);
+    expect(report.summary.orphanedFiles).toBe(1);
+  });
+
+  it('keeps an imported file off the orphan list', async () => {
+    const report = parseReport(await runCli([...APP_SCAN, '--json']));
+
+    // teaserFields.gql holds nothing but the dead fragment, so only the
+    // `#import` in user.gql saves it from being called orphaned.
+    expect(
+      report.orphanedFiles.map((orphan) => toPosix(orphan.file)),
+    ).not.toContain('app/graphql/fragments/teaserFields.gql');
+  });
+});
+
+describe('a suspected generated file', () => {
+  it('warns on stderr and in the JSON warnings, without failing the run', async () => {
+    const result = await runCli([...MASKED_SCAN, '--json']);
+    const report = parseReport(result);
+
+    expect(result.stderr).toContain('Suspected generated file');
+    expect(result.stderr).toContain('graphql.ts');
+    expect(
+      report.warnings.filter(
+        (warning) =>
+          warning.includes('Suspected generated file') &&
+          warning.includes('graphql.ts'),
+      ),
+    ).toHaveLength(1);
+    // The warning is advisory: the masked scan itself found nothing unused.
+    expect(result.code).toBe(0);
+  });
+});
+
+describe('--annotate', () => {
+  it('emits ::warning workflow commands on stderr', async () => {
+    const result = await runCli([...APP_SCAN, '--annotate']);
+    const annotations = result.stderr
+      .split('\n')
+      .filter((line) => line.startsWith('::warning '));
+
+    expect(result.code).toBe(1);
+    expect(
+      annotations.some((line) =>
+        /^::warning file=app\/graphql\/legacyReport\.gql,line=\d+::.*GetLegacyReport/.test(
+          line,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      annotations.some((line) =>
+        /^::warning file=\S+teaserFields\.gql,line=\d+::.*AbandonedTeaserFields/.test(
+          line,
+        ),
+      ),
+    ).toBe(true);
+    // Annotations must never leak into stdout, which --json shares.
+    expect(result.stdout).not.toContain('::warning');
+  });
+});
+
+describe('--schema', () => {
+  it('adds the advisory section without changing the exit code', async () => {
+    const result = await runCli([...CLEAN_SCAN, '--schema', 'schema.graphql']);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('--- Deprecated Field Usage ---');
+    expect(result.stdout).toContain('Ping.legacyLatencyMs is deprecated');
+  });
+
+  it('exits 2 on an SDL it cannot parse', async () => {
+    const result = await runCli([
+      ...CLEAN_SCAN,
+      '--schema',
+      'schema-invalid.graphql',
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      'Could not read or parse the GraphQL schema file',
+    );
+  });
+});
+
+describe('--fields', () => {
+  it('lists the candidate only when asked for it', async () => {
+    const off = parseReport(await runCli([...APP_SCAN, '--json']));
+    const on = parseReport(await runCli([...APP_SCAN, '--json', '--fields']));
+
+    // Absent, not empty: a consumer has to be able to tell "nothing found"
+    // from "never looked".
+    expect(off).not.toHaveProperty('unusedFields');
+    expect(on.unusedFields?.map((candidate) => candidate.field)).toEqual([
+      'internalAuditTrail',
+    ]);
+  });
+});
+
+describe('directory globs', () => {
+  it('expands packages/*/graphql across every workspace', async () => {
+    const result = await runCli([...GLOB_SCAN, '--json']);
+    const report = parseReport(result);
+
+    expect(result.code).toBe(1);
+    // One finding from each workspace, so both sides of the glob were scanned.
+    expect(report.unusedOperations.map((op) => op.name).sort()).toEqual([
+      'GetBillingLedgerSnapshot',
+      'GetOrdersArchiveSnapshot',
+    ]);
+  });
+
+  it('exits 2 when a pattern matches no directory', async () => {
+    const result = await runCli([
+      '--graphql',
+      'packages/*/nope',
+      '--src',
+      'app/src',
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('match no directories');
+  });
+});
+
+describe('usage errors', () => {
+  it('exits 2 on an unknown flag', async () => {
+    const result = await runCli(['--nope']);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Unknown flag: --nope');
+    expect(result.stdout).toBe('');
+  });
+
+  it('exits 2 on an unknown command', async () => {
+    const result = await runCli(['bogus']);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Unknown command: bogus');
+    expect(result.stdout).toBe('');
+  });
+});

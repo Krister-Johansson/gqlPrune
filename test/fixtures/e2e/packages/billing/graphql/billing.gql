@@ -1,0 +1,14 @@
+query GetInvoice($id: ID!) {
+  invoice(id: $id) {
+    id
+    total
+  }
+}
+
+# Dead: no source file in packages/billing/src references it.
+query GetBillingLedgerSnapshot {
+  billingLedgerSnapshot {
+    id
+    capturedAt
+  }
+}
