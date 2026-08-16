@@ -288,6 +288,35 @@ describe('parseArgs', () => {
     expect(result.errors).toEqual(['Missing value for --schema']);
   });
 
+  it('parses --min-confidence as the config minConfidence', () => {
+    expect(parseArgs(['--min-confidence', 'high']).config).toEqual({
+      minConfidence: 'high',
+    });
+    expect(parseArgs(['--min-confidence=medium']).config).toEqual({
+      minConfidence: 'medium',
+    });
+  });
+
+  it('rejects a --min-confidence value outside the three levels', () => {
+    const result = parseArgs(['--min-confidence', 'certain']);
+    expect(result.config).toEqual({});
+    expect(result.errors).toEqual([
+      'Invalid value for --min-confidence: certain (expected high, medium, low)',
+    ]);
+  });
+
+  it('reports a missing value for --min-confidence', () => {
+    const result = parseArgs(['--min-confidence']);
+    expect(result.config).toEqual({});
+    expect(result.errors).toEqual(['Missing value for --min-confidence']);
+  });
+
+  it('keeps the last --min-confidence when it is given twice', () => {
+    expect(
+      parseArgs(['--min-confidence', 'low', '--min-confidence', 'high']).config,
+    ).toEqual({ minConfidence: 'high' });
+  });
+
   it('collects repeatable --exclude into config.exclude', () => {
     expect(
       parseArgs([
@@ -345,7 +374,9 @@ describe('parseArgs', () => {
 
   it('accepts every flag and alias in the FLAGS table', () => {
     for (const spec of FLAGS) {
-      const argv = spec.takesValue ? [spec.flag, 'x'] : [spec.flag];
+      // A flag with a fixed value list only accepts one of those values.
+      const value = spec.values === undefined ? 'x' : spec.values[0];
+      const argv = spec.takesValue ? [spec.flag, value] : [spec.flag];
       expect(parseArgs(argv).errors).toEqual([]);
       if (spec.alias !== undefined) {
         expect(parseArgs([spec.alias]).errors).toEqual([]);
@@ -403,6 +434,13 @@ describe('CLI metadata tables', () => {
     expect(fields?.option).toBeUndefined();
   });
 
+  it('restricts --min-confidence to the three confidence levels', () => {
+    const spec = FLAGS.find((f) => f.flag === '--min-confidence');
+    expect(spec?.takesValue).toBe(true);
+    expect(spec?.target).toBe('minConfidence');
+    expect(spec?.values).toEqual(['high', 'medium', 'low']);
+  });
+
   it('routes --inline into the config rather than the CLI options', () => {
     const inline = FLAGS.find((f) => f.flag === '--inline');
     expect(inline?.takesValue).toBe(false);
@@ -425,6 +463,7 @@ describe('formatHelp', () => {
       '--schema',
       '--fields',
       '--inline',
+      '--min-confidence',
       '--json',
       '--annotate',
       '--verbose',

@@ -32,6 +32,7 @@ src/
     deprecated.ts         findDeprecatedUsages (opt-in, needs a local SDL)
     fields.ts             findUnusedFieldCandidates (opt-in `--fields`, advisory)
     inline.ts             extractInlineDocuments (opt-in `--inline`, gql`...` in src)
+    confidence.ts         grade* helpers: bare-name search → high/medium/low
     usagePatterns.ts      DEFAULT_*_PATTERNS, buildUsagePatterns, expandPattern
     stringHelpers.ts      small string utilities
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)

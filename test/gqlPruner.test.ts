@@ -19,6 +19,7 @@ import {
   formatAnnotations,
   formatExpandedDirLines,
   formatGeneratedFileWarnings,
+  formatVerboseConfidenceLines,
   formatVerboseConfigLines,
   formatVerboseScanLines,
   mainFunction,
@@ -98,6 +99,14 @@ const entitiesWithDocument = (
 });
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
+
+// Every candidate finding carries a grade; spread this into a fixture that
+// only cares about the rest of the shape.
+const HIGH = { confidence: 'high' as const, reason: 'name-absent' as const };
+const LOW = {
+  confidence: 'low' as const,
+  reason: 'source-mention' as const,
+};
 
 // SDL and a matching parsed file, for the opt-in deprecated-field checks.
 const SDL = [
@@ -483,6 +492,43 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('formatVerboseConfidenceLines', () => {
+    it('explains the grade of every graded kind', () => {
+      const lines = formatVerboseConfidenceLines({
+        unusedOperations: [
+          { name: 'Dead', type: 'query', filePath: 'a.gql', ...HIGH },
+        ],
+        unusedFragments: [{ name: 'DeadFields', filePath: 'a.gql', ...LOW }],
+        orphanedFiles: [{ file: 'a.gql', ...LOW }],
+        unusedFieldCandidates: [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql' }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
+      });
+      expect(lines).toEqual([
+        'confidence: operation "Dead" is high (name-absent: the name appears in no scanned source file)',
+        'confidence: fragment "DeadFields" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        'confidence: orphaned file "a.gql" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        'confidence: field "avatarUrl" is medium (heuristic-cap: the field check cannot see a read through a rename, a spread, or a computed key)',
+      ]);
+    });
+
+    it('returns nothing when the scan found nothing', () => {
+      expect(
+        formatVerboseConfidenceLines({
+          unusedOperations: [],
+          unusedFragments: [],
+          orphanedFiles: [],
+          unusedFieldCandidates: [],
+        }),
+      ).toEqual([]);
+    });
+  });
+
   describe('findDuplicateNameWarnings', () => {
     const file = (
       operations: { name: string; filePath: string }[] = [],
@@ -558,14 +604,29 @@ describe('gqlPruner', () => {
     it('serializes unused operations and fragments with a summary', () => {
       expect(
         buildJsonReport(
-          [{ name: 'A', type: 'query', filePath: 'a.gql', line: 3 }],
-          [{ name: 'F', filePath: 'b.gql', line: 7 }],
+          [{ name: 'A', type: 'query', filePath: 'a.gql', line: 3, ...HIGH }],
+          [{ name: 'F', filePath: 'b.gql', line: 7, ...LOW }],
         ),
       ).toEqual({
         unusedOperations: [
-          { name: 'A', type: 'query', file: 'a.gql', line: 3 },
+          {
+            name: 'A',
+            type: 'query',
+            file: 'a.gql',
+            line: 3,
+            confidence: 'high',
+            reason: 'name-absent',
+          },
         ],
-        unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        unusedFragments: [
+          {
+            name: 'F',
+            file: 'b.gql',
+            line: 7,
+            confidence: 'low',
+            reason: 'source-mention',
+          },
+        ],
         orphanedFiles: [],
         deprecatedUsages: [],
         warnings: [],
@@ -574,6 +635,7 @@ describe('gqlPruner', () => {
           unusedFragments: 1,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 1, medium: 0, low: 1 },
         },
       });
     });
@@ -590,7 +652,31 @@ describe('gqlPruner', () => {
           unusedFragments: 0,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 0, medium: 0, low: 0 },
         },
+      });
+    });
+
+    it('counts every graded kind in the confidence breakdown', () => {
+      const report = buildJsonReport(
+        [{ name: 'A', type: 'query', filePath: 'a.gql', ...HIGH }],
+        [{ name: 'F', filePath: 'a.gql', ...LOW }],
+        [],
+        [{ file: 'a.gql', ...LOW }],
+        [],
+        [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql' }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
+      );
+      expect(report.summary.byConfidence).toEqual({
+        high: 1,
+        medium: 1,
+        low: 2,
       });
     });
 
@@ -600,14 +686,16 @@ describe('gqlPruner', () => {
       ]);
     });
 
-    it('lists the orphaned files and counts them in the summary', () => {
+    it('lists the orphaned files with their grade and counts them', () => {
       const report = buildJsonReport(
-        [{ name: 'A', type: 'query', filePath: 'dead.gql' }],
+        [{ name: 'A', type: 'query', filePath: 'dead.gql', ...HIGH }],
         [],
         [],
-        ['dead.gql'],
+        [{ file: 'dead.gql', ...HIGH }],
       );
-      expect(report.orphanedFiles).toEqual(['dead.gql']);
+      expect(report.orphanedFiles).toEqual([
+        { file: 'dead.gql', confidence: 'high', reason: 'name-absent' },
+      ]);
       expect(report.summary.orphanedFiles).toBe(1);
     });
 
@@ -625,6 +713,8 @@ describe('gqlPruner', () => {
           },
         ],
       );
+      // Validated against a real schema, so they are facts rather than
+      // candidates: no confidence field, and nothing in the breakdown.
       expect(report.deprecatedUsages).toEqual([
         {
           message: 'The field User.nickname is deprecated. use displayName',
@@ -632,7 +722,13 @@ describe('gqlPruner', () => {
           line: 3,
         },
       ]);
+      expect(report.deprecatedUsages[0]).not.toHaveProperty('confidence');
       expect(report.summary.deprecatedUsages).toBe(1);
+      expect(report.summary.byConfidence).toEqual({
+        high: 0,
+        medium: 0,
+        low: 0,
+      });
     });
 
     it('omits unusedFields entirely when the field check did not run', () => {
@@ -648,10 +744,22 @@ describe('gqlPruner', () => {
         [],
         [],
         [],
-        [{ field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] }],
+        [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql', line: 4 }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
       );
       expect(report.unusedFields).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] },
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 4 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
+        },
       ]);
       expect(report.summary).toEqual({
         unusedOperations: 0,
@@ -659,6 +767,7 @@ describe('gqlPruner', () => {
         orphanedFiles: 0,
         deprecatedUsages: 0,
         unusedFields: 1,
+        byConfidence: { high: 0, medium: 1, low: 0 },
       });
     });
 
@@ -679,39 +788,59 @@ describe('gqlPruner', () => {
               type: 'query',
               filePath: 'graphql/user.gql',
               line: 3,
+              ...HIGH,
             },
           ],
-          [{ name: 'UserFields', filePath: 'graphql/user.gql', line: 8 }],
+          [
+            {
+              name: 'UserFields',
+              filePath: 'graphql/user.gql',
+              line: 8,
+              ...LOW,
+            },
+          ],
         ),
       ).toEqual([
-        '::warning file=graphql/user.gql,line=3::Unused GraphQL operation "GetUser" (query)',
-        '::warning file=graphql/user.gql,line=8::Unused GraphQL fragment "UserFields"',
+        '::warning file=graphql/user.gql,line=3::Unused GraphQL operation "GetUser" (query) [confidence: high]',
+        '::warning file=graphql/user.gql,line=8::Unused GraphQL fragment "UserFields" [confidence: low]',
       ]);
     });
 
     it('omits the line property when no line is available', () => {
       expect(
         formatAnnotations(
-          [{ name: 'X', type: 'query', filePath: 'a.gql' }],
+          [{ name: 'X', type: 'query', filePath: 'a.gql', ...HIGH }],
           [],
         ),
-      ).toEqual(['::warning file=a.gql::Unused GraphQL operation "X" (query)']);
+      ).toEqual([
+        '::warning file=a.gql::Unused GraphQL operation "X" (query) [confidence: high]',
+      ]);
     });
 
     it('escapes : and , in the file property (e.g. Windows paths)', () => {
       expect(
         formatAnnotations(
-          [{ name: 'X', type: 'query', filePath: 'C:\\a,b\\q.gql', line: 1 }],
+          [
+            {
+              name: 'X',
+              type: 'query',
+              filePath: 'C:\\a,b\\q.gql',
+              line: 1,
+              ...HIGH,
+            },
+          ],
           [],
         ),
       ).toEqual([
-        '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query)',
+        '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query) [confidence: high]',
       ]);
     });
 
     it('annotates an orphaned file without a line', () => {
-      expect(formatAnnotations([], [], ['graphql/dead.gql'])).toEqual([
-        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it',
+      expect(
+        formatAnnotations([], [], [{ file: 'graphql/dead.gql', ...LOW }]),
+      ).toEqual([
+        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it [confidence: low]',
       ]);
     });
 
@@ -729,11 +858,13 @@ describe('gqlPruner', () => {
                 { file: 'graphql/user.gql', line: 4 },
                 { file: 'graphql/post.gql', line: 9 },
               ],
+              confidence: 'medium',
+              reason: 'heuristic-cap',
             },
           ],
         ),
       ).toEqual([
-        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -744,10 +875,17 @@ describe('gqlPruner', () => {
           [],
           [],
           [],
-          [{ field: 'avatarUrl', locations: [{ file: 'a.gql' }] }],
+          [
+            {
+              field: 'avatarUrl',
+              locations: [{ file: 'a.gql' }],
+              confidence: 'medium',
+              reason: 'heuristic-cap',
+            },
+          ],
         ),
       ).toEqual([
-        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -1163,7 +1301,7 @@ describe('gqlPruner', () => {
 
       const result = scanProject({ graphqlDir: './g', srcDir: './s' });
 
-      expect(result.orphanedFiles).toEqual(['dead.gql']);
+      expect(result.orphanedFiles).toEqual([{ file: 'dead.gql', ...HIGH }]);
     });
 
     it('leaves orphanedFiles empty when every definition is used', () => {
@@ -1257,7 +1395,12 @@ describe('gqlPruner', () => {
       });
 
       expect(result.unusedFieldCandidates).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 2 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
+        },
       ]);
     });
   });
@@ -1311,7 +1454,13 @@ describe('gqlPruner', () => {
       expect(result.inlineDocumentCount).toBe(1);
       expect(result.operationCount).toBe(1);
       expect(result.unusedOperations).toEqual([
-        { name: 'GetUser', type: 'query', filePath: 'src/App.tsx', line: 4 },
+        {
+          name: 'GetUser',
+          type: 'query',
+          filePath: 'src/App.tsx',
+          line: 4,
+          ...HIGH,
+        },
       ]);
     });
 
@@ -1497,6 +1646,8 @@ describe('gqlPruner', () => {
         {
           field: 'avatarUrl',
           locations: [{ file: 'src/queries.ts', line: 2 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
         },
       ]);
     });
@@ -1737,7 +1888,9 @@ describe('gqlPruner', () => {
       mainFunction({ json: true, annotate: true });
 
       const report = JSON.parse(logged());
-      expect(report.orphanedFiles).toEqual(['g/dead.gql']);
+      expect(report.orphanedFiles).toEqual([
+        { file: 'g/dead.gql', confidence: 'high', reason: 'name-absent' },
+      ]);
       expect(report.summary.orphanedFiles).toBe(1);
       expect(errorSpy.mock.calls.flat().join('\n')).toContain(
         '::warning file=g/dead.gql::Orphaned GraphQL file',
@@ -1795,16 +1948,30 @@ describe('gqlPruner', () => {
       expect(out).not.toContain(CANDIDATE_REMINDER);
       const report = JSON.parse(out);
       expect(report.unusedOperations).toEqual([
-        { name: 'Unused', type: 'query', file: 'a.gql', line: 2 },
+        {
+          name: 'Unused',
+          type: 'query',
+          file: 'a.gql',
+          line: 2,
+          confidence: 'high',
+          reason: 'name-absent',
+        },
       ]);
       expect(report.unusedFragments).toEqual([
-        { name: 'DeadFrag', file: 'a.gql', line: 5 },
+        {
+          name: 'DeadFrag',
+          file: 'a.gql',
+          line: 5,
+          confidence: 'high',
+          reason: 'name-absent',
+        },
       ]);
       expect(report.summary).toEqual({
         unusedOperations: 1,
         unusedFragments: 1,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 2, medium: 0, low: 0 },
       });
     });
 
@@ -1833,6 +2000,7 @@ describe('gqlPruner', () => {
         unusedFragments: 0,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 0, medium: 0, low: 0 },
       });
     });
 
@@ -1980,6 +2148,7 @@ describe('gqlPruner', () => {
         unusedFragments: 0,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 0, medium: 0, low: 0 },
       });
       // …and the verbose detail went to stderr.
       const errs = errorSpy.mock.calls.flat().join('\n');
@@ -2126,6 +2295,7 @@ describe('gqlPruner', () => {
           unusedFragments: 0,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 0, medium: 0, low: 0 },
         });
       });
 
@@ -2214,7 +2384,12 @@ describe('gqlPruner', () => {
 
         const report = JSON.parse(logged());
         expect(report.unusedFields).toEqual([
-          { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql', line: 2 }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
         ]);
         expect(report.summary.unusedFields).toBe(1);
       });
@@ -2270,7 +2445,14 @@ describe('gqlPruner', () => {
 
         const report = JSON.parse(logged());
         expect(report.unusedOperations).toEqual([
-          { name: 'GetUser', type: 'query', file: 'src/App.tsx', line: 2 },
+          {
+            name: 'GetUser',
+            type: 'query',
+            file: 'src/App.tsx',
+            line: 2,
+            confidence: 'high',
+            reason: 'name-absent',
+          },
         ]);
         expect(process.exitCode).toBe(1);
       });
@@ -2629,6 +2811,204 @@ describe('gqlPruner', () => {
       expect(() => mainFunction()).toThrow('process.exit:2');
       const errs = errorSpy.mock.calls.flat().join('\n');
       expect(errs).toContain('--graphql');
+    });
+
+    describe('confidence grading', () => {
+      /** One unused operation, scanned against a single source file. */
+      const scansOneUnusedOperation = (
+        content: string,
+        configYaml = 'graphqlDir: ./g\nsrcDir: ./s\n',
+      ) => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(configYaml);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesOf([
+            { name: 'Unused', type: 'query', filePath: 'a.gql', line: 1 },
+          ]),
+        );
+        mockedReadSources.mockReturnValue([{ file: 'App.tsx', content }]);
+      };
+
+      it('shows the grade as a column in the operations table', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction();
+
+        expect(logged()).toContain('Confidence');
+        expect(logged()).toMatch(/Unused\s+high\s+a\.gql/);
+      });
+
+      it('grades a name mentioned in ordinary source as low', () => {
+        // The bare name is there, but no usage pattern matches it.
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction();
+
+        expect(logged()).toMatch(/Unused\s+low\s+a\.gql/);
+      });
+
+      it('grades a name mentioned only in a generated file as medium', () => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(
+          'graphqlDir: ./g\nsrcDir: ./s\n',
+        );
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['src/gql/graphql.ts']);
+        // Five operations, all but one referenced from the generated file, so
+        // the coverage heuristic flags it (see detectGeneratedFiles).
+        mockedExtract.mockReturnValue(
+          entitiesOf([
+            { name: 'A', type: 'query', filePath: 'a.gql' },
+            { name: 'B', type: 'query', filePath: 'a.gql' },
+            { name: 'C', type: 'query', filePath: 'a.gql' },
+            { name: 'D', type: 'query', filePath: 'a.gql' },
+            { name: 'Unused', type: 'query', filePath: 'a.gql', line: 1 },
+          ]),
+        );
+        mockedReadSources.mockReturnValue([
+          {
+            file: 'src/gql/graphql.ts',
+            content:
+              'ADocument BDocument CDocument DDocument\nconst d = gql`query Unused { id }`;',
+          },
+        ]);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([
+          {
+            name: 'Unused',
+            type: 'query',
+            file: 'a.gql',
+            line: 1,
+            confidence: 'medium',
+            reason: 'generated-only',
+          },
+        ]);
+      });
+
+      it('carries the grade into the JSON report and its summary', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations[0]).toMatchObject({
+          confidence: 'high',
+          reason: 'name-absent',
+        });
+        // The operation and the file it leaves orphaned, both graded.
+        expect(report.summary.byConfidence).toEqual({
+          high: 2,
+          medium: 0,
+          low: 0,
+        });
+      });
+
+      it('names the grade in the annotation message', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ annotate: true });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          '::warning file=a.gql,line=1::Unused GraphQL operation "Unused" (query) [confidence: high]',
+        );
+      });
+
+      it('explains every grade with --verbose', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ verbose: true });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'confidence: operation "Unused" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        );
+      });
+
+      it('hides findings below --min-confidence and exits 0 when only those existed', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ config: { minConfidence: 'high' } });
+
+        expect(logged()).not.toContain('Unused GraphQL Operations');
+        expect(logged()).toContain('No unused');
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('keeps a finding that meets the configured minimum', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ config: { minConfidence: 'high' } });
+
+        expect(logged()).toContain('Unused GraphQL Operations');
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('drops the hidden findings from the JSON report too', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ json: true, config: { minConfidence: 'medium' } });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([]);
+        expect(report.summary.unusedOperations).toBe(0);
+        expect(report.summary.byConfidence).toEqual({
+          high: 0,
+          medium: 0,
+          low: 0,
+        });
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('reports the configured minimum with --verbose', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ verbose: true, config: { minConfidence: 'medium' } });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'minConfidence: medium',
+        );
+      });
+
+      it('exits 2 when the config file names a level that does not exist', () => {
+        scansOneUnusedOperation(
+          '',
+          'graphqlDir: ./g\nsrcDir: ./s\nminConfidence: certain\n',
+        );
+
+        expect(() => mainFunction()).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'Invalid minConfidence: certain. Expected one of high, medium, low.',
+        );
+      });
+
+      it('leaves deprecated selections ungraded', () => {
+        (fs.readFileSync as jest.Mock).mockImplementation((file: string) =>
+          file === './schema.graphql'
+            ? SDL
+            : 'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        );
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+        );
+        mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.deprecatedUsages).toHaveLength(1);
+        expect(report.deprecatedUsages[0]).not.toHaveProperty('confidence');
+        expect(report.deprecatedUsages[0]).not.toHaveProperty('reason');
+      });
     });
   });
 });
