@@ -18,6 +18,7 @@ import {
   discoverCodegenConfig,
 } from '../utils/codegen.js';
 import { resolveDirs, scanProject } from './gqlPruner.js';
+import { pluralize } from '../utils/stringHelpers.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
 // Folders never worth scanning when auto-detecting the project layout.
@@ -238,7 +239,10 @@ function printPreview(config: GqlPruneConfig): void {
     scanProject(config);
   const unused = unusedOperations.length + unusedFragments.length;
   console.log(
-    `✓ Found ${operationCount} operations in ${gqlFileCount} files; ${unused} look unused. Run "gqlprune" to see them.`,
+    `✓ Found ${operationCount} ${pluralize(operationCount, 'operation')} in ` +
+      `${gqlFileCount} ${pluralize(gqlFileCount, 'file')}; ${unused} ` +
+      `${pluralize(unused, 'looks', 'look')} unused. Run "gqlprune" to see ` +
+      `${pluralize(unused, 'it', 'them')}.`,
   );
 }
 

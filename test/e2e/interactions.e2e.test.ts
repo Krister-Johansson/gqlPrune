@@ -54,6 +54,13 @@ describe('every option at once', () => {
     expect(result.code).toBe(1);
   });
 
+  it('still says the settings came from codegen.ts, on stderr', () => {
+    expect(result.stderr).toContain('Using settings derived from codegen.ts:');
+    expect(parseReport(result).warnings.join('\n')).not.toContain(
+      'derived from',
+    );
+  });
+
   it('reports the .gql and the inline findings side by side', () => {
     const report = parseReport(result);
     const files = report.unusedOperations.map((op) => toPosix(op.file));
@@ -156,12 +163,16 @@ describe('every option at once, gated at medium', () => {
 });
 
 describe('every option at once, as a human reads it', () => {
-  it('prints the derivation, the counts and every section in order', async () => {
-    const result = await runCli(
+  let result: CliResult;
+
+  beforeAll(async () => {
+    result = await runCli(
       ['--inline', '--fields', '--schema', './schema.graphql'],
       { cwd: combined },
     );
+  });
 
+  it('prints the derivation, the counts and every section in order', () => {
     expectInOrder(result.stdout, [
       'Using settings derived from codegen.ts:',
       'Found 3 GraphQL files.',
@@ -174,5 +185,39 @@ describe('every option at once, as a human reads it', () => {
       'These are candidates from a string search.',
     ]);
     expect(result.code).toBe(1);
+  });
+
+  it('counts each section in the number it found', () => {
+    // This project reports three operations and two orphans, but exactly one
+    // deprecated selection and one field candidate, which is where a footer
+    // written only in the plural shows.
+    expect(result.stdout).toContain(
+      'Found 3 unused GraphQL operations. Please remove them.',
+    );
+    expect(result.stdout).toContain(
+      'Found 2 orphaned GraphQL files. Every definition in them is unused ' +
+        'and no document imports them, so they can likely be deleted.',
+    );
+    expect(result.stdout).toContain(
+      'Found 1 selection of deprecated schema fields or enum values. It is ' +
+        'advisory and does not affect the exit code.',
+    );
+    expect(result.stdout).toContain(
+      'Found 1 field candidate whose name appears nowhere in the source.',
+    );
+  });
+
+  it('qualifies the report once, not once per section', () => {
+    // The field-candidate caveat says what only fields suffer from; the
+    // closing line covers verifying a candidate, for every section at once.
+    expect(result.stdout).toContain(
+      'A field is matched by name alone, so one read through a computed key, ' +
+        'spread into props, or used by another repository looks the same as ' +
+        'one nothing reads.',
+    );
+    expect(result.stdout).not.toContain('before trimming it');
+    expect(
+      result.stdout.split('Verify each one before deleting.'),
+    ).toHaveLength(2);
   });
 });

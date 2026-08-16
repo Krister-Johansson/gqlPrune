@@ -73,6 +73,23 @@ describe('a project configured only by its codegen config', () => {
     ]);
   });
 
+  it('still names the file in --json mode, on stderr', async () => {
+    const result = await runCli(['--json'], { cwd: derived });
+    const report = parseReport(result);
+
+    // A CI job that reads only the JSON would otherwise be handed results whose
+    // directories, excludes, schema and patterns all came from a file it never
+    // pointed at, with nothing anywhere saying so.
+    expectJsonOnlyStdout(result);
+    expect(result.stderr).toContain('Using settings derived from codegen.yml:');
+    for (const key of ['graphqlDir', 'srcDir', 'exclude', 'schemaFile']) {
+      expect(result.stderr).toContain(key);
+    }
+    // It says where the settings came from, not that something is wrong with
+    // the project, so it stays out of the array consumers read as problems.
+    expect(report.warnings.join('\n')).not.toContain('derived from');
+  });
+
   it('explains the derivation on stderr under --verbose', async () => {
     const result = await runCli(['--json', '--verbose'], { cwd: derived });
 

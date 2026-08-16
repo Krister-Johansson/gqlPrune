@@ -155,7 +155,7 @@ Findings are advisory. They print after the unused sections, they are emitted as
 File               Line Message
 graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
 ------------------------------
-Found 1 selection of deprecated schema fields or enum values. They are advisory and do not affect the exit code.
+Found 1 selection of deprecated schema fields or enum values. It is advisory and does not affect the exit code.
 ```
 
 In `--json` mode they appear as a `deprecatedUsages` array with a matching count in `summary`:
@@ -340,7 +340,7 @@ A `schema` that is a URL, an introspection endpoint, a glob covering several fil
 
 Explicit configuration fails loudly, and inference degrades gracefully. A setting you wrote in `gqlPrune.config.yaml` or passed as a flag ends the run with exit code 2 when it does not resolve, because you asked for it. A setting gqlPrune worked out from your codegen config never does: it is dropped, gqlPrune warns you which one and which file it came from, and the scan carries on. So a `schema` path that is not on disk yet, because it is downloaded or generated at build time, costs you the deprecated-selection check and a warning, not a failed run. Same for a `documents` glob pointing at a directory this checkout does not have: gqlPrune scans the directories that do exist and names the one it skipped. Only when nothing derived is left to scan does the run stop, and then the message names the codegen config so you know where the paths came from.
 
-Precedence runs in one direction: CLI flags beat `gqlPrune.config.yaml`, which beats anything derived from your codegen config, which beats the built-in defaults. An inferred setting is never silent. In a normal run gqlPrune names the file and the settings that came from it, and `--verbose` prints every derived value.
+Precedence runs in one direction: CLI flags beat `gqlPrune.config.yaml`, which beats anything derived from your codegen config, which beats the built-in defaults. An inferred setting is never silent. In a normal run gqlPrune names the file and the settings that came from it, and `--verbose` prints every derived value. In `--json` mode the same line goes to stderr, so stdout stays pure JSON and a CI job is still told which file configured its scan. The line says where the settings came from, so it is not repeated in the report's `warnings` array.
 
 Because deriving stops once a config names the directories, `gqlprune init` writes the settings it derived into the file it generates (see [Configuration](#configuration)). Run it on an apollo-angular project and the generated config carries `usagePatterns: ['{Name}GQL', '{Name}Document']`, so your operations keep matching the code your plugin generates.
 
@@ -603,7 +603,7 @@ avatarUrl   medium      graphql/user.gql:4
 These are candidates from a string search. Verify each one before deleting.
 ```
 
-The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints only when an operation or fragment is reported (the field-candidate section carries its own caveat), and never in `--json` mode.
+The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints whenever a candidate was reported, whether that is an unused operation, a fragment, an orphaned file or a field candidate, and never in `--json` mode. The deprecated section does not trigger it: those selections come from your schema, not from a string search. The field-candidate section adds a caveat of its own above it, covering only the blind spots specific to fields.
 
 ## Contributing
 
