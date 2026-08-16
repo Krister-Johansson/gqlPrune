@@ -53,6 +53,31 @@ Import comments are read from the raw file text (the convention used by graphql-
 
 Orphaned files are candidates like everything else gqlPrune reports. A file may still be read by another repository, a runtime loader, or tooling this scan cannot see, so check before you delete it. The JSON report lists the paths under `orphanedFiles` and counts them in `summary.orphanedFiles`. They never change the exit code on their own: an orphaned file always holds unused definitions, and those already exit 1.
 
+### Inline documents (opt-in)
+
+By default gqlPrune reads documents only from `.gql` and `.graphql` files. Pass `--inline` (or set `inline: true` in the config) to also read the documents embedded in your TypeScript and JavaScript source:
+
+```bash
+npx gqlprune --inline
+```
+
+Two shapes are recognized, the ones graphql-tag, Apollo, urql and the GraphQL Code Generator client preset produce:
+
+- Tagged templates: ``gql`query GetUser { ... }` `` and ``graphql`...` ``, including a tag reached through a member expression such as ``api.gql`...` ``.
+- Helper calls taking a single string argument: `graphql('query GetUser { ... }')`, `graphql("...")`, ``graphql(`...`)``, and the same for `gql(...)`.
+
+Recognition is textual: gqlPrune tracks where comments and strings begin and end, so a tag written inside one is skipped and commented-out code produces no findings, but it does not parse JavaScript, so an unusual construct can still be missed or misread.
+
+Each embedded document is parsed on its own and located against the file it sits in, so a finding points at the source file and the real line inside it (`src/User.tsx:12` rather than line 1). A body that does not parse, such as a half-written template or an operation name built by interpolation, is skipped and counted; `--verbose` prints how many. Interpolations like `${UserFieldsFragmentDoc}` are blanked before parsing, which is how graphql-tag treats them anyway, and the names inside them still count as references to the documents they name. Fragments resolve across both worlds: a fragment defined in a `.tsx` file and spread from a `.gql` operation counts as used, and so does the reverse.
+
+The pass is off by default because turning it on changes what a scan is. A source file becomes both a place where documents are defined and part of the text searched for usage, and those two roles have to be kept apart or every document would find itself. gqlPrune keeps them apart by blanking each document, together with the statement that assigns it, out of the text it searches. So a document never counts as its own usage, and `const GetUserDocument = graphql('query GetUser { ... }')` does not make `GetUser` look used through the `{Name}Document` pattern when nothing reads the constant.
+
+That constant is a usage signal in its own right. Under the client preset, `const q = graphql('query GetUser { ... }')` followed by `useQuery(q)` never writes the operation name outside the document, so no usage pattern can match it. gqlPrune therefore counts an inline document as used when the constant it is assigned to appears anywhere else in the scanned source, matched as a whole word. Read that with the same caution as everything else here: a constant called `query`, `doc` or `q` matches something unrelated in any real codebase and can hide a genuine finding, so give a document a distinctive name if you want the check to mean much for it.
+
+Whole-file [orphan detection](#orphaned-files) never applies to a source file. A `.tsx` component whose only query is unused is not a dead file, and pointing you at it for deletion would be bad advice, so only `.gql`/`.graphql` files are ever listed as orphaned.
+
+Inline documents also reach the opt-in checks below: with `--schema` they are validated for deprecated selections, and with `--fields` their fields contribute candidates, both reported against the source file.
+
 ### Field candidates (opt-in)
 
 Operations and fragments are the default unit of detection. Pass `--fields` (or set `checkFields: true` in the config) to also get an advisory list of individual fields your app may be selecting without ever reading:
@@ -198,6 +223,9 @@ fragmentUsagePatterns:
 # Optional: also list selected fields whose name appears nowhere in srcDir.
 # Advisory only; off by default.
 checkFields: true
+# Optional: also scan gql`...` templates and graphql() calls in srcDir.
+# Off by default.
+inline: true
 ```
 
 - `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
@@ -208,6 +236,7 @@ checkFields: true
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 - `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-usage check](#deprecated-selections-opt-in); omit it and no schema is read.
 - `checkFields` (optional): set to `true` to add the advisory [field candidates](#field-candidates-opt-in) list. Off by default.
+- `inline` (optional): set to `true` to also scan [inline documents](#inline-documents-opt-in) in `srcDir`. Off by default.
 
 For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a list of directories:
 
@@ -247,6 +276,7 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
 | `--schema <file>`                                                      | `schemaFile`            |
 | `--fields`                                                             | `checkFields`           |
+| `--inline`                                                             | `inline`                |
 
 `--graphql` and `--src` take the same glob patterns as their YAML fields; quote them (`--graphql 'packages/*/graphql'`) so the shell passes the pattern through instead of expanding it first.
 

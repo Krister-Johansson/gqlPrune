@@ -55,6 +55,13 @@ export interface GqlPruneConfig {
    * `true`, or pass `--fields`.
    */
   checkFields?: boolean;
+  /**
+   * Opt in to scanning inline GraphQL documents in your source files: ``gql`...` ``
+   * and ``graphql`...` `` tagged templates, and `gql('...')` / `graphql('...')`
+   * helper calls. Off by default, which keeps a scan limited to
+   * `.gql`/`.graphql` files. Set to `true`, or pass `--inline`.
+   */
+  inline?: boolean;
 }
 
 /**
@@ -72,5 +79,6 @@ export type CliConfig = Partial<
     | 'fragmentUsagePatterns'
     | 'schemaFile'
     | 'checkFields'
+    | 'inline'
   >
 > & { excludedFolders?: string[] };

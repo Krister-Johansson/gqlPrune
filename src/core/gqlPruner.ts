@@ -30,6 +30,12 @@ import {
   extractGraphqlEntities,
   GraphqlFileEntities,
 } from '../utils/operations.js';
+import {
+  extractInlineDocuments,
+  findInlineIdentifierUsage,
+  InlineIdentifierUsage,
+  toInlineEntities,
+} from '../utils/inline.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
@@ -120,6 +126,15 @@ export function resolveCheckFields(config: GqlPruneConfig): boolean {
 }
 
 /**
+ * Whether the opt-in inline-document scan runs. Strictly boolean `true`, like
+ * {@link resolveCheckFields}, so a stray YAML value never silently changes what
+ * a scan considers a definition.
+ */
+export function resolveInline(config: GqlPruneConfig): boolean {
+  return config.inline === true;
+}
+
+/**
  * Returns the operations that are not referenced by any of the file contents,
  * using the given usage patterns.
  */
@@ -164,6 +179,42 @@ export function explainOperationUsage(
       }
     }
     return { operation, patterns };
+  });
+}
+
+/**
+ * Marks the operations of an inline document as used when the constant the
+ * document is assigned to is referenced somewhere in the corpus. This is the
+ * one usage signal no pattern can express: under the client preset the code
+ * reads `const q = graphql(...)` and then `useQuery(q)`, and the operation's own
+ * name never appears outside the document.
+ *
+ * The verdict is keyed by operation name, like every other verdict in the tool,
+ * so same-named definitions share it (`findDuplicateNameWarnings` reports that).
+ *
+ * @param {OperationUsage[]} usages - Verdicts from {@link explainOperationUsage}.
+ * @param {InlineIdentifierUsage[]} inlineUsage - The referenced inline documents.
+ * @returns {OperationUsage[]} - The verdicts, with referenced ones marked used.
+ */
+export function applyInlineIdentifierUsage(
+  usages: OperationUsage[],
+  inlineUsage: InlineIdentifierUsage[],
+): OperationUsage[] {
+  if (inlineUsage.length === 0) {
+    return usages;
+  }
+  const matchByName = new Map<string, { pattern: string; file: string }>();
+  for (const { identifier, file, operations } of inlineUsage) {
+    for (const name of operations) {
+      matchByName.set(name, { pattern: identifier, file });
+    }
+  }
+  return usages.map((usage) => {
+    if (usage.match !== undefined) {
+      return usage;
+    }
+    const match = matchByName.get(usage.operation.name);
+    return match === undefined ? usage : { ...usage, match };
   });
 }
 
@@ -675,6 +726,12 @@ export type ScanResult = {
   gqlFileCount: number;
   sourceFileCount: number;
   operationCount: number;
+  /** Whether the opt-in inline-document pass ran (see `inline` / `--inline`). */
+  inline: boolean;
+  /** Inline documents parsed out of the source files; 0 when the pass is off. */
+  inlineDocumentCount: number;
+  /** Inline bodies that did not parse and were skipped. */
+  inlineSkippedCount: number;
   /** The `.gql`/`.graphql` files that were scanned. */
   gqlFiles: string[];
   /** Per-operation verdicts with the matching pattern/file (see `--verbose`). */
@@ -713,6 +770,7 @@ export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
     // Only when configured: the deprecated check is off by default, and an
     // empty line would suggest a setting that isn't in play.
     ...(config.schemaFile ? [`schemaFile: ${config.schemaFile}`] : []),
+    ...(resolveInline(config) ? ['inline: true'] : []),
   ];
 }
 
@@ -742,6 +800,11 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
   const lines = [
     `GraphQL files (${result.gqlFiles.length}): ${result.gqlFiles.join(', ')}`,
     `Source files scanned: ${result.sourceFileCount}`,
+    ...(result.inline
+      ? [
+          `Inline documents: ${result.inlineDocumentCount} (${result.inlineSkippedCount} skipped, did not parse)`,
+        ]
+      : []),
   ];
   for (const { operation, patterns, match } of result.operationUsages) {
     lines.push(
@@ -781,10 +844,7 @@ export function scanProject(
     ),
   ];
   // Parse every gql file once; operations and the fragment scan share the result.
-  const parsedFiles = gqlFiles.map(extractGraphqlEntities);
-  const operations: OperationInfo[] = parsedFiles.flatMap(
-    (file) => file.operations,
-  );
+  const gqlEntities = gqlFiles.map(extractGraphqlEntities);
 
   const tsFiles = [
     ...new Set(
@@ -795,15 +855,40 @@ export function scanProject(
   ];
   // Read every source file once (paired with its path), then test all operations
   // against the cache instead of re-reading each file for every operation.
-  const sources = readSourceFiles(tsFiles);
+  const rawSources = readSourceFiles(tsFiles);
+
+  // Opt-in: with the pass off, nothing is extracted and the corpus stays the
+  // raw source text. With it on, source files are definition sources too, and
+  // the corpus is searched with every inline document blanked out, so a
+  // document can never count as its own usage.
+  const inline = resolveInline(config);
+  const extractions = inline
+    ? rawSources.map((source) =>
+        extractInlineDocuments(source.file, source.content),
+      )
+    : [];
+  const inlineEntities = extractions.flatMap((extraction) =>
+    toInlineEntities(extraction.documents),
+  );
+  const sources = inline
+    ? extractions.map(({ file, blankedContent }) => ({
+        file,
+        content: blankedContent,
+      }))
+    : rawSources;
   const fileContents = sources.map((source) => source.content);
+
+  const parsedFiles = [...gqlEntities, ...inlineEntities];
+  const operations: OperationInfo[] = parsedFiles.flatMap(
+    (file) => file.operations,
+  );
+  const inlineUsage = findInlineIdentifierUsage(inlineEntities, sources);
 
   // One sweep yields both the unused set and the per-operation explanations
   // that `--verbose` reports.
-  const operationUsages = explainOperationUsage(
-    operations,
-    sources,
-    usagePatterns,
+  const operationUsages = applyInlineIdentifierUsage(
+    explainOperationUsage(operations, sources, usagePatterns),
+    inlineUsage,
   );
   const unusedOperations = operationUsages
     .filter((usage) => !usage.match)
@@ -812,6 +897,7 @@ export function scanProject(
     parsedFiles,
     fileContents,
     fragmentUsagePatterns,
+    inlineUsage.flatMap((usage) => usage.fragments),
   );
   const generatedFiles = detectGeneratedFiles(
     sources,
@@ -832,6 +918,15 @@ export function scanProject(
     gqlFileCount: gqlFiles.length,
     sourceFileCount: tsFiles.length,
     operationCount: operations.length,
+    inline,
+    inlineDocumentCount: extractions.reduce(
+      (total, extraction) => total + extraction.documents.length,
+      0,
+    ),
+    inlineSkippedCount: extractions.reduce(
+      (total, extraction) => total + extraction.skipped,
+      0,
+    ),
     gqlFiles,
     operationUsages,
     unusedOperations,
@@ -974,6 +1069,7 @@ export function mainFunction(
     gqlFileCount,
     sourceFileCount,
     operationCount,
+    inlineDocumentCount,
     unusedOperations,
     unusedFragments,
     orphanedFiles,
@@ -1005,6 +1101,11 @@ export function mainFunction(
     console.log(
       `Found ${kleur.yellow(sourceFileCount.toString())} source files.`,
     );
+    if (result.inline) {
+      console.log(
+        `Found ${kleur.yellow(inlineDocumentCount.toString())} inline GraphQL documents.`,
+      );
+    }
   }
 
   // Warn when a single file references most operations (e.g. un-excluded codegen
