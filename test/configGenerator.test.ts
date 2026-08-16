@@ -3,11 +3,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import checkbox from '@inquirer/checkbox';
 import confirm from '@inquirer/confirm';
 import input from '@inquirer/input';
 import {
   commonParentDir,
+  derivedConfigExtras,
   detectGeneratedExcludes,
   detectGraphqlDirs,
   detectSrcDirs,
@@ -73,6 +75,36 @@ function mockFsTree(
   (fs.realpathSync as unknown as jest.Mock).mockImplementation(
     (p: string) => p,
   );
+}
+
+/**
+ * Makes a codegen config the only file on disk, so `init` reads it and still
+ * skips the overwrite confirmation. `alsoPresent` names extra existing files
+ * (e.g. a schema the derivation points at).
+ */
+function mockCodegenFile(
+  file: string,
+  contents: string,
+  alsoPresent: string[] = [],
+): void {
+  const present = new Set([file, ...alsoPresent]);
+  (fs.existsSync as jest.Mock).mockImplementation((p: string) =>
+    present.has(p),
+  );
+  (fs.readFileSync as jest.Mock).mockReturnValue(contents);
+}
+
+/** The config `init` wrote, parsed back from the YAML it dumped. */
+function writtenConfig(): Record<string, unknown> {
+  const [, contents] = (fs.writeFileSync as jest.Mock).mock.calls[0];
+  return yaml.load(contents as string) as Record<string, unknown>;
+}
+
+/** The settings `init` told the user came from the codegen config. */
+function announcedKeys(logSpy: jest.SpyInstance): string[] {
+  const output = logSpy.mock.calls.flat().join('\n');
+  const match = /come from it: ([^.]+)\./.exec(output);
+  return match === null ? [] : match[1].split(', ');
 }
 
 describe('configGenerator', () => {
@@ -187,6 +219,41 @@ describe('configGenerator', () => {
       expect(topLevelRoots(['graphql\\a.gql', './graphql/b.gql'])).toEqual([
         'graphql',
       ]);
+    });
+  });
+
+  describe('derivedConfigExtras', () => {
+    it('returns {} when there was no codegen config', () => {
+      expect(derivedConfigExtras(undefined)).toEqual({});
+    });
+
+    it('returns {} for a derivation that only names directories', () => {
+      expect(
+        derivedConfigExtras({
+          graphqlDir: ['app'],
+          srcDir: ['app'],
+          exclude: ['app/generated'],
+        }),
+      ).toEqual({});
+    });
+
+    it('carries the pattern settings through', () => {
+      expect(
+        derivedConfigExtras({
+          graphqlDir: ['app'],
+          usagePatterns: ['{Name}GQL'],
+          fragmentUsagePatterns: ['{Name}FragmentDoc'],
+        }),
+      ).toEqual({
+        usagePatterns: ['{Name}GQL'],
+        fragmentUsagePatterns: ['{Name}FragmentDoc'],
+      });
+    });
+
+    it('carries schemaFile and inline through', () => {
+      expect(
+        derivedConfigExtras({ schemaFile: './schema.graphql', inline: true }),
+      ).toEqual({ schemaFile: './schema.graphql', inline: true });
     });
   });
 
@@ -460,6 +527,130 @@ describe('configGenerator', () => {
       expect(logSpy.mock.calls.flat().join('\n')).toContain(
         'src/gql/graphql.ts',
       );
+    });
+
+    it('writes the codegen-derived usage patterns, not just the directories', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      mockCodegenFile(
+        'codegen.yml',
+        [
+          'documents: app/graphql/**/*.graphql',
+          'generates:',
+          '  app/generated/graphql.ts:',
+          '    plugins:',
+          '      - typescript-apollo-angular',
+        ].join('\n'),
+      );
+      mockInputAnswers(
+        'app/graphql',
+        'app/graphql',
+        'app/generated/graphql.ts',
+      );
+
+      await generateConfig();
+
+      expect(writtenConfig()).toEqual({
+        graphqlDir: 'app/graphql',
+        srcDir: 'app/graphql',
+        exclude: ['app/generated/graphql.ts'],
+        usagePatterns: ['{Name}GQL', '{Name}Document'],
+        fragmentUsagePatterns: ['{Name}FragmentDoc'],
+      });
+    });
+
+    it('writes inline: true when the codegen preset keeps documents in source', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      mockCodegenFile(
+        'codegen.yml',
+        [
+          'documents: src/**/*.tsx',
+          'generates:',
+          '  src/gql/:',
+          '    preset: client',
+        ].join('\n'),
+      );
+      mockInputAnswers('src', 'src', 'src/gql');
+
+      await generateConfig();
+
+      expect(writtenConfig()).toEqual({
+        graphqlDir: 'src',
+        srcDir: 'src',
+        exclude: ['src/gql'],
+        inline: true,
+      });
+    });
+
+    it('writes a derived schemaFile that is on disk', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      mockCodegenFile(
+        'codegen.yml',
+        ['schema: ./schema.graphql', 'documents: app/**/*.graphql'].join('\n'),
+        ['./schema.graphql'],
+      );
+      mockInputAnswers('app', 'app');
+
+      await generateConfig();
+
+      expect(writtenConfig().schemaFile).toBe('./schema.graphql');
+      expect(announcedKeys(logSpy)).toContain('schemaFile');
+    });
+
+    it('neither writes nor announces a derived schemaFile that is not on disk', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      mockCodegenFile(
+        'codegen.yml',
+        ['schema: ./schema.graphql', 'documents: app/**/*.graphql'].join('\n'),
+      );
+      mockInputAnswers('app', 'app');
+
+      await generateConfig();
+
+      expect(writtenConfig()).not.toHaveProperty('schemaFile');
+      expect(announcedKeys(logSpy)).not.toContain('schemaFile');
+    });
+
+    it('writes every setting it announced as coming from the codegen config', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      mockCodegenFile(
+        'codegen.yml',
+        [
+          'schema: ./schema.graphql',
+          'documents: app/graphql/**/*.graphql',
+          'generates:',
+          '  app/generated/graphql.ts:',
+          '    plugins:',
+          '      - typescript-apollo-angular',
+        ].join('\n'),
+        ['./schema.graphql'],
+      );
+      mockInputAnswers(
+        'app/graphql',
+        'app/graphql',
+        'app/generated/graphql.ts',
+      );
+
+      await generateConfig();
+
+      const announced = announcedKeys(logSpy);
+      expect(announced).toContain('usagePatterns');
+      expect(Object.keys(writtenConfig())).toEqual(
+        expect.arrayContaining(announced),
+      );
+    });
+
+    it('writes the same three keys as ever when there is no codegen config', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      (fs.existsSync as jest.Mock).mockReturnValue(false);
+      mockInputAnswers('./graphql', './src', 'node_modules');
+
+      await generateConfig();
+
+      expect(writtenConfig()).toEqual({
+        graphqlDir: './graphql',
+        srcDir: './src',
+        exclude: ['node_modules'],
+      });
     });
 
     it('never offers a checklist for a single-root project', async () => {

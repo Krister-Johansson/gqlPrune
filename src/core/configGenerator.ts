@@ -131,10 +131,62 @@ function detectFrom(filePaths: string[]): DirDetection {
 export function detectCodegenDefaults(): CodegenDerivation | undefined {
   const lookup = discoverCodegenConfig();
   if (!lookup.found) return undefined;
-  const values = deriveGqlPruneConfig(lookup.config);
+  const values = dropUnusableSchemaFile(deriveGqlPruneConfig(lookup.config));
   return Object.keys(values).length === 0
     ? undefined
     : { file: lookup.config.file, values };
+}
+
+/**
+ * Drops a derived `schemaFile` whose path is not on disk.
+ *
+ * A codegen `schema` is routinely downloaded or generated at build time, and a
+ * scan that derives it degrades gracefully: the deprecated-selection check is
+ * skipped with a warning. Writing that path into `gqlPrune.config.yaml` makes it
+ * the user's own setting, which fails loudly instead (exit code 2), so `init`
+ * would hand back a config that cannot run. Checking the file first keeps the
+ * generated config runnable, and keeps `init` from announcing a setting it is
+ * not going to write.
+ */
+function dropUnusableSchemaFile(
+  values: Partial<GqlPruneConfig>,
+): Partial<GqlPruneConfig> {
+  if (values.schemaFile === undefined || fs.existsSync(values.schemaFile)) {
+    return values;
+  }
+  const rest = { ...values };
+  delete rest.schemaFile;
+  return rest;
+}
+
+/**
+ * The derived settings `init` writes straight into the generated config. The
+ * directories go through the prompts first and are written from the answers;
+ * these describe how the project's generated code names things, so the user's
+ * choice of directory does not change them.
+ *
+ * Only a setting the derivation actually produced is returned, so the generated
+ * YAML never carries an empty or placeholder key.
+ *
+ * @param {Partial<GqlPruneConfig> | undefined} values - The derived settings.
+ * @returns {Partial<GqlPruneConfig>} - The subset to write to the config file.
+ */
+export function derivedConfigExtras(
+  values: Partial<GqlPruneConfig> | undefined,
+): Partial<GqlPruneConfig> {
+  if (values === undefined) return {};
+  return {
+    ...(values.usagePatterns === undefined
+      ? {}
+      : { usagePatterns: values.usagePatterns }),
+    ...(values.fragmentUsagePatterns === undefined
+      ? {}
+      : { fragmentUsagePatterns: values.fragmentUsagePatterns }),
+    ...(values.schemaFile === undefined
+      ? {}
+      : { schemaFile: values.schemaFile }),
+    ...(values.inline === undefined ? {} : { inline: values.inline }),
+  };
 }
 
 /**
@@ -241,9 +293,11 @@ export async function generateConfig() {
   const codegen = detectCodegenDefaults();
   if (codegen !== undefined) {
     console.log(
-      `Found ${codegen.file}; the defaults below come from it: ${Object.keys(
+      `Found ${codegen.file}; these settings come from it: ${Object.keys(
         codegen.values,
-      ).join(', ')}.`,
+      ).join(', ')}. ` +
+        'The directory questions below start from those values; the rest is ' +
+        'written to the config as it stands.',
     );
   }
 
@@ -293,6 +347,10 @@ export async function generateConfig() {
         default: excludeDefaults.join(', '),
       }),
     ),
+    // Everything else the codegen config settled. Writing a config that names
+    // the directories stops gqlPrune from reading the codegen config on later
+    // runs, so a setting left out here is not merely unannounced, it is lost.
+    ...derivedConfigExtras(codegen?.values),
   };
 
   // Write the answers to a configuration file
