@@ -134,6 +134,19 @@ describe('fragments', () => {
       expect(unused.map((f) => f.name)).toEqual(['Lonely']);
     });
 
+    it('treats an extra root as used, along with what it spreads', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'fragment Outer on T { ...Inner }\nfragment Inner on T { id }\nfragment Lonely on T { id }',
+      );
+      const unused = findUnusedFragmentsInCorpus(
+        ['f.gql'].map(extractGraphqlEntities),
+        [],
+        [],
+        ['Outer'],
+      );
+      expect(unused.map((f) => f.name)).toEqual(['Lonely']);
+    });
+
     it('returns [] when there are no fragments', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('query Q { id }');
       expect(

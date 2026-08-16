@@ -92,6 +92,23 @@ describe('parseArgs', () => {
     expect(parseArgs(['--json']).config).toEqual({});
   });
 
+  it('parses --inline into the config as inline', () => {
+    expect(parseArgs(['--inline'])).toEqual({
+      command: undefined,
+      json: false,
+      annotate: false,
+      version: false,
+      verbose: false,
+      help: false,
+      errors: [],
+      config: { inline: true },
+    });
+  });
+
+  it('leaves inline unset when --inline is absent', () => {
+    expect(parseArgs(['--fields']).config).toEqual({ checkFields: true });
+  });
+
   it('combines --fields with other flags', () => {
     const result = parseArgs(['--fields', '--json', '--src', './src']);
     expect(result.config.checkFields).toBe(true);
@@ -385,6 +402,13 @@ describe('CLI metadata tables', () => {
     expect(fields?.configFlag).toBe('checkFields');
     expect(fields?.option).toBeUndefined();
   });
+
+  it('routes --inline into the config rather than the CLI options', () => {
+    const inline = FLAGS.find((f) => f.flag === '--inline');
+    expect(inline?.takesValue).toBe(false);
+    expect(inline?.configFlag).toBe('inline');
+    expect(inline?.option).toBeUndefined();
+  });
 });
 
 describe('formatHelp', () => {
@@ -400,6 +424,7 @@ describe('formatHelp', () => {
       '--fragment-pattern',
       '--schema',
       '--fields',
+      '--inline',
       '--json',
       '--annotate',
       '--verbose',

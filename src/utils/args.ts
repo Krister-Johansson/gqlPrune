@@ -17,7 +17,7 @@ export type BooleanOption =
  * {@link BooleanOption}: these flags feed `resolveConfig` alongside
  * `gqlPrune.config.yaml`, so passing one overrides the same key in the file.
  */
-export type ConfigFlag = 'checkFields';
+export type ConfigFlag = 'checkFields' | 'inline';
 
 /** The `CliConfig` field a value flag collects into. */
 export type ValueTarget =
@@ -135,6 +135,13 @@ export const FLAGS: readonly FlagSpec[] = [
     configFlag: 'checkFields',
     description:
       'Also list selected fields whose name appears nowhere in the source (candidates)',
+  },
+  {
+    flag: '--inline',
+    takesValue: false,
+    configFlag: 'inline',
+    description:
+      'Also scan gql`...` templates and graphql() calls in source files',
   },
   {
     flag: '--json',

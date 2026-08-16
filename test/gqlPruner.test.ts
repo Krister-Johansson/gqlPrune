@@ -2,10 +2,11 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
-import { buildSchema, parse, Source } from 'graphql';
+import { buildSchema, GraphQLSchema, parse, Source } from 'graphql';
 import * as fileUtils from '../src/utils/fileUtils';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
+import * as inline from '../src/utils/inline';
 import {
   buildJsonReport,
   CANDIDATE_REMINDER,
@@ -34,6 +35,7 @@ import {
   DEFAULT_USAGE_PATTERNS,
 } from '../src/utils/usagePatterns';
 import { OperationInfo } from '../src/types/OperationInfo';
+import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
 
 jest.mock('fs');
 // Partial mock: keep the pure helpers (isOperationUsedInContents) real, stub the
@@ -57,11 +59,20 @@ jest.mock('../src/utils/fragments', () => ({
   ...jest.requireActual('../src/utils/fragments'),
   findUnusedFragmentsInCorpus: jest.fn(() => []),
 }));
+// Real extraction, wrapped so a test can assert the opt-in pass never runs.
+jest.mock('../src/utils/inline', () => {
+  const actual = jest.requireActual('../src/utils/inline');
+  return {
+    ...actual,
+    extractInlineDocuments: jest.fn(actual.extractInlineDocuments),
+  };
+});
 
 const mockedDirExists = fileUtils.directoryExists as jest.Mock;
 const mockedFind = fileUtils.findFilesWithExtension as jest.Mock;
 const mockedReadSources = fileUtils.readSourceFiles as jest.Mock;
 const mockedExtract = extractGraphqlEntities as jest.Mock;
+const mockedExtractInline = inline.extractInlineDocuments as jest.Mock;
 
 // The parsed-file shape extractGraphqlEntities returns for a file whose only
 // contents are the given operations.
@@ -405,6 +416,9 @@ describe('gqlPruner', () => {
       gqlFileCount: 1,
       sourceFileCount: 3,
       operationCount: 2,
+      inline: false,
+      inlineDocumentCount: 0,
+      inlineSkippedCount: 0,
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
@@ -447,6 +461,25 @@ describe('gqlPruner', () => {
         operationUsages: [],
       });
       expect(lines.join('\n')).toContain('Source files scanned: 3');
+    });
+
+    it('counts the inline documents only when that pass ran', () => {
+      const off = formatVerboseScanLines({
+        ...baseResult,
+        operationUsages: [],
+      });
+      expect(off.join('\n')).not.toContain('Inline documents');
+
+      const on = formatVerboseScanLines({
+        ...baseResult,
+        operationUsages: [],
+        inline: true,
+        inlineDocumentCount: 4,
+        inlineSkippedCount: 1,
+      });
+      expect(on.join('\n')).toContain(
+        'Inline documents: 4 (1 skipped, did not parse)',
+      );
     });
   });
 
@@ -1028,6 +1061,7 @@ describe('gqlPruner', () => {
         [entitiesOf([]), entitiesOf([])],
         [''],
         DEFAULT_FRAGMENT_USAGE_PATTERNS,
+        [], // no inline roots: the opt-in inline pass is off
       );
     });
 
@@ -1224,6 +1258,226 @@ describe('gqlPruner', () => {
 
       expect(result.unusedFieldCandidates).toEqual([
         { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+      ]);
+    });
+  });
+
+  describe('scanProject (inline documents)', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    /** Wires the mocks for a scan of one source file and no gql files. */
+    const scanSources = (
+      sources: { file: string; content: string }[],
+      config: Partial<GqlPruneConfig> = {},
+      schema?: GraphQLSchema,
+    ) => {
+      mockedFind
+        .mockReturnValueOnce([]) // graphqlDir
+        .mockReturnValueOnce(sources.map((source) => source.file)); // srcDir
+      mockedReadSources.mockReturnValue(sources);
+      return scanProject(
+        { graphqlDir: './g', srcDir: './s', ...config },
+        schema,
+      );
+    };
+
+    it('never looks at inline documents by default', () => {
+      const result = scanSources([
+        {
+          file: 'src/App.tsx',
+          content: 'const q = gql`query GetUser { id }`;',
+        },
+      ]);
+
+      expect(mockedExtractInline).not.toHaveBeenCalled();
+      expect(result.inline).toBe(false);
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.operationCount).toBe(0);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('reports an unused operation from a tagged template with its real line', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: '\n\nconst q = gql`\n  query GetUser { id }\n`;',
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.inline).toBe(true);
+      expect(result.inlineDocumentCount).toBe(1);
+      expect(result.operationCount).toBe(1);
+      expect(result.unusedOperations).toEqual([
+        { name: 'GetUser', type: 'query', filePath: 'src/App.tsx', line: 4 },
+      ]);
+    });
+
+    it('counts a body that does not parse instead of failing the scan', () => {
+      const result = scanSources(
+        [{ file: 'src/App.tsx', content: 'const q = gql`query {{{`;' }],
+        { inline: true },
+      );
+
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.inlineSkippedCount).toBe(1);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('treats an inline operation used through a codegen hook as used', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content: 'const q = graphql(`query GetUser { id }`);',
+          },
+          { file: 'src/App.tsx', content: 'useGetUserQuery();' },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('never counts a document as its own usage', () => {
+      // The bare {Name} pattern would match the document's own text if the
+      // corpus still carried it.
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: 'const q = gql`query GetUser { id }`;',
+          },
+        ],
+        { inline: true, usagePatterns: ['{Name}'] },
+      );
+
+      expect(result.unusedOperations.map((op) => op.name)).toEqual(['GetUser']);
+    });
+
+    it('never counts the defining constant as its own usage', () => {
+      // GetUserDocument matches the default {Name}Document pattern, but the only
+      // occurrence is the declaration itself.
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: "const GetUserDocument = graphql('query GetUser { id }');",
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations.map((op) => op.name)).toEqual(['GetUser']);
+    });
+
+    it('treats a document referenced only through its constant as used', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content:
+              "export const userQuery = graphql('query GetUser { id }');",
+          },
+          { file: 'src/App.tsx', content: 'useQuery(userQuery);' },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.operationUsages[0].match).toEqual({
+        pattern: 'userQuery',
+        file: 'src/App.tsx',
+      });
+    });
+
+    it('resolves a fragment defined inline and spread from a gql file', () => {
+      mockedUnusedFragments.mockImplementationOnce(
+        jest.requireActual('../src/utils/fragments')
+          .findUnusedFragmentsInCorpus,
+      );
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['src/fragments.ts']);
+      mockedExtract.mockReturnValue({
+        ...entitiesWithDocument('a.gql', 'query GetUser { ...UserFields }', [
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        ]),
+        operationSpreads: ['UserFields'],
+      });
+      mockedReadSources.mockReturnValue([
+        {
+          file: 'src/fragments.ts',
+          content: 'const f = gql`fragment UserFields on User { id }`;',
+        },
+      ]);
+
+      const result = scanProject({
+        graphqlDir: './g',
+        srcDir: './s',
+        inline: true,
+      });
+
+      expect(result.unusedFragments).toEqual([]);
+    });
+
+    it('never names a source file as an orphaned file', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: 'const q = gql`query GetUser { id }`;',
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toHaveLength(1);
+      expect(result.orphanedFiles).toEqual([]);
+    });
+
+    it('checks inline documents against the schema when one is given', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content:
+              'const q = gql`\n  query GetUser {\n    user { nickname }\n  }\n`;',
+          },
+        ],
+        { inline: true },
+        buildSchema(SDL),
+      );
+
+      expect(result.deprecatedUsages).toEqual([
+        {
+          message: 'The field User.nickname is deprecated. use displayName',
+          file: 'src/App.tsx',
+          line: 3,
+        },
+      ]);
+    });
+
+    it('reports field candidates from an inline document', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content: 'const q = gql`\n  query GetUser { avatarUrl }\n`;',
+          },
+          { file: 'src/App.tsx', content: 'useQuery(q);' },
+        ],
+        { inline: true, checkFields: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.unusedFieldCandidates).toEqual([
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'src/queries.ts', line: 2 }],
+        },
       ]);
     });
   });
@@ -1488,6 +1742,7 @@ describe('gqlPruner', () => {
         [entitiesOf([])],
         ['source'],
         ['{Name}FragmentDoc'],
+        [],
       );
     });
 
@@ -1961,6 +2216,79 @@ describe('gqlPruner', () => {
 
         const report = JSON.parse(logged());
         expect(report.summary.unusedFields).toBe(1);
+      });
+    });
+
+    describe('inline documents', () => {
+      const INLINE_SOURCE = {
+        file: 'src/App.tsx',
+        content: '\nconst q = gql`query GetUser { id }`;',
+      };
+
+      /** Config file text plus a source file holding one inline document. */
+      const setUpInlineScan = (configYaml: string) => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(configYaml);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind.mockReturnValueOnce([]).mockReturnValueOnce(['src/App.tsx']);
+        mockedReadSources.mockReturnValue([INLINE_SOURCE]);
+      };
+
+      it('reports nothing from source files by default', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([]);
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('reports an inline operation with its file and line when enabled in the config', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([
+          { name: 'GetUser', type: 'query', file: 'src/App.tsx', line: 2 },
+        ]);
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('turns the pass on from the --inline flag over a config that omits it', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction({ json: true, config: { inline: true } });
+
+        expect(JSON.parse(logged()).summary.unusedOperations).toBe(1);
+      });
+
+      it('counts the inline documents in the human header only when enabled', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction();
+
+        expect(logged()).toContain('Found 1 inline GraphQL documents.');
+      });
+
+      it('leaves the header alone when the pass is off', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction();
+
+        expect(logged()).not.toContain('inline GraphQL documents');
+      });
+
+      it('explains the pass under --verbose', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction({ verbose: true });
+
+        const stderr = errorSpy.mock.calls.flat().join('\n');
+        expect(stderr).toContain('inline: true');
+        expect(stderr).toContain(
+          'Inline documents: 1 (0 skipped, did not parse)',
+        );
       });
     });
 

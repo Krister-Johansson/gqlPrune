@@ -31,6 +31,7 @@ src/
     orphans.ts            findOrphanedFiles (whole-file dead documents)
     deprecated.ts         findDeprecatedUsages (opt-in, needs a local SDL)
     fields.ts             findUnusedFieldCandidates (opt-in `--fields`, advisory)
+    inline.ts             extractInlineDocuments (opt-in `--inline`, gql`...` in src)
     usagePatterns.ts      DEFAULT_*_PATTERNS, buildUsagePatterns, expandPattern
     stringHelpers.ts      small string utilities
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)
