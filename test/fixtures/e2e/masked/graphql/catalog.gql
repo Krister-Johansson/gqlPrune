@@ -1,0 +1,29 @@
+# Four of the six operations the masking heuristic needs (it only applies from
+# five operations up).
+query GetCatalogItem($id: ID!) {
+  catalogItem(id: $id) {
+    id
+    title
+  }
+}
+
+query GetCatalogList {
+  catalogList {
+    id
+    title
+  }
+}
+
+query GetCatalogFacets {
+  catalogFacets {
+    id
+    label
+  }
+}
+
+mutation UpdateCatalogItem($id: ID!, $title: String!) {
+  updateCatalogItem(id: $id, title: $title) {
+    id
+    title
+  }
+}

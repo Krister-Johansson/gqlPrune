@@ -28,7 +28,8 @@ Useful scripts:
 | Command             | What it does                  |
 | ------------------- | ----------------------------- |
 | `npm run build`     | Compile TypeScript to `dist/` |
-| `npm test`          | Run the Jest test suite       |
+| `npm test`          | Run the Jest unit suite       |
+| `npm run test:e2e`  | Build, then run the e2e suite |
 | `npm run coverage`  | Run tests with coverage       |
 | `npm run typecheck` | `tsc --noEmit`                |
 | `npm run lint`      | ESLint (flat config)          |
@@ -55,6 +56,15 @@ report). CI runs the same suite, plus build, typecheck, and lint, on Node 20
 and 22 for every pull request, and those checks must pass before a merge. A
 failing test names the spec and assertion that broke; the specs live next to
 the module they cover, one file per source module.
+
+`test/e2e/` is a second, separate suite. It spawns the built CLI as a real
+process against the static project tree in `test/fixtures/e2e/`, and it packs
+and installs the tarball to check the shipped artifact. Run it with
+`npm run test:e2e`, which builds first. It is excluded from `npm test` and from
+the coverage thresholds, which describe the unit suite. Assert there on section
+headers, finding names, parsed JSON keys and exit codes, not on whole-output
+equality: the report gains columns over time and a byte-exact expectation would
+have to be rewritten for each one.
 
 ## Commit messages
 

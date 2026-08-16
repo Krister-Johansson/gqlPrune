@@ -36,6 +36,8 @@ src/
     stringHelpers.ts      small string utilities
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)
 test/                     Jest specs, one per source module
+  e2e/                    Separate suite: spawns the built CLI as a process
+  fixtures/e2e/           Static project tree the e2e cases scan
 ```
 
 **Design pattern that matters:** keep logic in small **pure, exported
@@ -60,7 +62,8 @@ the suite easy to test — mirror it for new work.
 | Command             | What it does                                                     |
 | ------------------- | ---------------------------------------------------------------- |
 | `npm run build`     | Compile to `dist/` (`tsc`)                                       |
-| `npm test`          | Run Jest                                                         |
+| `npm test`          | Run Jest (unit suite only)                                       |
+| `npm run test:e2e`  | Build, then run the e2e suite (`jest.e2e.config.cjs`)            |
 | `npm run coverage`  | Jest with coverage (thresholds enforced — see `jest.config.cjs`) |
 | `npm run typecheck` | `tsc --noEmit`                                                   |
 | `npm run lint`      | ESLint (flat config)                                             |
@@ -97,6 +100,10 @@ A change moves through these stages. Don't skip ahead.
   in `test/gqlPruner.test.ts` (real pure helpers, mocked filesystem).
 - Match the existing test style: `describe` per function, small focused `it`s,
   explicit expected values.
+- Behaviour that only the shipped binary shows — exit codes, `--json` stdout
+  purity, the packaged artifact — belongs in `test/e2e/` instead. Assert there on
+  section headers, finding names, parsed JSON keys and exit codes; never on
+  whole-output equality, which breaks on every added column.
 
 ### 3. Branch & commit
 

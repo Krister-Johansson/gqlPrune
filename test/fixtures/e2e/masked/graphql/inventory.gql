@@ -1,0 +1,13 @@
+query GetInventoryLevels {
+  inventoryLevels {
+    id
+    quantity
+  }
+}
+
+query GetInventoryAlerts {
+  inventoryAlerts {
+    id
+    severity
+  }
+}

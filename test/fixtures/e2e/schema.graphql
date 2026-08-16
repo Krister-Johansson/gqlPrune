@@ -1,0 +1,41 @@
+# Fixture SDL for the end-to-end suite. gqlPrune only runs the deprecation rule
+# against it, so it needs to cover the deprecated fields and the types the
+# fixture documents select on. It is not a real service schema.
+
+type Query {
+  user(id: ID!): User
+  dashboard: Dashboard
+  legacyReport: LegacyReport
+  ping: Ping
+  serviceStatus: ServiceStatus
+}
+
+type User {
+  id: ID!
+  name: String
+  legacyDisplayName: String @deprecated(reason: "Use name instead.")
+  internalAuditTrail: String
+}
+
+type Dashboard {
+  id: ID!
+  headline: String
+  refreshedAt: String
+}
+
+type LegacyReport {
+  id: ID!
+  title: String
+}
+
+type Ping {
+  id: ID!
+  ok: Boolean
+  legacyLatencyMs: Int @deprecated(reason: "Use durationMs instead.")
+  durationMs: Int
+}
+
+type ServiceStatus {
+  id: ID!
+  state: String
+}
