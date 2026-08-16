@@ -76,7 +76,7 @@ release-please derives versions and the changelog from them. Use `feat:`, `fix:`
 ## Pull requests
 
 1. Branch off `main`.
-2. Make sure it passes locally: `npm run build && npm run typecheck && npm run lint && npm test`.
+2. Make sure it passes locally: `npm run build && npm run typecheck && npm run lint && npm test && npm run test:e2e`.
 3. Open the PR with a clear description. CI must be green before merge.
 
 ## Code review

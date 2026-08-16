@@ -72,7 +72,7 @@ the suite easy to test — mirror it for new work.
 **The local gate before any PR** (same checks CI runs on Node 20 + 22):
 
 ```bash
-npm run build && npm run typecheck && npm run lint && npm test
+npm run build && npm run typecheck && npm run lint && npm test && npm run test:e2e
 ```
 
 Coverage thresholds live in `jest.config.cjs` (statements/functions/lines ≥ 90,
