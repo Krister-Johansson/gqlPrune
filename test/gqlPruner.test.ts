@@ -1315,6 +1315,26 @@ describe('gqlPruner', () => {
       ]);
     });
 
+    it('reports nothing for a document that is commented out', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: [
+              '// const old = graphql(`query FromComment { me { id } }`);',
+              '/* const older = graphql(`query FromBlock { me { id } }`); */',
+              'export const note = "graphql(`query FromString { me { id } }`)";',
+            ].join('\n'),
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.inlineSkippedCount).toBe(0);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
     it('counts a body that does not parse instead of failing the scan', () => {
       const result = scanSources(
         [{ file: 'src/App.tsx', content: 'const q = gql`query {{{`;' }],

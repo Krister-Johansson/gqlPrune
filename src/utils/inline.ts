@@ -61,12 +61,21 @@ export type InlineIdentifierUsage = {
 /**
  * Start of an inline document: an optional `const|let|var IDENT =` (an `export`
  * in front and a type annotation after the name are both fine), then the `gql`
- * or `graphql` tag — possibly reached through a member expression — and then
+ * or `graphql` tag, possibly reached through a member expression, and then
  * either a backtick (tagged template) or a parenthesis and the opening quote of
  * a single string argument. The lookarounds keep `mygql` and `graphqlDir` out.
+ *
+ * Sticky, because the scanner only ever tries it at an offset it has already
+ * decided is code rather than a comment or a string.
  */
 const DOCUMENT_START =
-  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=\n]*)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/g;
+  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=\n]*)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
+
+/** First character of a JavaScript identifier, where a tag can begin. */
+const IDENTIFIER_START = /[A-Za-z_$]/;
+
+/** Any character that can continue a JavaScript identifier. */
+const IDENTIFIER_PART = /[\w$]/;
 
 /** Replaces every character of a range with a space, keeping newlines in place. */
 function blankRange(text: string): string {
@@ -127,6 +136,84 @@ function scanLiteral(
   return null;
 }
 
+/** Returns the offset of the newline that ends a `//` comment, or the file end. */
+function skipLineComment(content: string, start: number): number {
+  const newline = content.indexOf('\n', start + 2);
+  return newline === -1 ? content.length : newline;
+}
+
+/**
+ * Returns the offset just past the end of a block comment. An unterminated
+ * comment runs to the end of the file, which is what a compiler
+ * sees too, so nothing after it is read as code.
+ */
+function skipBlockComment(content: string, start: number): number {
+  const end = content.indexOf('*/', start + 2);
+  return end === -1 ? content.length : end + 2;
+}
+
+/**
+ * Returns the offset just past an ordinary string or template literal, so its
+ * contents are never read as code. A `'` or `"` literal cannot cross a line, so
+ * a newline ends it and scanning resumes there; a template literal runs to its
+ * closing backtick, with `${...}` skipped as a unit by brace counting so a
+ * brace-heavy interpolation cannot end it early.
+ */
+function skipLiteral(content: string, start: number): number {
+  const quote = content[start];
+  let i = start + 1;
+  while (i < content.length) {
+    const char = content[i];
+    if (char === '\\') {
+      i += 2;
+      continue;
+    }
+    if (char === quote) return i + 1;
+    if (char === '\n' && quote !== '`') return i;
+    if (quote === '`' && char === '$' && content[i + 1] === '{') {
+      const end = findInterpolationEnd(content, i);
+      if (end === null) return content.length;
+      i = end;
+      continue;
+    }
+    i += 1;
+  }
+  return content.length;
+}
+
+/**
+ * Returns the offset just past the `)` that closes a call whose argument list is
+ * already open at `start`, so a helper call carrying options after the document
+ * is blanked whole. Nested parentheses, strings and comments inside the
+ * arguments are skipped. Returns `null` when the call never closes.
+ */
+function findCallEnd(content: string, start: number): number | null {
+  let depth = 1;
+  let i = start;
+  while (i < content.length) {
+    const char = content[i];
+    if (char === '/' && content[i + 1] === '/') {
+      i = skipLineComment(content, i);
+      continue;
+    }
+    if (char === '/' && content[i + 1] === '*') {
+      i = skipBlockComment(content, i);
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      i = skipLiteral(content, i);
+      continue;
+    }
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
 /** Tracks line/column while walking a file's offsets in ascending order. */
 function locationTracker(content: string): (index: number) => {
   line: number;
@@ -156,61 +243,109 @@ function locationTracker(content: string): (index: number) => {
  * graphql-tag and friends append the interpolated documents after the body
  * rather than substituting inside it.
  *
+ * A single pass walks the file and keeps track of whether it is in code, a
+ * comment, or a string, and only looks for a tag while it is in code. A tag
+ * written inside a comment or a quoted string is therefore skipped instead of
+ * becoming a phantom document, which matters most for commented-out code. The
+ * pass does not parse JavaScript: a regular-expression literal holding a quote
+ * or a comment marker, such as `/["']/`, can still throw it off for the rest of
+ * the line.
+ *
  * @param {string} content - The raw source file text.
  * @returns {InlineSite[]} - The recognized documents, in file order.
  */
 export function findInlineDocumentSites(content: string): InlineSite[] {
   const sites: InlineSite[] = [];
   const locate = locationTracker(content);
-  DOCUMENT_START.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = DOCUMENT_START.exec(content)) !== null) {
-    const [matched, identifier, paren, quote] = match;
-    // Without a call parenthesis this has to be a tagged template: `gql'...'`
-    // is not one, and `from 'graphql'` would otherwise look like a document.
-    if (paren === undefined && quote !== '`') continue;
-
-    const bodyStart = match.index + matched.length;
-    const literal = scanLiteral(content, bodyStart, quote);
-    if (literal === null) continue;
-    const { bodyEnd, interpolations } = literal;
-
-    // The statement ends at the closing quote, plus the call's `)` when it has
-    // one, so that nothing of the definition site is left in the corpus.
-    let end = bodyEnd + 1;
-    if (paren !== undefined) {
-      let after = end;
-      while (after < content.length && /\s/.test(content[after])) after += 1;
-      if (content[after] === ')') end = after + 1;
+  let i = 0;
+  while (i < content.length) {
+    const char = content[i];
+    if (char === '/' && content[i + 1] === '/') {
+      i = skipLineComment(content, i);
+      continue;
+    }
+    if (char === '/' && content[i + 1] === '*') {
+      i = skipBlockComment(content, i);
+      continue;
+    }
+    if (!IDENTIFIER_START.test(char)) {
+      // Any other literal belongs to the surrounding code, not to a document.
+      i =
+        char === "'" || char === '"' || char === '`'
+          ? skipLiteral(content, i)
+          : i + 1;
+      continue;
     }
 
-    // Everything from the statement's first character to its end is blanked,
-    // except the interpolations.
-    const blankRanges: Range[] = [];
-    let cursor = match.index;
-    for (const interpolation of interpolations) {
-      blankRanges.push({ start: cursor, end: interpolation.start });
-      cursor = interpolation.end;
+    DOCUMENT_START.lastIndex = i;
+    const match = DOCUMENT_START.exec(content);
+    const end =
+      match === null ? null : readDocument(content, match, sites, locate);
+    if (end !== null) {
+      i = end;
+      continue;
     }
-    blankRanges.push({ start: cursor, end });
-
-    const body = interpolations.reduce(
-      (text, interpolation) =>
-        text.slice(0, interpolation.start - bodyStart) +
-        blankRange(content.slice(interpolation.start, interpolation.end)) +
-        text.slice(interpolation.end - bodyStart),
-      content.slice(bodyStart, bodyEnd),
-    );
-
-    sites.push({
-      body,
-      ...locate(bodyStart),
-      ...(identifier === undefined ? {} : { identifier }),
-      blankRanges,
-    });
-    DOCUMENT_START.lastIndex = end;
+    // Not a document after all: step over the whole identifier so the text it
+    // introduces (a plain string, say) is read in its own right.
+    i += 1;
+    while (i < content.length && IDENTIFIER_PART.test(content[i])) i += 1;
   }
   return sites;
+}
+
+/**
+ * Turns one `DOCUMENT_START` match into a site and appends it, returning the
+ * offset just past the defining statement. Returns `null` when the match is not
+ * a document after all, either because the tag takes a plain quoted string
+ * (`gql'...'` is not a tagged template, and `from 'graphql'` is an import) or
+ * because the literal never closes.
+ */
+function readDocument(
+  content: string,
+  match: RegExpExecArray,
+  sites: InlineSite[],
+  locate: (index: number) => { line: number; column: number },
+): number | null {
+  const [matched, identifier, paren, quote] = match;
+  if (paren === undefined && quote !== '`') return null;
+
+  const bodyStart = match.index + matched.length;
+  const literal = scanLiteral(content, bodyStart, quote);
+  if (literal === null) return null;
+  const { bodyEnd, interpolations } = literal;
+
+  // The statement ends at the closing quote, plus the rest of the call's
+  // argument list when it has one, so that nothing of the definition site is
+  // left in the corpus.
+  const closing =
+    paren === undefined ? null : findCallEnd(content, bodyEnd + 1);
+  const end = closing ?? bodyEnd + 1;
+
+  // Everything from the statement's first character to its end is blanked,
+  // except the interpolations.
+  const blankRanges: Range[] = [];
+  let cursor = match.index;
+  for (const interpolation of interpolations) {
+    blankRanges.push({ start: cursor, end: interpolation.start });
+    cursor = interpolation.end;
+  }
+  blankRanges.push({ start: cursor, end });
+
+  const body = interpolations.reduce(
+    (text, interpolation) =>
+      text.slice(0, interpolation.start - bodyStart) +
+      blankRange(content.slice(interpolation.start, interpolation.end)) +
+      text.slice(interpolation.end - bodyStart),
+    content.slice(bodyStart, bodyEnd),
+  );
+
+  sites.push({
+    body,
+    ...locate(bodyStart),
+    ...(identifier === undefined ? {} : { identifier }),
+    blankRanges,
+  });
+  return end;
 }
 
 /**

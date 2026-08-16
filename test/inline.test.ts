@@ -140,6 +140,123 @@ describe('findInlineDocumentSites', () => {
     );
   });
 
+  it('ignores a tag inside a line comment', () => {
+    expect(
+      findInlineDocumentSites('// const q = gql`query A { a }`;\n'),
+    ).toEqual([]);
+  });
+
+  it('ignores a tag inside a block comment', () => {
+    expect(
+      findInlineDocumentSites('/* const q = gql`query A { a }`; */\n'),
+    ).toEqual([]);
+  });
+
+  it('ignores a tag inside a double-quoted string', () => {
+    expect(
+      findInlineDocumentSites('const note = "gql`query A { a }`";\n'),
+    ).toEqual([]);
+  });
+
+  it('ignores a tag inside a single-quoted string', () => {
+    expect(
+      findInlineDocumentSites("const note = 'gql`query A { a }`';\n"),
+    ).toEqual([]);
+  });
+
+  it('ignores a tag inside an ordinary template literal', () => {
+    expect(
+      findInlineDocumentSites("const note = `gql('query A { a }')`;\n"),
+    ).toEqual([]);
+  });
+
+  it('finds a document that follows a comment holding a tag', () => {
+    const content = [
+      '// const old = gql`query Old { a }`;',
+      '/* const older = gql`query Older { a }`; */',
+      'const q = gql`query A { a }`;',
+    ].join('\n');
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites.map((site) => site.body)).toEqual(['query A { a }']);
+    expect(sites[0].line).toBe(3);
+  });
+
+  it('finds a document that follows an interpolated template literal', () => {
+    const content = [
+      'const label = `${count > 0 ? `${count} left` : "none"} total`;',
+      'const q = gql`query A { a }`;',
+    ].join('\n');
+
+    expect(findInlineDocumentSites(content).map((site) => site.body)).toEqual([
+      'query A { a }',
+    ]);
+  });
+
+  it('keeps its place across an apostrophe in a line comment', () => {
+    const content = [
+      "// don't look in here",
+      'const q = gql`query A { a }`;',
+    ].join('\n');
+
+    expect(
+      findInlineDocumentSites(content).map((site) => site.identifier),
+    ).toEqual(['q']);
+  });
+
+  it('reads a helper call that takes more arguments after the document', () => {
+    const content =
+      "const q = graphql('query A { a }', { fetchPolicy: 'no-cache' });";
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites.map((site) => site.body)).toEqual(['query A { a }']);
+    expect(sites[0].blankRanges).toEqual([
+      { start: 0, end: content.length - 1 },
+    ]);
+  });
+
+  it('reads past comments and nested parentheses in the argument list', () => {
+    const content = [
+      "const q = graphql('query A { a }' /* doc */, // options",
+      '  opts(1, 2));',
+    ].join('\n');
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites.map((site) => site.body)).toEqual(['query A { a }']);
+    expect(sites[0].blankRanges).toEqual([
+      { start: 0, end: content.length - 1 },
+    ]);
+  });
+
+  it('stops at the closing quote when the call never closes', () => {
+    const content = "const q = graphql('query A { a }'";
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites.map((site) => site.body)).toEqual(['query A { a }']);
+    expect(sites[0].blankRanges).toEqual([{ start: 0, end: content.length }]);
+  });
+
+  it('does not end an ordinary string at an escaped quote', () => {
+    const content = [
+      "const s = 'it\\'s here';",
+      'const q = gql`query A { a }`;',
+    ].join('\n');
+
+    expect(
+      findInlineDocumentSites(content).map((site) => site.identifier),
+    ).toEqual(['q']);
+  });
+
+  it('swallows the rest of the file at an unterminated block comment', () => {
+    expect(
+      findInlineDocumentSites('/* unfinished\nconst q = gql`query A { a }`;\n'),
+    ).toEqual([]);
+  });
+
   it('returns nothing for a file without GraphQL', () => {
     expect(
       findInlineDocumentSites('export const total = items.length;\n'),
@@ -201,6 +318,15 @@ describe('extractInlineDocuments', () => {
     expect(blankedContent).not.toContain('GetUserDocument');
     expect(blankedContent).not.toContain('GetUser ');
     expect(blankedContent).toHaveLength(content.length);
+  });
+
+  it('blanks the trailing arguments of a helper call too', () => {
+    const content =
+      "const q = graphql('query A { a }', { fetchPolicy: 'no-cache' });";
+
+    const { blankedContent } = extractInlineDocuments('src/App.tsx', content);
+
+    expect(blankedContent).toBe(' '.repeat(content.length - 1) + ';');
   });
 
   it('keeps the surrounding code and the interpolated names visible', () => {
