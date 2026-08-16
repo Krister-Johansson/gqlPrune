@@ -36,6 +36,14 @@ import {
   InlineIdentifierUsage,
   toInlineEntities,
 } from '../utils/inline.js';
+import {
+  CodegenDerivation,
+  deriveGqlPruneConfig,
+  discoverCodegenConfig,
+  formatCodegenInfoLine,
+  formatCodegenVerboseLines,
+  loadCodegenConfig,
+} from '../utils/codegen.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
@@ -694,15 +702,10 @@ export function findDuplicateNameWarnings(
 }
 
 /**
- * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
- * values provided as CLI flags, which win per field. A missing config file is
- * fine — the CLI flags may supply everything. Throws on a malformed or
- * otherwise unreadable file so the problem isn't silently ignored.
+ * Reads `gqlPrune.config.yaml`, or returns `{}` when there is none. Throws on a
+ * malformed or otherwise unreadable file so the problem isn't silently ignored.
  */
-export function resolveConfig(
-  cliConfig: CliConfig = {},
-): Partial<GqlPruneConfig> {
-  let fileConfig: Partial<GqlPruneConfig> = {};
+function readFileConfig(): Partial<GqlPruneConfig> {
   let raw: string | undefined;
   try {
     raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
@@ -714,11 +717,212 @@ export function resolveConfig(
   }
   // An empty/whitespace-only file is treated as no config (parsing it throws),
   // so CLI flags alone can still drive the run.
-  if (raw !== undefined && raw.trim() !== '') {
-    fileConfig = (yaml.load(raw) as GqlPruneConfig) ?? {};
+  if (raw === undefined || raw.trim() === '') return {};
+  return (yaml.load(raw) as GqlPruneConfig) ?? {};
+}
+
+/** A run's configuration, plus where any codegen-derived values came from. */
+export type ResolvedRunConfig = {
+  config: Partial<GqlPruneConfig>;
+  /** Present when a codegen config supplied values that took effect. */
+  codegen?: CodegenDerivation;
+  /** Why no codegen config was used, when one was looked for (`--verbose`). */
+  codegenNotice?: string;
+  /** A config named by `--codegen`/`codegenConfig` that could not be read. */
+  codegenError?: string;
+};
+
+/**
+ * Resolves everything a run needs, in strict precedence: CLI flags, then
+ * `gqlPrune.config.yaml`, then a GraphQL Code Generator config, then the
+ * built-in defaults.
+ *
+ * The codegen layer is read in two cases only. When `--codegen`/`codegenConfig`
+ * names a file, it is read wherever it sits, and a file that cannot be read is
+ * an error the caller reports. Otherwise it is looked for in the working
+ * directory, and only when neither the config file nor a flag says which
+ * directories to scan. That is exactly the run that fails today with "No
+ * configuration found", so an inferred setting can never change the result of a
+ * project that is already configured.
+ *
+ * @param {CliConfig} cliConfig - Overrides collected from the CLI flags.
+ * @returns {ResolvedRunConfig} - The configuration and its codegen provenance.
+ */
+export function resolveRunConfig(cliConfig: CliConfig = {}): ResolvedRunConfig {
+  const merged = { ...readFileConfig(), ...cliConfig };
+  const requested =
+    typeof merged.codegenConfig === 'string' ? merged.codegenConfig.trim() : '';
+  const unconfigured =
+    resolveDirs(merged.graphqlDir).length === 0 &&
+    resolveDirs(merged.srcDir).length === 0;
+  if (requested === '' && !unconfigured) return { config: merged };
+
+  const lookup =
+    requested === '' ? discoverCodegenConfig() : loadCodegenConfig(requested);
+  if (!lookup.found) {
+    return requested === ''
+      ? { config: merged, codegenNotice: lookup.reason }
+      : { config: merged, codegenError: lookup.reason };
   }
+  // Lowest precedence: only the keys nothing else already decided.
+  const values = Object.fromEntries(
+    Object.entries(deriveGqlPruneConfig(lookup.config)).filter(
+      ([key]) => !(key in merged),
+    ),
+  );
+  return {
+    config: { ...values, ...merged },
+    ...(Object.keys(values).length > 0
+      ? { codegen: { file: lookup.config.file, values } }
+      : { codegenNotice: `Nothing to derive from ${lookup.config.file}.` }),
+  };
+}
+
+/**
+ * The codegen config a setting was derived from, or `undefined` when the user
+ * wrote it themselves.
+ *
+ * The distinction drives one rule: **explicit configuration fails loudly,
+ * inference degrades gracefully.** A value from `gqlPrune.config.yaml` or a CLI
+ * flag that does not resolve ends the run with exit code 2, because the user
+ * asked for it and a silent skip would hide their mistake. A value gqlPrune
+ * derived from a codegen config never turns a runnable scan into a fatal error:
+ * it is dropped with an advisory warning and the scan carries on.
+ *
+ * @param {ResolvedRunConfig} run - The resolved run, with its provenance.
+ * @param {keyof GqlPruneConfig} key - The setting to ask about.
+ * @returns {string | undefined} - The codegen file, when the value came from one.
+ */
+export function codegenSource(
+  run: ResolvedRunConfig,
+  key: keyof GqlPruneConfig,
+): string | undefined {
+  return run.codegen !== undefined && key in run.codegen.values
+    ? run.codegen.file
+    : undefined;
+}
+
+/**
+ * The advisory warning for a `schemaFile` that was derived from a codegen
+ * config and cannot be used. A codegen `schema` is routinely a path that is only
+ * filled in at build time, so it must cost the deprecated-selection check and
+ * nothing else.
+ */
+export function formatDerivedSchemaWarning(
+  codegenFile: string,
+  schemaFile: string,
+): string {
+  return (
+    `Skipped the deprecated-selection check: the schema "${schemaFile}" derived ` +
+    `from ${codegenFile} could not be read or parsed. Set "schemaFile" in ` +
+    'gqlPrune.config.yaml to check against a schema of your own.'
+  );
+}
+
+/** The directories a scan will walk, plus anything the caller must report. */
+export type ResolvedScanDirs = {
+  graphqlDir: string[];
+  srcDir: string[];
+  /** Advisory warnings for derived directories that were dropped. */
+  warnings: string[];
+  /** Set when nothing scannable is left; the run must stop with exit code 2. */
+  error?: string;
+};
+
+/**
+ * Turns the configured `graphqlDir`/`srcDir` values into the directories to
+ * scan: globs are expanded, and paths that are not on disk are checked.
+ *
+ * Which failures are fatal depends on where the value came from (see
+ * {@link codegenSource}). A directory the user configured that does not exist
+ * ends the run. A derived one is dropped with a warning, and only an empty
+ * result stops the run, with a message that names the codegen config: the user
+ * never wrote the path it complains about.
+ *
+ * @param {string[]} graphqlDir - Configured GraphQL directories.
+ * @param {string[]} srcDir - Configured source directories.
+ * @param {object} derived - Per field, the codegen file it was derived from.
+ * @returns {ResolvedScanDirs} - The surviving directories, warnings and error.
+ */
+export function resolveScanDirs(
+  graphqlDir: string[],
+  srcDir: string[],
+  derived: { graphqlDir?: string; srcDir?: string } = {},
+): ResolvedScanDirs {
+  const stop = (error: string, warnings: string[] = []): ResolvedScanDirs => ({
+    graphqlDir: [],
+    srcDir: [],
+    warnings,
+    error,
+  });
+
+  const expanded = [
+    { field: 'graphqlDir', configured: graphqlDir, from: derived.graphqlDir },
+    { field: 'srcDir', configured: srcDir, from: derived.srcDir },
+  ].map((field) => ({ ...field, ...expandDirPatterns(field.configured) }));
+
+  // A glob that matches nothing is checked first, before anything touches the
+  // filesystem, exactly as it always was.
+  const explicitUnmatched = expanded
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.unmatched);
+  if (explicitUnmatched.length > 0) {
+    return stop(
+      `These configured directory patterns match no directories: ${explicitUnmatched.join(', ')}.`,
+    );
+  }
+
+  const checked = expanded.map((entry) => {
+    const present = entry.dirs.filter((dir) => directoryExists(dir));
+    const missing = entry.dirs.filter((dir) => !present.includes(dir));
+    return { ...entry, present, dropped: [...entry.unmatched, ...missing] };
+  });
+
+  const explicitMissing = checked
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.dropped);
+  if (explicitMissing.length > 0) {
+    return stop(
+      `These configured directories do not exist: ${explicitMissing.join(', ')}.`,
+    );
+  }
+
+  const warnings: string[] = [];
+  for (const entry of checked) {
+    if (entry.from === undefined || entry.dropped.length === 0) continue;
+    if (entry.present.length === 0) {
+      return stop(
+        `No directory derived from ${entry.from} for "${entry.field}" is on disk: ` +
+          `${entry.dropped.join(', ')}. Set graphqlDir and srcDir in ` +
+          'gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> ' +
+          'and --src <dir>.',
+        warnings,
+      );
+    }
+    warnings.push(
+      `Skipped "${entry.field}" ${entry.dropped.join(', ')} derived from ` +
+        `${entry.from}: not on disk. Scanning ${entry.present.join(', ')}.`,
+    );
+  }
+
+  return {
+    graphqlDir: checked[0].present,
+    srcDir: checked[1].present,
+    warnings,
+  };
+}
+
+/**
+ * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
+ * values provided as CLI flags, which win per field. A missing config file is
+ * fine: the CLI flags may supply everything. See {@link resolveRunConfig} for
+ * the full precedence, including codegen-derived defaults.
+ */
+export function resolveConfig(
+  cliConfig: CliConfig = {},
+): Partial<GqlPruneConfig> {
   // Required fields may still be absent; mainFunction validates and narrows.
-  return { ...fileConfig, ...cliConfig };
+  return resolveRunConfig(cliConfig).config;
 }
 
 /** The result of a single project scan, free of any console output. */
@@ -962,15 +1166,33 @@ export function mainFunction(
     }
   };
 
-  let resolved: Partial<GqlPruneConfig>;
+  let run: ResolvedRunConfig;
   try {
-    resolved = resolveConfig(options.config);
+    run = resolveRunConfig(options.config);
   } catch (e) {
     console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
     process.exit(2);
   }
 
+  // A codegen config the user asked for by name and that cannot be read is a
+  // broken run, like an unreadable schema; a discovered one is only a default.
+  if (run.codegenError !== undefined) {
+    console.error(kleur.red(run.codegenError));
+    process.exit(2);
+  }
+  // Report the inferred layer before anything can fail, so even a run that
+  // stops at a missing directory explains where its settings came from.
+  if (verbose) {
+    if (run.codegenNotice !== undefined) {
+      logVerbose([`codegen: ${run.codegenNotice}`]);
+    }
+    if (run.codegen !== undefined) {
+      logVerbose(formatCodegenVerboseLines(run.codegen));
+    }
+  }
+
+  const resolved = run.config;
   const graphqlDirs = resolveDirs(resolved.graphqlDir);
   const srcDirs = resolveDirs(resolved.srcDir);
 
@@ -983,45 +1205,30 @@ export function mainFunction(
     process.exit(2);
   }
 
-  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches;
-  // plain paths pass through and are checked for existence just below.
-  const expandedGraphqlDirs = expandDirPatterns(graphqlDirs);
-  const expandedSrcDirs = expandDirPatterns(srcDirs);
-  const emptyPatterns = [
-    ...expandedGraphqlDirs.unmatched,
-    ...expandedSrcDirs.unmatched,
-  ];
-  if (emptyPatterns.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directory patterns match no directories: ${emptyPatterns.join(', ')}.`,
-      ),
-    );
+  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches,
+  // and check that what is left is on disk. A configured path that is not ends
+  // the run; a derived one is dropped with a warning (see resolveScanDirs).
+  const scanDirs = resolveScanDirs(graphqlDirs, srcDirs, {
+    graphqlDir: codegenSource(run, 'graphqlDir'),
+    srcDir: codegenSource(run, 'srcDir'),
+  });
+  if (scanDirs.error !== undefined) {
+    console.error(kleur.red(scanDirs.error));
     process.exit(2);
   }
-
-  const missingDirs = [
-    ...expandedGraphqlDirs.dirs,
-    ...expandedSrcDirs.dirs,
-  ].filter((dir) => !directoryExists(dir));
-  if (missingDirs.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directories do not exist: ${missingDirs.join(', ')}.`,
-      ),
-    );
-    process.exit(2);
-  }
+  // Collected here and emitted with the scan's own warnings further down, so
+  // every advisory takes the same route to stderr, ::warning and the JSON.
+  const configWarnings = [...scanDirs.warnings];
 
   // Optional and off unless configured: a path to a local SDL file.
   const schemaFile =
     typeof resolved.schemaFile === 'string' ? resolved.schemaFile.trim() : '';
 
-  // All directories exist; carry the expanded lists forward.
+  // Every remaining directory exists; carry the expanded lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
-    graphqlDir: expandedGraphqlDirs.dirs,
-    srcDir: expandedSrcDirs.dirs,
+    graphqlDir: scanDirs.graphqlDir,
+    srcDir: scanDirs.srcDir,
     schemaFile: schemaFile === '' ? undefined : schemaFile,
   };
 
@@ -1037,30 +1244,34 @@ export function mainFunction(
       }),
     );
     logVerbose([
-      ...formatExpandedDirLines(
-        'graphqlDir',
-        graphqlDirs,
-        expandedGraphqlDirs.dirs,
-      ),
-      ...formatExpandedDirLines('srcDir', srcDirs, expandedSrcDirs.dirs),
+      ...formatExpandedDirLines('graphqlDir', graphqlDirs, scanDirs.graphqlDir),
+      ...formatExpandedDirLines('srcDir', srcDirs, scanDirs.srcDir),
     ]);
   }
 
   // Build the schema here rather than inside the scan: a schema the user asked
   // for but that cannot be read or parsed is a broken run (exit 2), like a
-  // missing directory, not a silently skipped check.
+  // missing directory, not a silently skipped check. A schema derived from a
+  // codegen config is the opposite case: the user never asked for the check, so
+  // it is skipped with a warning and the scan continues.
   let schema: GraphQLSchema | undefined;
   if (schemaFile !== '') {
+    const derivedSchema = codegenSource(run, 'schemaFile');
     try {
       schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
     } catch (e) {
-      console.error(
-        kleur.red(
-          `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
-        ),
+      if (derivedSchema === undefined) {
+        console.error(
+          kleur.red(
+            `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
+          ),
+        );
+        console.error(e);
+        process.exit(2);
+      }
+      configWarnings.push(
+        formatDerivedSchemaWarning(derivedSchema, schemaFile),
       );
-      console.error(e);
-      process.exit(2);
     }
   }
 
@@ -1085,13 +1296,21 @@ export function mainFunction(
     : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
-  const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
+  const advisoryWarnings = [
+    ...configWarnings,
+    ...duplicateWarnings,
+    ...generatedWarnings,
+  ];
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
   }
 
   if (!json) {
+    // Never leave an inferred setting invisible: name the file it came from.
+    if (run.codegen !== undefined) {
+      console.log(kleur.dim(formatCodegenInfoLine(run.codegen)));
+    }
     console.log(
       `Found ${kleur.yellow(gqlFileCount.toString())} GraphQL files.`,
     );

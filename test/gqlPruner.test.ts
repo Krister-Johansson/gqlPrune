@@ -27,6 +27,7 @@ import {
   resolveDirs,
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
+  resolveRunConfig,
   resolveUsagePatterns,
   scanProject,
 } from '../src/core/gqlPruner';
@@ -98,6 +99,43 @@ const entitiesWithDocument = (
 });
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
+
+/**
+ * Presents exactly these files to the config readers; every other path reads as
+ * missing. `fs` is fully mocked here, so this is the whole project as far as
+ * `resolveRunConfig` is concerned.
+ */
+function mockProjectFiles(files: Record<string, string>): void {
+  (fs.existsSync as unknown as jest.Mock).mockImplementation(
+    (file: string) => file in files,
+  );
+  (fs.readFileSync as jest.Mock).mockImplementation((file: string) => {
+    if (file in files) return files[file];
+    const error = new Error(`ENOENT: ${file}`) as NodeJS.ErrnoException;
+    error.code = 'ENOENT';
+    throw error;
+  });
+}
+
+// A codegen config of the kind a urql project keeps in its root.
+const CODEGEN_TS = [
+  'const config = {',
+  "  schema: './schema.graphql',",
+  "  documents: ['src/**/*.graphql'],",
+  '  generates: {',
+  "    'src/generated/graphql.ts': { plugins: ['typescript-urql'] },",
+  '  },',
+  '};',
+  'export default config;',
+].join('\n');
+
+// A codegen config whose documents live under two roots, one of which a
+// checkout may not have.
+const CODEGEN_TWO_DIRS = [
+  'documents:',
+  '  - src/**/*.graphql',
+  '  - legacy/**/*.graphql',
+].join('\n');
 
 // SDL and a matching parsed file, for the opt-in deprecated-field checks.
 const SDL = [
@@ -979,6 +1017,106 @@ describe('gqlPruner', () => {
         throw err;
       });
       expect(() => resolveConfig()).toThrow('eacces');
+    });
+  });
+
+  describe('resolveRunConfig', () => {
+    it('derives the whole configuration when nothing else supplies it', () => {
+      mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+      const run = resolveRunConfig();
+      expect(run.config).toEqual({
+        graphqlDir: ['src'],
+        srcDir: ['src'],
+        exclude: ['src/generated/graphql.ts'],
+        schemaFile: './schema.graphql',
+        usagePatterns: ['use{Name}{Type}', '{Name}Document'],
+        fragmentUsagePatterns: ['{Name}FragmentDoc'],
+      });
+      expect(run.codegen?.file).toBe('codegen.ts');
+      expect(run.codegenError).toBeUndefined();
+    });
+
+    it('never looks at a codegen config when flags supply the directories', () => {
+      mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+      const run = resolveRunConfig({ graphqlDir: './g', srcDir: './s' });
+      expect(run.config).toEqual({ graphqlDir: './g', srcDir: './s' });
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('never looks at a codegen config when the YAML supplies the directories', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml': 'graphqlDir: ./g\nsrcDir: ./s\n',
+        'codegen.ts': CODEGEN_TS,
+      });
+      const run = resolveRunConfig();
+      expect(run.config).toEqual({ graphqlDir: './g', srcDir: './s' });
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('lets gqlPrune.config.yaml win over an explicitly named codegen config', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml': [
+          'codegenConfig: tools/codegen.yml',
+          'graphqlDir: ./g',
+          'srcDir: ./s',
+          'schemaFile: ./mine.graphql',
+        ].join('\n'),
+        'tools/codegen.yml': [
+          'schema: ./theirs.graphql',
+          'documents: src/**/*.tsx',
+          'generates:',
+          '  src/gql/:',
+          '    preset: client',
+        ].join('\n'),
+      });
+      const run = resolveRunConfig();
+      // The YAML keeps every field it states; only the rest is derived.
+      expect(run.config).toMatchObject({
+        graphqlDir: './g',
+        srcDir: './s',
+        schemaFile: './mine.graphql',
+        exclude: ['src/gql'],
+        inline: true,
+      });
+      expect(run.codegen).toEqual({
+        file: 'tools/codegen.yml',
+        values: { exclude: ['src/gql'], inline: true },
+      });
+    });
+
+    it('lets CLI flags win over both the YAML and the codegen config', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml':
+          'codegenConfig: codegen.yml\nsrcDir: ./yaml-s\n',
+        'codegen.yml': 'documents: codegen-src/**/*.graphql\n',
+      });
+      const run = resolveRunConfig({ graphqlDir: './cli-g' });
+      expect(run.config).toMatchObject({
+        graphqlDir: './cli-g',
+        srcDir: './yaml-s',
+      });
+    });
+
+    it('reports a named codegen config that cannot be read', () => {
+      mockProjectFiles({});
+      const run = resolveRunConfig({ codegenConfig: 'tools/codegen.yml' });
+      expect(run.codegenError).toContain('tools/codegen.yml');
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('notes why discovery came back empty instead of failing', () => {
+      mockProjectFiles({});
+      const run = resolveRunConfig();
+      expect(run.codegenError).toBeUndefined();
+      expect(run.codegenNotice).toContain('No GraphQL Code Generator config');
+      expect(run.config).toEqual({});
+    });
+
+    it('notes a discovered config that yields nothing to derive', () => {
+      mockProjectFiles({ 'codegen.ts': 'export default { generates: {} };' });
+      const run = resolveRunConfig();
+      expect(run.codegen).toBeUndefined();
+      expect(run.codegenNotice).toContain('codegen.ts');
     });
   });
 
@@ -2617,6 +2755,206 @@ describe('gqlPruner', () => {
       expect(errorSpy.mock.calls.flat().join('\n')).toContain(
         'Could not read or parse the GraphQL schema file: ./schema.graphql.',
       );
+    });
+
+    describe('with a GraphQL Code Generator config', () => {
+      /** A scan of one operation that App.tsx uses through the urql hook. */
+      const mockScannedProject = (): void => {
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+        );
+        mockedReadSources.mockReturnValue([
+          { file: 'App.tsx', content: 'useGetUserQuery()' },
+        ]);
+      };
+
+      it('runs with no gqlPrune configuration at all', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        expect(() => mainFunction()).not.toThrow();
+        expect(exitSpy).not.toHaveBeenCalled();
+        expect(logged()).toContain('No unused');
+      });
+
+      it('says which settings came from the codegen config', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction();
+        expect(logged()).toContain('Using settings derived from codegen.ts');
+        expect(logged()).toContain('graphqlDir');
+        expect(logged()).toContain('usagePatterns');
+      });
+
+      it('lists every derived value under --verbose', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction({ verbose: true });
+        const errs = errorSpy.mock.calls.flat().join('\n');
+        expect(errs).toContain('codegen config: codegen.ts');
+        expect(errs).toContain('codegen graphqlDir: src');
+        expect(errs).toContain('codegen schemaFile: ./schema.graphql');
+      });
+
+      it('leaves a project that has its own config untouched', () => {
+        mockProjectFiles({
+          './gqlPrune.config.yaml': 'graphqlDir: ./g\nsrcDir: ./s\n',
+          'codegen.ts': CODEGEN_TS,
+        });
+        mockScannedProject();
+
+        mainFunction();
+        expect(logged()).not.toContain('derived from');
+        expect(mockedFind).toHaveBeenCalledWith(
+          './g',
+          ['.gql', '.graphql'],
+          expect.any(Function),
+        );
+      });
+
+      it('exits 2 when a codegen config named by --codegen cannot be read', () => {
+        mockProjectFiles({});
+
+        expect(() =>
+          mainFunction({ config: { codegenConfig: 'tools/codegen.yml' } }),
+        ).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'tools/codegen.yml',
+        );
+      });
+
+      it('still exits 2 when the discovered config yields no directories', () => {
+        mockProjectFiles({ 'codegen.ts': 'export default { generates: {} };' });
+
+        expect(() => mainFunction()).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain('--graphql');
+      });
+
+      // Explicit configuration fails loudly; inference degrades gracefully. A
+      // schema path that is not on disk yet (downloaded or generated at build
+      // time) is normal in a codegen config, and must not stop a scan the user
+      // never asked to include a schema in.
+      describe('a derived setting that does not resolve', () => {
+        /** A scan of one operation that nothing references. */
+        const mockUnusedOperation = (): void => {
+          mockedFind
+            .mockReturnValueOnce(['a.gql'])
+            .mockReturnValueOnce(['App.tsx']);
+          mockedExtract.mockReturnValue(
+            entitiesOf([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]),
+          );
+          mockedReadSources.mockReturnValue([
+            { file: 'App.tsx', content: 'nothing here' },
+          ]);
+        };
+
+        it('skips the deprecated check when the derived schema cannot be read', () => {
+          // codegen.ts names ./schema.graphql, which this project does not have.
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+          mockUnusedOperation();
+
+          expect(() => mainFunction()).not.toThrow();
+          expect(exitSpy).not.toHaveBeenCalled();
+          // The exit code reflects the findings, not the skipped check.
+          expect(process.exitCode).toBe(1);
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('codegen.ts');
+          expect(errs).toContain('./schema.graphql');
+        });
+
+        it('carries the skipped-schema warning in the JSON report', () => {
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+          mockUnusedOperation();
+
+          mainFunction({ json: true });
+
+          const report = JSON.parse(logged());
+          expect(report.warnings).toHaveLength(1);
+          expect(report.warnings[0]).toContain('codegen.ts');
+          expect(report.warnings[0]).toContain('./schema.graphql');
+          expect(report.deprecatedUsages).toEqual([]);
+        });
+
+        it('still exits 2 when --schema names the same unreadable path', () => {
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+
+          expect(() =>
+            mainFunction({ config: { schemaFile: './schema.graphql' } }),
+          ).toThrow('process.exit:2');
+          expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+            'Could not read or parse the GraphQL schema file: ./schema.graphql.',
+          );
+        });
+
+        it('drops a derived directory that does not exist and scans the rest', () => {
+          mockProjectFiles({ 'codegen.yml': CODEGEN_TWO_DIRS });
+          mockedDirExists.mockImplementation((dir: string) => dir === 'src');
+          mockUnusedOperation();
+
+          expect(() => mainFunction()).not.toThrow();
+          expect(exitSpy).not.toHaveBeenCalled();
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('legacy');
+          expect(errs).toContain('codegen.yml');
+          expect(mockedFind).toHaveBeenCalledWith(
+            'src',
+            ['.gql', '.graphql'],
+            expect.any(Function),
+          );
+          expect(mockedFind).not.toHaveBeenCalledWith(
+            'legacy',
+            expect.anything(),
+            expect.anything(),
+          );
+        });
+
+        it('exits 2 with codegen-aware guidance when no derived directory exists', () => {
+          mockProjectFiles({ 'codegen.yml': CODEGEN_TWO_DIRS });
+          mockedDirExists.mockReturnValue(false);
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('codegen.yml');
+          expect(errs).toContain('src');
+          expect(errs).toContain('legacy');
+          expect(errs).toContain('graphqlDir');
+          expect(errs).not.toContain(
+            'These configured directories do not exist',
+          );
+        });
+
+        it('keeps the plain message for a directory the user configured', () => {
+          (fs.readFileSync as jest.Mock).mockReturnValue(
+            'graphqlDir: ./g\nsrcDir: ./s\n',
+          );
+          mockedDirExists.mockImplementation((dir: string) => dir !== './g');
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain(
+            'These configured directories do not exist: ./g.',
+          );
+          expect(errs).not.toContain('codegen');
+        });
+      });
     });
 
     it('exits 2 with guidance when neither a config file nor flags supply dirs', () => {
