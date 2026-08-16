@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [3.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.12.0...gqlprune-v3.0.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scan:** the `--json` report's `orphanedFiles` is now a list of objects (`{ file, confidence, reason }`) instead of a list of path strings, so an orphaned file carries the same grade as every other finding. Read the path as `entry.file`. `summary.orphanedFiles` is unchanged, and no other key changed position or meaning.
+
+### Features
+
+* **config:** derive settings from a GraphQL Code Generator config ([#151](https://github.com/Krister-Johansson/gqlPrune/issues/151)) ([c5d9da0](https://github.com/Krister-Johansson/gqlPrune/commit/c5d9da092011827a2e2d887d47cd676e43510b67))
+* **scan:** grade findings by confidence ([#153](https://github.com/Krister-Johansson/gqlPrune/issues/153)) ([487c3b1](https://github.com/Krister-Johansson/gqlPrune/commit/487c3b1ec98f56737f491b5de971499d324e6ee9))
+* **scan:** opt-in inline GraphQL document scanning ([#149](https://github.com/Krister-Johansson/gqlPrune/issues/149)) ([dbfd428](https://github.com/Krister-Johansson/gqlPrune/commit/dbfd428dbbc301db33934c887e3837fa20cdefee))
+
 ## [2.12.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.2...gqlprune-v2.12.0) (2026-08-15)
 
 
