@@ -1,0 +1,7 @@
+# Used: spread by GetUser. Selects a field the fixture schema deprecates, which
+# is what the --schema case picks up.
+fragment UserFields on User {
+  id
+  name
+  legacyDisplayName
+}

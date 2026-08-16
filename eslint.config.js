@@ -3,7 +3,10 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import prettierRecommended from 'eslint-plugin-prettier/recommended';
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  // test/fixtures/** is input data, not project source: it is deliberately
+  // written the way a real consumer's tree looks (imports that resolve to
+  // nothing, codegen-shaped output) and is only ever string-searched.
+  { ignores: ['dist', 'test/fixtures'] },
   ...tseslint.configs.recommended,
   {
     plugins: {

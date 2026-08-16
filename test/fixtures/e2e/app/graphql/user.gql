@@ -1,0 +1,12 @@
+# Used: app/src/useUser.ts calls useGetUserQuery.
+# The second import also keeps fragments/teaserFields.gql off the orphan list
+# even though every definition in that file is unused.
+#import "./fragments/userFields.gql"
+#import "./fragments/teaserFields.gql"
+
+query GetUser($id: ID!) {
+  user(id: $id) {
+    ...UserFields
+    internalAuditTrail
+  }
+}

@@ -1,0 +1,14 @@
+query GetOrderList {
+  orderList {
+    id
+    reference
+  }
+}
+
+# Dead: no source file in packages/orders/src references it.
+query GetOrdersArchiveSnapshot {
+  ordersArchiveSnapshot {
+    id
+    capturedAt
+  }
+}
