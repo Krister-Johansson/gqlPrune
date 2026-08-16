@@ -27,7 +27,8 @@ export type ValueTarget =
   | 'excludedFolders'
   | 'usagePatterns'
   | 'fragmentUsagePatterns'
-  | 'schemaFile';
+  | 'schemaFile'
+  | 'codegenConfig';
 
 /**
  * One row of the CLI's flag table. `parseArgs`, `formatHelp` and the shell
@@ -128,6 +129,14 @@ export const FLAGS: readonly FlagSpec[] = [
     valueKind: 'path',
     target: 'schemaFile',
     description: 'Local SDL file; also flags @deprecated field and enum usage',
+  },
+  {
+    flag: '--codegen',
+    takesValue: true,
+    valuePlaceholder: '<file>',
+    valueKind: 'path',
+    target: 'codegenConfig',
+    description: 'GraphQL Code Generator config to derive settings from',
   },
   {
     flag: '--fields',

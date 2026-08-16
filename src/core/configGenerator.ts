@@ -12,6 +12,11 @@ import {
   directoryExists,
   findFilesWithExtension,
 } from '../utils/fileUtils.js';
+import {
+  CodegenDerivation,
+  deriveGqlPruneConfig,
+  discoverCodegenConfig,
+} from '../utils/codegen.js';
 import { resolveDirs, scanProject } from './gqlPruner.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
@@ -117,6 +122,37 @@ function detectFrom(filePaths: string[]): DirDetection {
   };
 }
 
+/**
+ * Reads the project's GraphQL Code Generator config, when it has one, so `init`
+ * can offer its `documents` globs and generated output paths as the answers
+ * instead of asking the user to restate them. Returns `undefined` when there is
+ * no config, or nothing in it to derive.
+ */
+export function detectCodegenDefaults(): CodegenDerivation | undefined {
+  const lookup = discoverCodegenConfig();
+  if (!lookup.found) return undefined;
+  const values = deriveGqlPruneConfig(lookup.config);
+  return Object.keys(values).length === 0
+    ? undefined
+    : { file: lookup.config.file, values };
+}
+
+/**
+ * Turns codegen-derived directories into a {@link DirDetection}, so they take
+ * the place of the filesystem heuristics. Several directories become a
+ * checklist, exactly as several detected roots do.
+ */
+export function codegenDirDetection(
+  value: string | string[] | undefined,
+): DirDetection | undefined {
+  const dirs = resolveDirs(value);
+  if (dirs.length === 0) return undefined;
+  return {
+    suggestion: dirs[0],
+    candidates: dirs.length > 1 ? dirs : [],
+  };
+}
+
 /** Suggests a `graphqlDir` from where the `.gql`/`.graphql` files live. */
 export function detectGraphqlDirs(): DirDetection {
   return detectFrom(
@@ -200,8 +236,19 @@ export async function generateConfig() {
     }
   }
 
+  // Prefer what the project's codegen config already states over guessing from
+  // the filesystem, and say where the answers came from so they can be checked.
+  const codegen = detectCodegenDefaults();
+  if (codegen !== undefined) {
+    console.log(
+      `Found ${codegen.file}; the defaults below come from it: ${Object.keys(
+        codegen.values,
+      ).join(', ')}.`,
+    );
+  }
+
   const graphqlDir = await askForDir(
-    detectGraphqlDirs(),
+    codegenDirDetection(codegen?.values.graphqlDir) ?? detectGraphqlDirs(),
     {
       select:
         'GraphQL files were found under several roots. Select the directories to scan:',
@@ -210,7 +257,7 @@ export async function generateConfig() {
     './path/to/graphql',
   );
   const srcDir = await askForDir(
-    detectSrcDirs(),
+    codegenDirDetection(codegen?.values.srcDir) ?? detectSrcDirs(),
     {
       select:
         'Source files were found under several roots. Select the directories to scan:',
@@ -223,6 +270,11 @@ export async function generateConfig() {
   // would otherwise reference every operation and mask all unused results. It
   // runs on the answers, so a multi-root selection narrows it the same way.
   const detectedExcludes = detectGeneratedExcludes(graphqlDir, srcDir);
+  // The codegen config already names its output paths; excluding them is what
+  // keeps generated code from making every operation look used.
+  const excludeDefaults = [
+    ...new Set([...resolveDirs(codegen?.values.exclude), ...detectedExcludes]),
+  ];
   if (detectedExcludes.length > 0) {
     console.log(
       `⚠ Detected a likely generated file that references most operations: ${detectedExcludes.join(
@@ -238,7 +290,7 @@ export async function generateConfig() {
       await input({
         message:
           'Files or folders to exclude (comma separated; gitignore-style globs allowed):',
-        default: detectedExcludes.join(', '),
+        default: excludeDefaults.join(', '),
       }),
     ),
   };

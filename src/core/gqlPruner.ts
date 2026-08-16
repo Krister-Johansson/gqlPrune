@@ -36,6 +36,14 @@ import {
   InlineIdentifierUsage,
   toInlineEntities,
 } from '../utils/inline.js';
+import {
+  CodegenDerivation,
+  deriveGqlPruneConfig,
+  discoverCodegenConfig,
+  formatCodegenInfoLine,
+  formatCodegenVerboseLines,
+  loadCodegenConfig,
+} from '../utils/codegen.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
@@ -694,15 +702,10 @@ export function findDuplicateNameWarnings(
 }
 
 /**
- * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
- * values provided as CLI flags, which win per field. A missing config file is
- * fine — the CLI flags may supply everything. Throws on a malformed or
- * otherwise unreadable file so the problem isn't silently ignored.
+ * Reads `gqlPrune.config.yaml`, or returns `{}` when there is none. Throws on a
+ * malformed or otherwise unreadable file so the problem isn't silently ignored.
  */
-export function resolveConfig(
-  cliConfig: CliConfig = {},
-): Partial<GqlPruneConfig> {
-  let fileConfig: Partial<GqlPruneConfig> = {};
+function readFileConfig(): Partial<GqlPruneConfig> {
   let raw: string | undefined;
   try {
     raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
@@ -714,11 +717,78 @@ export function resolveConfig(
   }
   // An empty/whitespace-only file is treated as no config (parsing it throws),
   // so CLI flags alone can still drive the run.
-  if (raw !== undefined && raw.trim() !== '') {
-    fileConfig = (yaml.load(raw) as GqlPruneConfig) ?? {};
+  if (raw === undefined || raw.trim() === '') return {};
+  return (yaml.load(raw) as GqlPruneConfig) ?? {};
+}
+
+/** A run's configuration, plus where any codegen-derived values came from. */
+export type ResolvedRunConfig = {
+  config: Partial<GqlPruneConfig>;
+  /** Present when a codegen config supplied values that took effect. */
+  codegen?: CodegenDerivation;
+  /** Why no codegen config was used, when one was looked for (`--verbose`). */
+  codegenNotice?: string;
+  /** A config named by `--codegen`/`codegenConfig` that could not be read. */
+  codegenError?: string;
+};
+
+/**
+ * Resolves everything a run needs, in strict precedence: CLI flags, then
+ * `gqlPrune.config.yaml`, then a GraphQL Code Generator config, then the
+ * built-in defaults.
+ *
+ * The codegen layer is read in two cases only. When `--codegen`/`codegenConfig`
+ * names a file, it is read wherever it sits, and a file that cannot be read is
+ * an error the caller reports. Otherwise it is looked for in the working
+ * directory, and only when neither the config file nor a flag says which
+ * directories to scan. That is exactly the run that fails today with "No
+ * configuration found", so an inferred setting can never change the result of a
+ * project that is already configured.
+ *
+ * @param {CliConfig} cliConfig - Overrides collected from the CLI flags.
+ * @returns {ResolvedRunConfig} - The configuration and its codegen provenance.
+ */
+export function resolveRunConfig(cliConfig: CliConfig = {}): ResolvedRunConfig {
+  const merged = { ...readFileConfig(), ...cliConfig };
+  const requested =
+    typeof merged.codegenConfig === 'string' ? merged.codegenConfig.trim() : '';
+  const unconfigured =
+    resolveDirs(merged.graphqlDir).length === 0 &&
+    resolveDirs(merged.srcDir).length === 0;
+  if (requested === '' && !unconfigured) return { config: merged };
+
+  const lookup =
+    requested === '' ? discoverCodegenConfig() : loadCodegenConfig(requested);
+  if (!lookup.found) {
+    return requested === ''
+      ? { config: merged, codegenNotice: lookup.reason }
+      : { config: merged, codegenError: lookup.reason };
   }
+  // Lowest precedence: only the keys nothing else already decided.
+  const values = Object.fromEntries(
+    Object.entries(deriveGqlPruneConfig(lookup.config)).filter(
+      ([key]) => !(key in merged),
+    ),
+  );
+  return {
+    config: { ...values, ...merged },
+    ...(Object.keys(values).length > 0
+      ? { codegen: { file: lookup.config.file, values } }
+      : { codegenNotice: `Nothing to derive from ${lookup.config.file}.` }),
+  };
+}
+
+/**
+ * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
+ * values provided as CLI flags, which win per field. A missing config file is
+ * fine: the CLI flags may supply everything. See {@link resolveRunConfig} for
+ * the full precedence, including codegen-derived defaults.
+ */
+export function resolveConfig(
+  cliConfig: CliConfig = {},
+): Partial<GqlPruneConfig> {
   // Required fields may still be absent; mainFunction validates and narrows.
-  return { ...fileConfig, ...cliConfig };
+  return resolveRunConfig(cliConfig).config;
 }
 
 /** The result of a single project scan, free of any console output. */
@@ -962,15 +1032,33 @@ export function mainFunction(
     }
   };
 
-  let resolved: Partial<GqlPruneConfig>;
+  let run: ResolvedRunConfig;
   try {
-    resolved = resolveConfig(options.config);
+    run = resolveRunConfig(options.config);
   } catch (e) {
     console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
     process.exit(2);
   }
 
+  // A codegen config the user asked for by name and that cannot be read is a
+  // broken run, like an unreadable schema; a discovered one is only a default.
+  if (run.codegenError !== undefined) {
+    console.error(kleur.red(run.codegenError));
+    process.exit(2);
+  }
+  // Report the inferred layer before anything can fail, so even a run that
+  // stops at a missing directory explains where its settings came from.
+  if (verbose) {
+    if (run.codegenNotice !== undefined) {
+      logVerbose([`codegen: ${run.codegenNotice}`]);
+    }
+    if (run.codegen !== undefined) {
+      logVerbose(formatCodegenVerboseLines(run.codegen));
+    }
+  }
+
+  const resolved = run.config;
   const graphqlDirs = resolveDirs(resolved.graphqlDir);
   const srcDirs = resolveDirs(resolved.srcDir);
 
@@ -1092,6 +1180,10 @@ export function mainFunction(
   }
 
   if (!json) {
+    // Never leave an inferred setting invisible: name the file it came from.
+    if (run.codegen !== undefined) {
+      console.log(kleur.dim(formatCodegenInfoLine(run.codegen)));
+    }
     console.log(
       `Found ${kleur.yellow(gqlFileCount.toString())} GraphQL files.`,
     );

@@ -293,7 +293,13 @@ describe('configGenerator', () => {
       logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     });
 
-    afterEach(() => logSpy.mockRestore());
+    afterEach(() => {
+      logSpy.mockRestore();
+      // `init` reads the filesystem to find a codegen config, and clearAllMocks
+      // keeps implementations; reset them so one test's files stay its own.
+      (fs.existsSync as jest.Mock).mockReset();
+      (fs.readFileSync as jest.Mock).mockReset();
+    });
 
     it('asks before overwriting an existing config and keeps it when declined', async () => {
       mockFsTree({ '.': [] }, new Set());
@@ -366,6 +372,37 @@ describe('configGenerator', () => {
 
       expect(mockedInput.mock.calls[0][0].default).toBe('./graphql');
       expect(mockedInput.mock.calls[1][0].default).toBe('./src');
+    });
+
+    it('offers the codegen config values as prompt defaults and says so', async () => {
+      mockFsTree({ '.': [] }, new Set());
+      // Only codegen.yml exists, so `init` skips the overwrite confirmation.
+      (fs.existsSync as jest.Mock).mockImplementation(
+        (file: string) => file === 'codegen.yml',
+      );
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        [
+          'documents: app/graphql/**/*.graphql',
+          'generates:',
+          '  app/generated/graphql.ts:',
+          '    plugins:',
+          '      - typescript-react-apollo',
+        ].join('\n'),
+      );
+      mockInputAnswers(
+        'app/graphql',
+        'app/graphql',
+        'app/generated/graphql.ts',
+      );
+
+      await generateConfig();
+
+      expect(mockedInput.mock.calls[0][0].default).toBe('app/graphql');
+      expect(mockedInput.mock.calls[1][0].default).toBe('app/graphql');
+      expect(mockedInput.mock.calls[2][0].default).toContain(
+        'app/generated/graphql.ts',
+      );
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('codegen.yml');
     });
 
     it('prints a preview after writing when the directories exist', async () => {
