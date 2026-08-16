@@ -779,6 +779,140 @@ export function resolveRunConfig(cliConfig: CliConfig = {}): ResolvedRunConfig {
 }
 
 /**
+ * The codegen config a setting was derived from, or `undefined` when the user
+ * wrote it themselves.
+ *
+ * The distinction drives one rule: **explicit configuration fails loudly,
+ * inference degrades gracefully.** A value from `gqlPrune.config.yaml` or a CLI
+ * flag that does not resolve ends the run with exit code 2, because the user
+ * asked for it and a silent skip would hide their mistake. A value gqlPrune
+ * derived from a codegen config never turns a runnable scan into a fatal error:
+ * it is dropped with an advisory warning and the scan carries on.
+ *
+ * @param {ResolvedRunConfig} run - The resolved run, with its provenance.
+ * @param {keyof GqlPruneConfig} key - The setting to ask about.
+ * @returns {string | undefined} - The codegen file, when the value came from one.
+ */
+export function codegenSource(
+  run: ResolvedRunConfig,
+  key: keyof GqlPruneConfig,
+): string | undefined {
+  return run.codegen !== undefined && key in run.codegen.values
+    ? run.codegen.file
+    : undefined;
+}
+
+/**
+ * The advisory warning for a `schemaFile` that was derived from a codegen
+ * config and cannot be used. A codegen `schema` is routinely a path that is only
+ * filled in at build time, so it must cost the deprecated-selection check and
+ * nothing else.
+ */
+export function formatDerivedSchemaWarning(
+  codegenFile: string,
+  schemaFile: string,
+): string {
+  return (
+    `Skipped the deprecated-selection check: the schema "${schemaFile}" derived ` +
+    `from ${codegenFile} could not be read or parsed. Set "schemaFile" in ` +
+    'gqlPrune.config.yaml to check against a schema of your own.'
+  );
+}
+
+/** The directories a scan will walk, plus anything the caller must report. */
+export type ResolvedScanDirs = {
+  graphqlDir: string[];
+  srcDir: string[];
+  /** Advisory warnings for derived directories that were dropped. */
+  warnings: string[];
+  /** Set when nothing scannable is left; the run must stop with exit code 2. */
+  error?: string;
+};
+
+/**
+ * Turns the configured `graphqlDir`/`srcDir` values into the directories to
+ * scan: globs are expanded, and paths that are not on disk are checked.
+ *
+ * Which failures are fatal depends on where the value came from (see
+ * {@link codegenSource}). A directory the user configured that does not exist
+ * ends the run. A derived one is dropped with a warning, and only an empty
+ * result stops the run, with a message that names the codegen config: the user
+ * never wrote the path it complains about.
+ *
+ * @param {string[]} graphqlDir - Configured GraphQL directories.
+ * @param {string[]} srcDir - Configured source directories.
+ * @param {object} derived - Per field, the codegen file it was derived from.
+ * @returns {ResolvedScanDirs} - The surviving directories, warnings and error.
+ */
+export function resolveScanDirs(
+  graphqlDir: string[],
+  srcDir: string[],
+  derived: { graphqlDir?: string; srcDir?: string } = {},
+): ResolvedScanDirs {
+  const stop = (error: string, warnings: string[] = []): ResolvedScanDirs => ({
+    graphqlDir: [],
+    srcDir: [],
+    warnings,
+    error,
+  });
+
+  const expanded = [
+    { field: 'graphqlDir', configured: graphqlDir, from: derived.graphqlDir },
+    { field: 'srcDir', configured: srcDir, from: derived.srcDir },
+  ].map((field) => ({ ...field, ...expandDirPatterns(field.configured) }));
+
+  // A glob that matches nothing is checked first, before anything touches the
+  // filesystem, exactly as it always was.
+  const explicitUnmatched = expanded
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.unmatched);
+  if (explicitUnmatched.length > 0) {
+    return stop(
+      `These configured directory patterns match no directories: ${explicitUnmatched.join(', ')}.`,
+    );
+  }
+
+  const checked = expanded.map((entry) => {
+    const present = entry.dirs.filter((dir) => directoryExists(dir));
+    const missing = entry.dirs.filter((dir) => !present.includes(dir));
+    return { ...entry, present, dropped: [...entry.unmatched, ...missing] };
+  });
+
+  const explicitMissing = checked
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.dropped);
+  if (explicitMissing.length > 0) {
+    return stop(
+      `These configured directories do not exist: ${explicitMissing.join(', ')}.`,
+    );
+  }
+
+  const warnings: string[] = [];
+  for (const entry of checked) {
+    if (entry.from === undefined || entry.dropped.length === 0) continue;
+    if (entry.present.length === 0) {
+      return stop(
+        `No directory derived from ${entry.from} for "${entry.field}" is on disk: ` +
+          `${entry.dropped.join(', ')}. Set graphqlDir and srcDir in ` +
+          'gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> ' +
+          'and --src <dir>.',
+        warnings,
+      );
+    }
+    warnings.push(
+      `Skipped "${entry.field}" ${entry.dropped.join(', ')} derived from ` +
+        `${entry.from}: not on disk. Scanning ${entry.present.join(', ')}.`,
+    );
+  }
+
+  return {
+    graphqlDir: checked[0].present,
+    srcDir: checked[1].present,
+    warnings,
+  };
+}
+
+/**
  * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
  * values provided as CLI flags, which win per field. A missing config file is
  * fine: the CLI flags may supply everything. See {@link resolveRunConfig} for
@@ -1071,45 +1205,30 @@ export function mainFunction(
     process.exit(2);
   }
 
-  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches;
-  // plain paths pass through and are checked for existence just below.
-  const expandedGraphqlDirs = expandDirPatterns(graphqlDirs);
-  const expandedSrcDirs = expandDirPatterns(srcDirs);
-  const emptyPatterns = [
-    ...expandedGraphqlDirs.unmatched,
-    ...expandedSrcDirs.unmatched,
-  ];
-  if (emptyPatterns.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directory patterns match no directories: ${emptyPatterns.join(', ')}.`,
-      ),
-    );
+  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches,
+  // and check that what is left is on disk. A configured path that is not ends
+  // the run; a derived one is dropped with a warning (see resolveScanDirs).
+  const scanDirs = resolveScanDirs(graphqlDirs, srcDirs, {
+    graphqlDir: codegenSource(run, 'graphqlDir'),
+    srcDir: codegenSource(run, 'srcDir'),
+  });
+  if (scanDirs.error !== undefined) {
+    console.error(kleur.red(scanDirs.error));
     process.exit(2);
   }
-
-  const missingDirs = [
-    ...expandedGraphqlDirs.dirs,
-    ...expandedSrcDirs.dirs,
-  ].filter((dir) => !directoryExists(dir));
-  if (missingDirs.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directories do not exist: ${missingDirs.join(', ')}.`,
-      ),
-    );
-    process.exit(2);
-  }
+  // Collected here and emitted with the scan's own warnings further down, so
+  // every advisory takes the same route to stderr, ::warning and the JSON.
+  const configWarnings = [...scanDirs.warnings];
 
   // Optional and off unless configured: a path to a local SDL file.
   const schemaFile =
     typeof resolved.schemaFile === 'string' ? resolved.schemaFile.trim() : '';
 
-  // All directories exist; carry the expanded lists forward.
+  // Every remaining directory exists; carry the expanded lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
-    graphqlDir: expandedGraphqlDirs.dirs,
-    srcDir: expandedSrcDirs.dirs,
+    graphqlDir: scanDirs.graphqlDir,
+    srcDir: scanDirs.srcDir,
     schemaFile: schemaFile === '' ? undefined : schemaFile,
   };
 
@@ -1125,30 +1244,34 @@ export function mainFunction(
       }),
     );
     logVerbose([
-      ...formatExpandedDirLines(
-        'graphqlDir',
-        graphqlDirs,
-        expandedGraphqlDirs.dirs,
-      ),
-      ...formatExpandedDirLines('srcDir', srcDirs, expandedSrcDirs.dirs),
+      ...formatExpandedDirLines('graphqlDir', graphqlDirs, scanDirs.graphqlDir),
+      ...formatExpandedDirLines('srcDir', srcDirs, scanDirs.srcDir),
     ]);
   }
 
   // Build the schema here rather than inside the scan: a schema the user asked
   // for but that cannot be read or parsed is a broken run (exit 2), like a
-  // missing directory, not a silently skipped check.
+  // missing directory, not a silently skipped check. A schema derived from a
+  // codegen config is the opposite case: the user never asked for the check, so
+  // it is skipped with a warning and the scan continues.
   let schema: GraphQLSchema | undefined;
   if (schemaFile !== '') {
+    const derivedSchema = codegenSource(run, 'schemaFile');
     try {
       schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
     } catch (e) {
-      console.error(
-        kleur.red(
-          `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
-        ),
+      if (derivedSchema === undefined) {
+        console.error(
+          kleur.red(
+            `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
+          ),
+        );
+        console.error(e);
+        process.exit(2);
+      }
+      configWarnings.push(
+        formatDerivedSchemaWarning(derivedSchema, schemaFile),
       );
-      console.error(e);
-      process.exit(2);
     }
   }
 
@@ -1173,7 +1296,11 @@ export function mainFunction(
     : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
-  const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
+  const advisoryWarnings = [
+    ...configWarnings,
+    ...duplicateWarnings,
+    ...generatedWarnings,
+  ];
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
