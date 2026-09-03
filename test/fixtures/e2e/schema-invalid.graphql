@@ -1,0 +1,5 @@
+# Deliberately broken SDL: `gqlprune --schema` must exit 2 on it rather than
+# silently skipping the deprecated-usage check.
+type Query {
+  broken: (
+}

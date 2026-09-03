@@ -20,11 +20,19 @@ function definitionKey(
   return `${prefix}::${path.resolve(filePath)}::${name}`;
 }
 
+/** The only files a whole-file verdict applies to. */
+const DOCUMENT_EXTENSIONS = ['.gql', '.graphql'];
+
 /**
  * Returns the GraphQL files that are dead as a whole: every operation and
  * fragment they define is unused, and no other document pulls them in with an
  * `#import` comment. Operates on the already-parsed corpus and the unused sets
  * the scan produced, so it never touches the filesystem.
+ *
+ * Only `.gql`/`.graphql` files are eligible. A source file carrying an inline
+ * document (see the opt-in `inline` scan) is never named here, however unused
+ * its documents are: the file is a component or a module that happens to embed
+ * GraphQL, so "delete the whole file" would be dangerous advice.
  *
  * Two cases are deliberately left out. A file that defines nothing (empty, or
  * one that failed to parse) is never flagged, because there is nothing to
@@ -69,6 +77,9 @@ export function findOrphanedFiles(
 
   return parsedFiles
     .filter((file) => {
+      if (!DOCUMENT_EXTENSIONS.includes(path.extname(file.filePath))) {
+        return false;
+      }
       if (file.hasAnonymousOperation) return false;
       const definitions: { kind: 'operation' | 'fragment'; name: string }[] = [
         ...file.operations.map((op) => ({

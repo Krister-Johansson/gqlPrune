@@ -51,6 +51,31 @@ describe('orphans', () => {
       ).toEqual(['g/dead.gql']);
     });
 
+    it('never flags a source file holding an inline document', () => {
+      // A component whose only query is unused is not a dead file: deleting it
+      // would take the component with it.
+      const files = [
+        parsed('src/User.tsx', { operations: [op('A', 'src/User.tsx')] }),
+        parsed('src/user.js', { operations: [op('B', 'src/user.js')] }),
+      ];
+      expect(
+        findOrphanedFiles(
+          files,
+          [op('A', 'src/User.tsx'), op('B', 'src/user.js')],
+          [],
+        ),
+      ).toEqual([]);
+    });
+
+    it('flags an unused .graphql file as readily as a .gql one', () => {
+      const files = [
+        parsed('g/dead.graphql', { operations: [op('A', 'g/dead.graphql')] }),
+      ];
+      expect(findOrphanedFiles(files, [op('A', 'g/dead.graphql')], [])).toEqual(
+        ['g/dead.graphql'],
+      );
+    });
+
     it('flags a fragment-only file whose fragment is unused', () => {
       const files = [
         parsed('g/frags.gql', { fragments: [frag('F', 'g/frags.gql')] }),

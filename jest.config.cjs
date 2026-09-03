@@ -3,7 +3,10 @@ module.exports = {
   testEnvironment: 'node',
   // Agent tooling creates temporary git worktrees under .claude/; without this,
   // a bare test run also compiles those trees' stale sources and fails there.
-  testPathIgnorePatterns: ['/node_modules/', '/\\.claude/'],
+  // test/e2e/ is a separate project (jest.e2e.config.cjs, `npm run test:e2e`):
+  // it needs a build first and spawns processes, so it must not slow down or
+  // skew a bare `npm test`.
+  testPathIgnorePatterns: ['/node_modules/', '/\\.claude/', '/test/e2e/'],
   modulePathIgnorePatterns: ['/\\.claude/'],
   // ts-jest suggests isolatedModules for node16 modules, but enabling it breaks
   // type-only imports from our `.d.ts` files under per-file transpilation. The

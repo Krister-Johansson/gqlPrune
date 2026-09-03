@@ -1,0 +1,7 @@
+# Dead fragment: nothing spreads it and no source file names an
+# AbandonedTeaserFieldsFragmentDoc. The file itself stays off the orphan list
+# because user.gql imports it.
+fragment AbandonedTeaserFields on Dashboard {
+  id
+  headline
+}

@@ -1,0 +1,9 @@
+# Used: clean/src/usePing.ts calls useGetPingQuery. Selects a deprecated field
+# so the --schema case can show an advisory section on an otherwise clean run.
+query GetPing {
+  ping {
+    id
+    ok
+    legacyLatencyMs
+  }
+}

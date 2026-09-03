@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Krister Johansson
 
 import { CliConfig } from '../types/GqlPruneConfig.js';
+import { CONFIDENCE_LEVELS } from './confidence.js';
 
 /** Shells `gqlprune completion` can emit a script for. */
 export const SHELLS = ['bash', 'zsh', 'fish'] as const;
@@ -17,7 +18,7 @@ export type BooleanOption =
  * {@link BooleanOption}: these flags feed `resolveConfig` alongside
  * `gqlPrune.config.yaml`, so passing one overrides the same key in the file.
  */
-export type ConfigFlag = 'checkFields';
+export type ConfigFlag = 'checkFields' | 'inline';
 
 /** The `CliConfig` field a value flag collects into. */
 export type ValueTarget =
@@ -27,7 +28,9 @@ export type ValueTarget =
   | 'excludedFolders'
   | 'usagePatterns'
   | 'fragmentUsagePatterns'
-  | 'schemaFile';
+  | 'schemaFile'
+  | 'codegenConfig'
+  | 'minConfidence';
 
 /**
  * One row of the CLI's flag table. `parseArgs`, `formatHelp` and the shell
@@ -44,6 +47,8 @@ export type FlagSpec = {
   valuePlaceholder?: string;
   /** `path` hands value completion to the shell's own file picker. */
   valueKind?: 'path';
+  /** The only values the flag accepts; anything else is a usage error. */
+  values?: readonly string[];
   /** Whether repeating the flag accumulates values; otherwise the last wins. */
   repeatable?: boolean;
   description: string;
@@ -130,11 +135,34 @@ export const FLAGS: readonly FlagSpec[] = [
     description: 'Local SDL file; also flags @deprecated field and enum usage',
   },
   {
+    flag: '--codegen',
+    takesValue: true,
+    valuePlaceholder: '<file>',
+    valueKind: 'path',
+    target: 'codegenConfig',
+    description: 'GraphQL Code Generator config to derive settings from',
+  },
+  {
     flag: '--fields',
     takesValue: false,
     configFlag: 'checkFields',
     description:
       'Also list selected fields whose name appears nowhere in the source (candidates)',
+  },
+  {
+    flag: '--inline',
+    takesValue: false,
+    configFlag: 'inline',
+    description:
+      'Also scan gql`...` templates and graphql() calls in source files',
+  },
+  {
+    flag: '--min-confidence',
+    takesValue: true,
+    valuePlaceholder: '<level>',
+    values: CONFIDENCE_LEVELS,
+    target: 'minConfidence',
+    description: 'Report only findings at this confidence or above',
   },
   {
     flag: '--json',
@@ -280,7 +308,8 @@ function setConfigValue(
  * a value is never mistaken for the positional command. Repeating a flag the
  * table marks repeatable builds a list; repeating any other value flag replaces
  * the earlier value. A command listed with `argValues` (today only
- * `completion`) takes one further positional, kept as `commandArg`. A switch
+ * `completion`) takes one further positional, kept as `commandArg`. A value
+ * outside a flag's `values` list is rejected like any other usage error. A switch
  * flag sets either its `CliOptions` field or, when the table gives it a
  * `configFlag`, the matching boolean on the config override. Unknown
  * flags, flags missing their value, and stray positional
@@ -357,6 +386,14 @@ export function parseArgs(argv: string[]): CliOptions {
 
     if (value === undefined) {
       errors.push(`Missing value for ${name}`);
+      continue;
+    }
+    // A flag that only accepts a fixed set of values rejects anything else as a
+    // usage error, rather than carrying a typo into the scan.
+    if (spec.values !== undefined && !spec.values.includes(value)) {
+      errors.push(
+        `Invalid value for ${name}: ${value} (expected ${spec.values.join(', ')})`,
+      );
       continue;
     }
     if (spec.target !== undefined) {

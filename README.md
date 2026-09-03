@@ -14,6 +14,28 @@
 
 `gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
 
+## Migrating from 2.x to 3.0
+
+One field of the `--json` report changed shape. `orphanedFiles` used to be a list
+of paths and is now a list of objects, so that each orphaned file carries the
+same confidence grade as every other finding:
+
+```diff
+- "orphanedFiles": ["graphql/user.gql"]
++ "orphanedFiles": [{ "file": "graphql/user.gql", "confidence": "high", "reason": "name-absent" }]
+```
+
+A script that read the paths directly needs one change:
+
+```diff
+- report.orphanedFiles.forEach((file) => ...)
++ report.orphanedFiles.forEach(({ file }) => ...)
+```
+
+`summary.orphanedFiles` still counts them, and nothing else in the report
+changed position or meaning. The human-readable output, the exit codes, and
+every configuration key are unchanged.
+
 ## Migrating from 1.x to 2.0
 
 - gqlPrune 2.x requires Node.js 20 or newer.
@@ -52,6 +74,31 @@ A `.gql`/`.graphql` file is orphaned when every operation and fragment it define
 Import comments are read from the raw file text (the convention used by graphql-tag and the webpack GraphQL loaders) and resolved against the importing file's directory, so `#import "./fields.gql"` keeps the `fields.gql` next to it off the list. Two cases never get flagged: a file that defines nothing, including one that fails to parse, and a file containing an anonymous operation, whose usage gqlPrune cannot track by name.
 
 Orphaned files are candidates like everything else gqlPrune reports. A file may still be read by another repository, a runtime loader, or tooling this scan cannot see, so check before you delete it. The JSON report lists the paths under `orphanedFiles` and counts them in `summary.orphanedFiles`. They never change the exit code on their own: an orphaned file always holds unused definitions, and those already exit 1.
+
+### Inline documents (opt-in)
+
+By default gqlPrune reads documents only from `.gql` and `.graphql` files. Pass `--inline` (or set `inline: true` in the config) to also read the documents embedded in your TypeScript and JavaScript source:
+
+```bash
+npx gqlprune --inline
+```
+
+Two shapes are recognized, the ones graphql-tag, Apollo, urql and the GraphQL Code Generator client preset produce:
+
+- Tagged templates: ``gql`query GetUser { ... }` `` and ``graphql`...` ``, including a tag reached through a member expression such as ``api.gql`...` ``.
+- Helper calls taking a single string argument: `graphql('query GetUser { ... }')`, `graphql("...")`, ``graphql(`...`)``, and the same for `gql(...)`.
+
+Recognition is textual: gqlPrune tracks where comments and strings begin and end, so a tag written inside one is skipped and commented-out code produces no findings, but it does not parse JavaScript, so an unusual construct can still be missed or misread.
+
+Each embedded document is parsed on its own and located against the file it sits in, so a finding points at the source file and the real line inside it (`src/User.tsx:12` rather than line 1). A body that does not parse, such as a half-written template or an operation name built by interpolation, is skipped and counted; `--verbose` prints how many. Interpolations like `${UserFieldsFragmentDoc}` are blanked before parsing, which is how graphql-tag treats them anyway, and the names inside them still count as references to the documents they name. Fragments resolve across both worlds: a fragment defined in a `.tsx` file and spread from a `.gql` operation counts as used, and so does the reverse.
+
+The pass is off by default because turning it on changes what a scan is. A source file becomes both a place where documents are defined and part of the text searched for usage, and those two roles have to be kept apart or every document would find itself. gqlPrune keeps them apart by blanking each document, together with the statement that assigns it, out of the text it searches. So a document never counts as its own usage, and `const GetUserDocument = graphql('query GetUser { ... }')` does not make `GetUser` look used through the `{Name}Document` pattern when nothing reads the constant.
+
+That constant is a usage signal in its own right. Under the client preset, `const q = graphql('query GetUser { ... }')` followed by `useQuery(q)` never writes the operation name outside the document, so no usage pattern can match it. gqlPrune therefore counts an inline document as used when the constant it is assigned to appears anywhere else in the scanned source, matched as a whole word. Read that with the same caution as everything else here: a constant called `query`, `doc` or `q` matches something unrelated in any real codebase and can hide a genuine finding, so give a document a distinctive name if you want the check to mean much for it.
+
+Whole-file [orphan detection](#orphaned-files) never applies to a source file. A `.tsx` component whose only query is unused is not a dead file, and pointing you at it for deletion would be bad advice, so only `.gql`/`.graphql` files are ever listed as orphaned.
+
+Inline documents also reach the opt-in checks below: with `--schema` they are validated for deprecated selections, and with `--fields` their fields contribute candidates, both reported against the source file.
 
 ### Field candidates (opt-in)
 
@@ -125,12 +172,44 @@ In `--json` mode they appear as a `deprecatedUsages` array with a matching count
   "summary": {
     "unusedOperations": 0,
     "unusedFragments": 0,
-    "deprecatedUsages": 1
+    "deprecatedUsages": 1,
+    "byConfidence": { "high": 0, "medium": 0, "low": 0 }
   }
 }
 ```
 
 If the file named by `schemaFile` cannot be read or is not valid SDL, the run stops with exit code 2 rather than skipping the check silently.
+
+### Confidence grades
+
+Every candidate carries a grade that answers one question: how much evidence is there that something references the definition anyway, even though no usage pattern matched?
+
+That evidence comes from a second search. The scan itself looks for the strings your usage patterns expand to, such as `useGetUserQuery` and `GetUserDocument`. The grading also looks for the bare definition name, `GetUser`, as a whole word, which the pattern search never does.
+
+- **high**: the name appears nowhere in the scanned source. Nothing in `srcDir` mentions it at all.
+- **medium**: the name appears only in files that look generated (see [Avoiding false "all clear" results](#avoiding-false-all-clear-results)), so the mention is probably codegen output rather than hand-written use.
+- **low**: the name appears in ordinary source, but never in a form a usage pattern recognizes. Something refers to that identifier, so a dynamic lookup or a naming convention gqlPrune does not know about is plausible.
+
+Unused operations, unused fragments and orphaned files are all graded. An orphaned file takes the lowest grade among the definitions it holds, because one definition that still looks live undermines the verdict on the whole file.
+
+Field candidates never rise above medium, whatever the name search finds. They come from a name-absence heuristic that cannot see a field read through a rename, a spread, or a computed key, so calling one of them high confidence would claim more than the check can know.
+
+Deprecated selections carry no grade. They are validated against a real schema, so they are facts rather than candidates.
+
+The grade appears as a column in the human tables, as `confidence` and `reason` on each finding in the JSON report, and in the text of each GitHub Actions annotation. Grading changes nothing about the framing: a high-confidence finding is still a candidate you should check before deleting.
+
+Use `--min-confidence <level>`, or `minConfidence` in the config file, to decide which findings are reported. Because the exit code follows what is reported, this is also the CI gate:
+
+```bash
+# Fails the build only on findings whose name appears nowhere in the source.
+npx gqlprune --min-confidence high
+```
+
+```yaml
+minConfidence: high
+```
+
+Findings below the level are left out of the report, so one repository can fail CI on `high` while a developer runs `npx gqlprune` locally and reviews everything. Omit the setting and nothing is filtered, which is the default. A value other than `high`, `medium` or `low` stops the run with exit code 2. `--verbose` prints the grade and the evidence behind it for every finding, including the ones the gate hid.
 
 ## Limitations
 
@@ -146,7 +225,7 @@ Usage detection is a string search over `srcDir`. An operation is reported as un
 - The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not read (it reads `.ts`, `.tsx`, `.js`, and `.jsx`).
 - Another repository consumes it, for example a shared GraphQL package that several applications import.
 
-Check each finding before you delete it. `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
+Check each finding before you delete it. Its [confidence grade](#confidence-grades) says how much corroborating evidence there is, and `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
 
 ### Generated code can hide findings
 
@@ -164,7 +243,7 @@ npm install --save-dev gqlprune
 
 ### Configuration
 
-Run the `init` command to generate `gqlPrune.config.yaml` at the root of your project. It auto-detects your GraphQL and source directories (scanning the project and skipping `node_modules`, `.git`, and `dist`) and offers them as defaults you can accept or override. It also detects a generated file that would mask your results (the [false "all clear"](#avoiding-false-all-clear-results) trap) and pre-fills it into `exclude`, so your first run is truthful. After writing the file it prints a preview of what a real run would find:
+Run the `init` command to generate `gqlPrune.config.yaml` at the root of your project. It auto-detects your GraphQL and source directories (scanning the project and skipping `node_modules`, `.git`, and `dist`) and offers them as defaults you can accept or override. If the project has a [GraphQL Code Generator config](#reading-your-codegen-config), `init` takes the defaults from there instead, says which file they came from, and writes all of them into `gqlPrune.config.yaml`, `usagePatterns` and `inline` included. It has to: a config that names `graphqlDir` and `srcDir` stops gqlPrune from reading your codegen config on later runs, so a derived setting left out of the file would be gone. The one exception is a derived `schemaFile` whose path is not on disk yet, because it is downloaded or generated at build time. `init` leaves that one out, and does not list it either, rather than writing a path that would end every later run with exit code 2. It also detects a generated file that would mask your results (the [false "all clear"](#avoiding-false-all-clear-results) trap) and pre-fills it into `exclude`, so your first run is truthful. After writing the file it prints a preview of what a real run would find:
 
 ```bash
 npx gqlprune init
@@ -198,6 +277,12 @@ fragmentUsagePatterns:
 # Optional: also list selected fields whose name appears nowhere in srcDir.
 # Advisory only; off by default.
 checkFields: true
+# Optional: also scan gql`...` templates and graphql() calls in srcDir.
+# Off by default.
+inline: true
+# Optional: report only findings graded at this confidence or above.
+# One of high, medium, low. Everything is reported when omitted.
+minConfidence: high
 ```
 
 - `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
@@ -207,7 +292,10 @@ checkFields: true
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 - `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-usage check](#deprecated-selections-opt-in); omit it and no schema is read.
+- `codegenConfig` (optional): path to a GraphQL Code Generator config to derive settings from, for a config that does not sit in the project root. See [reading your codegen config](#reading-your-codegen-config).
 - `checkFields` (optional): set to `true` to add the advisory [field candidates](#field-candidates-opt-in) list. Off by default.
+- `inline` (optional): set to `true` to also scan [inline documents](#inline-documents-opt-in) in `srcDir`. Off by default.
+- `minConfidence` (optional): `high`, `medium` or `low`. Reports only findings graded at that level or above, which is also what the exit code follows (see [Confidence grades](#confidence-grades)). Everything is reported when omitted.
 
 For monorepos or projects with scattered operations, `graphqlDir` and `srcDir` accept a list of directories:
 
@@ -229,6 +317,61 @@ srcDir: 'packages/*/src'
 
 `*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
+### Reading your codegen config
+
+If your project already uses GraphQL Code Generator, most of what gqlPrune needs is written down in its config. gqlPrune reads it so you do not have to restate the same facts.
+
+It looks in the current directory for the first of these that exists: `codegen.ts`, `codegen.mts`, `codegen.cts`, `codegen.js`, `codegen.mjs`, `codegen.cjs`, `codegen.yml`, `codegen.yaml`, `codegen.json`, and finally a `codegen` key in `package.json`. Point it at a config somewhere else with `--codegen <file>` or `codegenConfig` in `gqlPrune.config.yaml`.
+
+This happens automatically only when nothing else says which directories to scan: no `graphqlDir`/`srcDir` in `gqlPrune.config.yaml` and no `--graphql`/`--src` on the command line. That is the run that would otherwise stop with "No configuration found", so reading a codegen config can only turn a refusal into a working scan. A project that is already configured behaves exactly as before. When you name a file with `--codegen`, it is read whichever way the rest of the project is configured, and a file that cannot be read ends the run with exit code 2.
+
+What gqlPrune takes from each part:
+
+| Codegen setting                          | Becomes                                                                                            |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `documents` globs                        | `graphqlDir` and `srcDir` (the file-name part of the glob is dropped)                              |
+| `documents` globs starting `!`           | `exclude` entries                                                                                  |
+| `documents` in `.ts`/`.tsx`/`.js`/`.jsx` | `inline: true`, so [inline documents](#inline-documents-opt-in) are scanned                        |
+| `schema`, when it is a local SDL file    | `schemaFile`, which turns on the [deprecated-usage check](#deprecated-selections-opt-in)           |
+| `generates` output paths                 | `exclude` entries, so generated code cannot [mask your results](#avoiding-false-all-clear-results) |
+| preset and plugin names                  | `usagePatterns` and `fragmentUsagePatterns` (see the table below)                                  |
+
+A `schema` that is a URL, an introspection endpoint, a glob covering several files, or a value with a `${...}` in it is ignored: `schemaFile` takes one local SDL file.
+
+Explicit configuration fails loudly, and inference degrades gracefully. A setting you wrote in `gqlPrune.config.yaml` or passed as a flag ends the run with exit code 2 when it does not resolve, because you asked for it. A setting gqlPrune worked out from your codegen config never does: it is dropped, gqlPrune warns you which one and which file it came from, and the scan carries on. So a `schema` path that is not on disk yet, because it is downloaded or generated at build time, costs you the deprecated-selection check and a warning, not a failed run. Same for a `documents` glob pointing at a directory this checkout does not have: gqlPrune scans the directories that do exist and names the one it skipped. Only when nothing derived is left to scan does the run stop, and then the message names the codegen config so you know where the paths came from.
+
+Precedence runs in one direction: CLI flags beat `gqlPrune.config.yaml`, which beats anything derived from your codegen config, which beats the built-in defaults. An inferred setting is never silent. In a normal run gqlPrune names the file and the settings that came from it, and `--verbose` prints every derived value.
+
+Because deriving stops once a config names the directories, `gqlprune init` writes the settings it derived into the file it generates (see [Configuration](#configuration)). Run it on an apollo-angular project and the generated config carries `usagePatterns: ['{Name}GQL', '{Name}Document']`, so your operations keep matching the code your plugin generates.
+
+A `codegen.ts` (or any other JavaScript or TypeScript config) is read as text, never executed. Running your config would mean running arbitrary code to produce values that are only ever defaults, so gqlPrune pulls out the string literals it needs instead. A value that is computed, imported, spread, or built from a template with `${...}` in it cannot be read this way and is skipped, which costs you one suggestion and nothing else. YAML and JSON configs are parsed normally.
+
+#### Which naming conventions are recognized
+
+Each plugin generates code under its own naming convention, and that convention is what `usagePatterns` has to match. Recognizing one **replaces** the built-in patterns rather than adding to them: every extra pattern is another way for a dead operation to look used, and a silent all clear is the worst result this tool can give you.
+
+| Plugin or preset            | Derived `usagePatterns`                                                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript-react-apollo`   | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `use{Name}Suspense{Type}`, `{Name}Document`                                                    |
+| `typescript-urql`           | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-vue-apollo`     | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `{Name}Document`                                                                               |
+| `typescript-vue-urql`       | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-react-query`    | `use{Name}{Type}`, `useInfinite{Name}{Type}`, `useSuspense{Name}{Type}`, `useSuspenseInfinite{Name}{Type}`, `{Name}Document`             |
+| `typescript-solid-query`    | `create{Name}{Type}`, `createInfinite{Name}{Type}`, `createSuspense{Name}{Type}`, `createSuspenseInfinite{Name}{Type}`, `{Name}Document` |
+| `typescript-apollo-angular` | `{Name}GQL`, `{Name}Document`                                                                                                            |
+| `typed-document-node`       | `{Name}Document`                                                                                                                         |
+| `client` preset             | no patterns; sets `inline: true` instead                                                                                                 |
+
+Every plugin in the table also derives `fragmentUsagePatterns: ['{Name}FragmentDoc']`, which is what all of them call a fragment constant. The `client` preset is the exception to the whole idea of a pattern: your code writes `const q = graphql('query GetUser ...')` and then passes `q` around, so the operation's name never appears at the call site and no pattern could find it. The inline scan follows the constant instead.
+
+Four conventions are left out on purpose, and a project using them keeps the built-in patterns:
+
+- `typescript-document-nodes` names its constant after the operation and nothing else (`GetUser`), and `typescript-graphql-request` calls its SDK method the same way (`sdk.GetUser(...)`). A bare `{Name}` pattern matches any identifier that happens to share the name, so it would report far too much as used.
+- `typescript-operations` generates types only. Importing the `GetUserQuery` type says nothing about whether the operation still runs.
+- `near-operation-file` changes where the output files are written, not what anything is called.
+
+Two codegen options change the generated names in a way gqlPrune does not follow: `omitOperationSuffix` drops the `Query`/`Mutation`/`Subscription` suffix, and `dedupeOperationSuffix` drops it when the operation name already ends with it. If you use either, set `usagePatterns` yourself.
+
 ### Without a config file (CLI flags)
 
 Every config field has a matching flag, so you can run gqlPrune without a `gqlPrune.config.yaml`. That makes a one-off `npx` run possible with no setup:
@@ -246,11 +389,14 @@ npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
 | `--pattern <template>` _(repeatable)_                                  | `usagePatterns`         |
 | `--fragment-pattern <template>` _(repeatable)_                         | `fragmentUsagePatterns` |
 | `--schema <file>`                                                      | `schemaFile`            |
+| `--codegen <file>`                                                     | `codegenConfig`         |
 | `--fields`                                                             | `checkFields`           |
+| `--inline`                                                             | `inline`                |
+| `--min-confidence <level>`                                             | `minConfidence`         |
 
 `--graphql` and `--src` take the same glob patterns as their YAML fields; quote them (`--graphql 'packages/*/graphql'`) so the shell passes the pattern through instead of expanding it first.
 
-Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, or an unknown command aborts with an error instead of being silently ignored.
+Both `--flag value` and `--flag=value` work, in any order. Precedence is simple: a flag overrides the same field in the YAML, flags alone work with no YAML, and YAML alone works exactly as before. A list flag such as `--exclude` replaces that list from the YAML rather than appending to it. An unknown flag, a flag missing its value, a value outside a flag's fixed set (`--min-confidence`), or an unknown command aborts with an error instead of being silently ignored.
 
 ## Usage
 
@@ -281,25 +427,42 @@ npx gqlprune --json
       "name": "GetUser",
       "type": "query",
       "file": "graphql/user.gql",
-      "line": 1
+      "line": 1,
+      "confidence": "high",
+      "reason": "name-absent"
     }
   ],
   "unusedFragments": [
-    { "name": "UserFields", "file": "graphql/user.gql", "line": 8 }
+    {
+      "name": "UserFields",
+      "file": "graphql/user.gql",
+      "line": 8,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
   ],
-  "orphanedFiles": ["graphql/user.gql"],
+  "orphanedFiles": [
+    {
+      "file": "graphql/user.gql",
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
   "deprecatedUsages": [],
   "warnings": [],
   "summary": {
     "unusedOperations": 1,
     "unusedFragments": 1,
     "orphanedFiles": 1,
-    "deprecatedUsages": 0
+    "deprecatedUsages": 0,
+    "byConfidence": { "high": 3, "medium": 0, "low": 0 }
   }
 }
 ```
 
 Only the JSON is written to stdout and the exit code is unchanged (0 clean, 1 unused, 2 error; see [Usage](#usage)), so it pipes cleanly into `jq` and CI gates. The `warnings` array carries advisory messages, currently a heads-up when a [generated file may be masking results](#avoiding-false-all-clear-results), and is empty when there are none. `deprecatedUsages` stays empty unless you configure a [schema file](#deprecated-selections-opt-in).
+
+Each candidate carries its [confidence grade](#confidence-grades) and the `reason` behind it, and `summary.byConfidence` counts every graded finding in the report per level. Deprecated selections are the exception: the schema settled them, so they are not graded.
 
 With `--fields`, the report gains an `unusedFields` array and a matching `summary.unusedFields` count:
 
@@ -308,14 +471,17 @@ With `--fields`, the report gains an `unusedFields` array and a matching `summar
   "unusedFields": [
     {
       "field": "avatarUrl",
-      "locations": [{ "file": "graphql/user.gql", "line": 4 }]
+      "locations": [{ "file": "graphql/user.gql", "line": 4 }],
+      "confidence": "medium",
+      "reason": "heuristic-cap"
     }
   ],
   "summary": {
     "unusedOperations": 0,
     "unusedFragments": 0,
     "orphanedFiles": 0,
-    "unusedFields": 1
+    "unusedFields": 1,
+    "byConfidence": { "high": 0, "medium": 1, "low": 0 }
   }
 }
 ```
@@ -340,6 +506,7 @@ npx gqlprune --verbose
 [verbose] Source files scanned: 42
 [verbose] used:   GetUser (query) — "useGetUserQuery" found in src/App.tsx
 [verbose] unused: OldQuery (query) — no match for useOldQueryQuery, useOldQueryLazyQuery, useOldQuerySuspenseQuery, OldQueryDocument
+[verbose] confidence: operation "OldQuery" is high (name-absent: the name appears in no scanned source file)
 ```
 
 This is the fastest way to debug a surprising result. For an operation you believe is used, it shows exactly which patterns were searched, and if every operation matches in the same file, that file is almost certainly [generated output masking your results](#avoiding-false-all-clear-results). Verbose lines go to stderr, so `--verbose --json` still emits pure JSON on stdout.
@@ -356,9 +523,21 @@ Add a script and run it in your pipeline; the non-zero exit fails the job when u
 }
 ```
 
+To fail the job on the strongest findings only, add the gate and keep reviewing the rest locally:
+
+```json
+{
+  "scripts": {
+    "gql:prune": "gqlprune --min-confidence high"
+  }
+}
+```
+
+See [Confidence grades](#confidence-grades) for what each level means.
+
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), at each orphaned file, and at each [deprecated selection](#deprecated-selections-opt-in) when a schema is configured, so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), at each orphaned file, and at each [deprecated selection](#deprecated-selections-opt-in) when a schema is configured, so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. Every candidate annotation ends with its [confidence grade](#confidence-grades), for example `[confidence: high]`, so a reviewer can triage from the Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate
@@ -397,29 +576,29 @@ Completion needs `gqlprune` on your `PATH`, so it applies to global installs (`n
 
 ## Output
 
-Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and a fourth when a [schema](#deprecated-selections-opt-in) is configured and something selects a deprecated field or enum value. `--fields` adds a fifth with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row.
+Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and a fourth when a [schema](#deprecated-selections-opt-in) is configured and something selects a deprecated field or enum value. `--fields` adds a fifth with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row. Every candidate section has a Confidence column carrying its [grade](#confidence-grades); the deprecated section has none, because those selections are not graded.
 
 ```bash
 --- Unused GraphQL Operations ---
-Type     Operation       File
-query    OperationName   operationFile.gql
+Type     Operation       Confidence  File
+query    OperationName   high        operationFile.gql
 
 --- Unused GraphQL Fragments ---
-Fragment        File
-FragmentName    fragmentFile.gql
+Fragment        Confidence  File
+FragmentName    low         fragmentFile.gql
 
 --- Orphaned GraphQL Files ---
-File
-graphql/deadFile.gql
+Confidence  File
+low         graphql/deadFile.gql
 
 --- Deprecated Field Usage ---
 File               Line Message
 graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
 
 --- Unused Field Candidates ---
-Field       Selected in
-avatarUrl   graphql/user.gql:4
-            graphql/post.gql:9
+Field       Confidence  Selected in
+avatarUrl   medium      graphql/user.gql:4
+                        graphql/post.gql:9
 
 These are candidates from a string search. Verify each one before deleting.
 ```

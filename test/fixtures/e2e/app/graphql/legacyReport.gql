@@ -1,0 +1,8 @@
+# Dead: nothing in app/src references useGetLegacyReportQuery, and no document
+# imports this file, so the whole file is reported orphaned.
+query GetLegacyReport {
+  legacyReport {
+    id
+    title
+  }
+}

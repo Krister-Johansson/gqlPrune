@@ -2,10 +2,11 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as fs from 'fs';
-import { buildSchema, parse, Source } from 'graphql';
+import { buildSchema, GraphQLSchema, parse, Source } from 'graphql';
 import * as fileUtils from '../src/utils/fileUtils';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
+import * as inline from '../src/utils/inline';
 import {
   buildJsonReport,
   CANDIDATE_REMINDER,
@@ -18,6 +19,7 @@ import {
   formatAnnotations,
   formatExpandedDirLines,
   formatGeneratedFileWarnings,
+  formatVerboseConfidenceLines,
   formatVerboseConfigLines,
   formatVerboseScanLines,
   mainFunction,
@@ -26,6 +28,7 @@ import {
   resolveDirs,
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
+  resolveRunConfig,
   resolveUsagePatterns,
   scanProject,
 } from '../src/core/gqlPruner';
@@ -34,6 +37,7 @@ import {
   DEFAULT_USAGE_PATTERNS,
 } from '../src/utils/usagePatterns';
 import { OperationInfo } from '../src/types/OperationInfo';
+import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
 
 jest.mock('fs');
 // Partial mock: keep the pure helpers (isOperationUsedInContents) real, stub the
@@ -57,11 +61,20 @@ jest.mock('../src/utils/fragments', () => ({
   ...jest.requireActual('../src/utils/fragments'),
   findUnusedFragmentsInCorpus: jest.fn(() => []),
 }));
+// Real extraction, wrapped so a test can assert the opt-in pass never runs.
+jest.mock('../src/utils/inline', () => {
+  const actual = jest.requireActual('../src/utils/inline');
+  return {
+    ...actual,
+    extractInlineDocuments: jest.fn(actual.extractInlineDocuments),
+  };
+});
 
 const mockedDirExists = fileUtils.directoryExists as jest.Mock;
 const mockedFind = fileUtils.findFilesWithExtension as jest.Mock;
 const mockedReadSources = fileUtils.readSourceFiles as jest.Mock;
 const mockedExtract = extractGraphqlEntities as jest.Mock;
+const mockedExtractInline = inline.extractInlineDocuments as jest.Mock;
 
 // The parsed-file shape extractGraphqlEntities returns for a file whose only
 // contents are the given operations.
@@ -87,6 +100,51 @@ const entitiesWithDocument = (
 });
 const mockedUnusedFragments =
   fragments.findUnusedFragmentsInCorpus as jest.Mock;
+
+// Every candidate finding carries a grade; spread this into a fixture that
+// only cares about the rest of the shape.
+const HIGH = { confidence: 'high' as const, reason: 'name-absent' as const };
+const LOW = {
+  confidence: 'low' as const,
+  reason: 'source-mention' as const,
+};
+
+/**
+ * Presents exactly these files to the config readers; every other path reads as
+ * missing. `fs` is fully mocked here, so this is the whole project as far as
+ * `resolveRunConfig` is concerned.
+ */
+function mockProjectFiles(files: Record<string, string>): void {
+  (fs.existsSync as unknown as jest.Mock).mockImplementation(
+    (file: string) => file in files,
+  );
+  (fs.readFileSync as jest.Mock).mockImplementation((file: string) => {
+    if (file in files) return files[file];
+    const error = new Error(`ENOENT: ${file}`) as NodeJS.ErrnoException;
+    error.code = 'ENOENT';
+    throw error;
+  });
+}
+
+// A codegen config of the kind a urql project keeps in its root.
+const CODEGEN_TS = [
+  'const config = {',
+  "  schema: './schema.graphql',",
+  "  documents: ['src/**/*.graphql'],",
+  '  generates: {',
+  "    'src/generated/graphql.ts': { plugins: ['typescript-urql'] },",
+  '  },',
+  '};',
+  'export default config;',
+].join('\n');
+
+// A codegen config whose documents live under two roots, one of which a
+// checkout may not have.
+const CODEGEN_TWO_DIRS = [
+  'documents:',
+  '  - src/**/*.graphql',
+  '  - legacy/**/*.graphql',
+].join('\n');
 
 // SDL and a matching parsed file, for the opt-in deprecated-field checks.
 const SDL = [
@@ -405,6 +463,9 @@ describe('gqlPruner', () => {
       gqlFileCount: 1,
       sourceFileCount: 3,
       operationCount: 2,
+      inline: false,
+      inlineDocumentCount: 0,
+      inlineSkippedCount: 0,
       gqlFiles: ['graphql/user.gql'],
       unusedOperations: [],
       unusedFragments: [],
@@ -447,6 +508,62 @@ describe('gqlPruner', () => {
         operationUsages: [],
       });
       expect(lines.join('\n')).toContain('Source files scanned: 3');
+    });
+
+    it('counts the inline documents only when that pass ran', () => {
+      const off = formatVerboseScanLines({
+        ...baseResult,
+        operationUsages: [],
+      });
+      expect(off.join('\n')).not.toContain('Inline documents');
+
+      const on = formatVerboseScanLines({
+        ...baseResult,
+        operationUsages: [],
+        inline: true,
+        inlineDocumentCount: 4,
+        inlineSkippedCount: 1,
+      });
+      expect(on.join('\n')).toContain(
+        'Inline documents: 4 (1 skipped, did not parse)',
+      );
+    });
+  });
+
+  describe('formatVerboseConfidenceLines', () => {
+    it('explains the grade of every graded kind', () => {
+      const lines = formatVerboseConfidenceLines({
+        unusedOperations: [
+          { name: 'Dead', type: 'query', filePath: 'a.gql', ...HIGH },
+        ],
+        unusedFragments: [{ name: 'DeadFields', filePath: 'a.gql', ...LOW }],
+        orphanedFiles: [{ file: 'a.gql', ...LOW }],
+        unusedFieldCandidates: [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql' }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
+      });
+      expect(lines).toEqual([
+        'confidence: operation "Dead" is high (name-absent: the name appears in no scanned source file)',
+        'confidence: fragment "DeadFields" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        'confidence: orphaned file "a.gql" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        'confidence: field "avatarUrl" is medium (heuristic-cap: the field check cannot see a read through a rename, a spread, or a computed key)',
+      ]);
+    });
+
+    it('returns nothing when the scan found nothing', () => {
+      expect(
+        formatVerboseConfidenceLines({
+          unusedOperations: [],
+          unusedFragments: [],
+          orphanedFiles: [],
+          unusedFieldCandidates: [],
+        }),
+      ).toEqual([]);
     });
   });
 
@@ -525,14 +642,29 @@ describe('gqlPruner', () => {
     it('serializes unused operations and fragments with a summary', () => {
       expect(
         buildJsonReport(
-          [{ name: 'A', type: 'query', filePath: 'a.gql', line: 3 }],
-          [{ name: 'F', filePath: 'b.gql', line: 7 }],
+          [{ name: 'A', type: 'query', filePath: 'a.gql', line: 3, ...HIGH }],
+          [{ name: 'F', filePath: 'b.gql', line: 7, ...LOW }],
         ),
       ).toEqual({
         unusedOperations: [
-          { name: 'A', type: 'query', file: 'a.gql', line: 3 },
+          {
+            name: 'A',
+            type: 'query',
+            file: 'a.gql',
+            line: 3,
+            confidence: 'high',
+            reason: 'name-absent',
+          },
         ],
-        unusedFragments: [{ name: 'F', file: 'b.gql', line: 7 }],
+        unusedFragments: [
+          {
+            name: 'F',
+            file: 'b.gql',
+            line: 7,
+            confidence: 'low',
+            reason: 'source-mention',
+          },
+        ],
         orphanedFiles: [],
         deprecatedUsages: [],
         warnings: [],
@@ -541,6 +673,7 @@ describe('gqlPruner', () => {
           unusedFragments: 1,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 1, medium: 0, low: 1 },
         },
       });
     });
@@ -557,7 +690,31 @@ describe('gqlPruner', () => {
           unusedFragments: 0,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 0, medium: 0, low: 0 },
         },
+      });
+    });
+
+    it('counts every graded kind in the confidence breakdown', () => {
+      const report = buildJsonReport(
+        [{ name: 'A', type: 'query', filePath: 'a.gql', ...HIGH }],
+        [{ name: 'F', filePath: 'a.gql', ...LOW }],
+        [],
+        [{ file: 'a.gql', ...LOW }],
+        [],
+        [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql' }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
+      );
+      expect(report.summary.byConfidence).toEqual({
+        high: 1,
+        medium: 1,
+        low: 2,
       });
     });
 
@@ -567,14 +724,16 @@ describe('gqlPruner', () => {
       ]);
     });
 
-    it('lists the orphaned files and counts them in the summary', () => {
+    it('lists the orphaned files with their grade and counts them', () => {
       const report = buildJsonReport(
-        [{ name: 'A', type: 'query', filePath: 'dead.gql' }],
+        [{ name: 'A', type: 'query', filePath: 'dead.gql', ...HIGH }],
         [],
         [],
-        ['dead.gql'],
+        [{ file: 'dead.gql', ...HIGH }],
       );
-      expect(report.orphanedFiles).toEqual(['dead.gql']);
+      expect(report.orphanedFiles).toEqual([
+        { file: 'dead.gql', confidence: 'high', reason: 'name-absent' },
+      ]);
       expect(report.summary.orphanedFiles).toBe(1);
     });
 
@@ -592,6 +751,8 @@ describe('gqlPruner', () => {
           },
         ],
       );
+      // Validated against a real schema, so they are facts rather than
+      // candidates: no confidence field, and nothing in the breakdown.
       expect(report.deprecatedUsages).toEqual([
         {
           message: 'The field User.nickname is deprecated. use displayName',
@@ -599,7 +760,13 @@ describe('gqlPruner', () => {
           line: 3,
         },
       ]);
+      expect(report.deprecatedUsages[0]).not.toHaveProperty('confidence');
       expect(report.summary.deprecatedUsages).toBe(1);
+      expect(report.summary.byConfidence).toEqual({
+        high: 0,
+        medium: 0,
+        low: 0,
+      });
     });
 
     it('omits unusedFields entirely when the field check did not run', () => {
@@ -615,10 +782,22 @@ describe('gqlPruner', () => {
         [],
         [],
         [],
-        [{ field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] }],
+        [
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql', line: 4 }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
+        ],
       );
       expect(report.unusedFields).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 4 }] },
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 4 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
+        },
       ]);
       expect(report.summary).toEqual({
         unusedOperations: 0,
@@ -626,6 +805,7 @@ describe('gqlPruner', () => {
         orphanedFiles: 0,
         deprecatedUsages: 0,
         unusedFields: 1,
+        byConfidence: { high: 0, medium: 1, low: 0 },
       });
     });
 
@@ -646,39 +826,59 @@ describe('gqlPruner', () => {
               type: 'query',
               filePath: 'graphql/user.gql',
               line: 3,
+              ...HIGH,
             },
           ],
-          [{ name: 'UserFields', filePath: 'graphql/user.gql', line: 8 }],
+          [
+            {
+              name: 'UserFields',
+              filePath: 'graphql/user.gql',
+              line: 8,
+              ...LOW,
+            },
+          ],
         ),
       ).toEqual([
-        '::warning file=graphql/user.gql,line=3::Unused GraphQL operation "GetUser" (query)',
-        '::warning file=graphql/user.gql,line=8::Unused GraphQL fragment "UserFields"',
+        '::warning file=graphql/user.gql,line=3::Unused GraphQL operation "GetUser" (query) [confidence: high]',
+        '::warning file=graphql/user.gql,line=8::Unused GraphQL fragment "UserFields" [confidence: low]',
       ]);
     });
 
     it('omits the line property when no line is available', () => {
       expect(
         formatAnnotations(
-          [{ name: 'X', type: 'query', filePath: 'a.gql' }],
+          [{ name: 'X', type: 'query', filePath: 'a.gql', ...HIGH }],
           [],
         ),
-      ).toEqual(['::warning file=a.gql::Unused GraphQL operation "X" (query)']);
+      ).toEqual([
+        '::warning file=a.gql::Unused GraphQL operation "X" (query) [confidence: high]',
+      ]);
     });
 
     it('escapes : and , in the file property (e.g. Windows paths)', () => {
       expect(
         formatAnnotations(
-          [{ name: 'X', type: 'query', filePath: 'C:\\a,b\\q.gql', line: 1 }],
+          [
+            {
+              name: 'X',
+              type: 'query',
+              filePath: 'C:\\a,b\\q.gql',
+              line: 1,
+              ...HIGH,
+            },
+          ],
           [],
         ),
       ).toEqual([
-        '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query)',
+        '::warning file=C%3A\\a%2Cb\\q.gql,line=1::Unused GraphQL operation "X" (query) [confidence: high]',
       ]);
     });
 
     it('annotates an orphaned file without a line', () => {
-      expect(formatAnnotations([], [], ['graphql/dead.gql'])).toEqual([
-        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it',
+      expect(
+        formatAnnotations([], [], [{ file: 'graphql/dead.gql', ...LOW }]),
+      ).toEqual([
+        '::warning file=graphql/dead.gql::Orphaned GraphQL file: every definition is unused and no document imports it [confidence: low]',
       ]);
     });
 
@@ -696,11 +896,13 @@ describe('gqlPruner', () => {
                 { file: 'graphql/user.gql', line: 4 },
                 { file: 'graphql/post.gql', line: 9 },
               ],
+              confidence: 'medium',
+              reason: 'heuristic-cap',
             },
           ],
         ),
       ).toEqual([
-        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -711,10 +913,17 @@ describe('gqlPruner', () => {
           [],
           [],
           [],
-          [{ field: 'avatarUrl', locations: [{ file: 'a.gql' }] }],
+          [
+            {
+              field: 'avatarUrl',
+              locations: [{ file: 'a.gql' }],
+              confidence: 'medium',
+              reason: 'heuristic-cap',
+            },
+          ],
         ),
       ).toEqual([
-        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -949,6 +1158,106 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('resolveRunConfig', () => {
+    it('derives the whole configuration when nothing else supplies it', () => {
+      mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+      const run = resolveRunConfig();
+      expect(run.config).toEqual({
+        graphqlDir: ['src'],
+        srcDir: ['src'],
+        exclude: ['src/generated/graphql.ts'],
+        schemaFile: './schema.graphql',
+        usagePatterns: ['use{Name}{Type}', '{Name}Document'],
+        fragmentUsagePatterns: ['{Name}FragmentDoc'],
+      });
+      expect(run.codegen?.file).toBe('codegen.ts');
+      expect(run.codegenError).toBeUndefined();
+    });
+
+    it('never looks at a codegen config when flags supply the directories', () => {
+      mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+      const run = resolveRunConfig({ graphqlDir: './g', srcDir: './s' });
+      expect(run.config).toEqual({ graphqlDir: './g', srcDir: './s' });
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('never looks at a codegen config when the YAML supplies the directories', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml': 'graphqlDir: ./g\nsrcDir: ./s\n',
+        'codegen.ts': CODEGEN_TS,
+      });
+      const run = resolveRunConfig();
+      expect(run.config).toEqual({ graphqlDir: './g', srcDir: './s' });
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('lets gqlPrune.config.yaml win over an explicitly named codegen config', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml': [
+          'codegenConfig: tools/codegen.yml',
+          'graphqlDir: ./g',
+          'srcDir: ./s',
+          'schemaFile: ./mine.graphql',
+        ].join('\n'),
+        'tools/codegen.yml': [
+          'schema: ./theirs.graphql',
+          'documents: src/**/*.tsx',
+          'generates:',
+          '  src/gql/:',
+          '    preset: client',
+        ].join('\n'),
+      });
+      const run = resolveRunConfig();
+      // The YAML keeps every field it states; only the rest is derived.
+      expect(run.config).toMatchObject({
+        graphqlDir: './g',
+        srcDir: './s',
+        schemaFile: './mine.graphql',
+        exclude: ['src/gql'],
+        inline: true,
+      });
+      expect(run.codegen).toEqual({
+        file: 'tools/codegen.yml',
+        values: { exclude: ['src/gql'], inline: true },
+      });
+    });
+
+    it('lets CLI flags win over both the YAML and the codegen config', () => {
+      mockProjectFiles({
+        './gqlPrune.config.yaml':
+          'codegenConfig: codegen.yml\nsrcDir: ./yaml-s\n',
+        'codegen.yml': 'documents: codegen-src/**/*.graphql\n',
+      });
+      const run = resolveRunConfig({ graphqlDir: './cli-g' });
+      expect(run.config).toMatchObject({
+        graphqlDir: './cli-g',
+        srcDir: './yaml-s',
+      });
+    });
+
+    it('reports a named codegen config that cannot be read', () => {
+      mockProjectFiles({});
+      const run = resolveRunConfig({ codegenConfig: 'tools/codegen.yml' });
+      expect(run.codegenError).toContain('tools/codegen.yml');
+      expect(run.codegen).toBeUndefined();
+    });
+
+    it('notes why discovery came back empty instead of failing', () => {
+      mockProjectFiles({});
+      const run = resolveRunConfig();
+      expect(run.codegenError).toBeUndefined();
+      expect(run.codegenNotice).toContain('No GraphQL Code Generator config');
+      expect(run.config).toEqual({});
+    });
+
+    it('notes a discovered config that yields nothing to derive', () => {
+      mockProjectFiles({ 'codegen.ts': 'export default { generates: {} };' });
+      const run = resolveRunConfig();
+      expect(run.codegen).toBeUndefined();
+      expect(run.codegenNotice).toContain('codegen.ts');
+    });
+  });
+
   describe('resolveDirs', () => {
     it('wraps a single string', () => {
       expect(resolveDirs('./graphql')).toEqual(['./graphql']);
@@ -1028,6 +1337,7 @@ describe('gqlPruner', () => {
         [entitiesOf([]), entitiesOf([])],
         [''],
         DEFAULT_FRAGMENT_USAGE_PATTERNS,
+        [], // no inline roots: the opt-in inline pass is off
       );
     });
 
@@ -1129,7 +1439,7 @@ describe('gqlPruner', () => {
 
       const result = scanProject({ graphqlDir: './g', srcDir: './s' });
 
-      expect(result.orphanedFiles).toEqual(['dead.gql']);
+      expect(result.orphanedFiles).toEqual([{ file: 'dead.gql', ...HIGH }]);
     });
 
     it('leaves orphanedFiles empty when every definition is used', () => {
@@ -1223,7 +1533,260 @@ describe('gqlPruner', () => {
       });
 
       expect(result.unusedFieldCandidates).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 2 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
+        },
+      ]);
+    });
+  });
+
+  describe('scanProject (inline documents)', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    /** Wires the mocks for a scan of one source file and no gql files. */
+    const scanSources = (
+      sources: { file: string; content: string }[],
+      config: Partial<GqlPruneConfig> = {},
+      schema?: GraphQLSchema,
+    ) => {
+      mockedFind
+        .mockReturnValueOnce([]) // graphqlDir
+        .mockReturnValueOnce(sources.map((source) => source.file)); // srcDir
+      mockedReadSources.mockReturnValue(sources);
+      return scanProject(
+        { graphqlDir: './g', srcDir: './s', ...config },
+        schema,
+      );
+    };
+
+    it('never looks at inline documents by default', () => {
+      const result = scanSources([
+        {
+          file: 'src/App.tsx',
+          content: 'const q = gql`query GetUser { id }`;',
+        },
+      ]);
+
+      expect(mockedExtractInline).not.toHaveBeenCalled();
+      expect(result.inline).toBe(false);
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.operationCount).toBe(0);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('reports an unused operation from a tagged template with its real line', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: '\n\nconst q = gql`\n  query GetUser { id }\n`;',
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.inline).toBe(true);
+      expect(result.inlineDocumentCount).toBe(1);
+      expect(result.operationCount).toBe(1);
+      expect(result.unusedOperations).toEqual([
+        {
+          name: 'GetUser',
+          type: 'query',
+          filePath: 'src/App.tsx',
+          line: 4,
+          ...HIGH,
+        },
+      ]);
+    });
+
+    it('reports nothing for a document that is commented out', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: [
+              '// const old = graphql(`query FromComment { me { id } }`);',
+              '/* const older = graphql(`query FromBlock { me { id } }`); */',
+              'export const note = "graphql(`query FromString { me { id } }`)";',
+            ].join('\n'),
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.inlineSkippedCount).toBe(0);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('counts a body that does not parse instead of failing the scan', () => {
+      const result = scanSources(
+        [{ file: 'src/App.tsx', content: 'const q = gql`query {{{`;' }],
+        { inline: true },
+      );
+
+      expect(result.inlineDocumentCount).toBe(0);
+      expect(result.inlineSkippedCount).toBe(1);
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('treats an inline operation used through a codegen hook as used', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content: 'const q = graphql(`query GetUser { id }`);',
+          },
+          { file: 'src/App.tsx', content: 'useGetUserQuery();' },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('never counts a document as its own usage', () => {
+      // The bare {Name} pattern would match the document's own text if the
+      // corpus still carried it.
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: 'const q = gql`query GetUser { id }`;',
+          },
+        ],
+        { inline: true, usagePatterns: ['{Name}'] },
+      );
+
+      expect(result.unusedOperations.map((op) => op.name)).toEqual(['GetUser']);
+    });
+
+    it('never counts the defining constant as its own usage', () => {
+      // GetUserDocument matches the default {Name}Document pattern, but the only
+      // occurrence is the declaration itself.
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: "const GetUserDocument = graphql('query GetUser { id }');",
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations.map((op) => op.name)).toEqual(['GetUser']);
+    });
+
+    it('treats a document referenced only through its constant as used', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content:
+              "export const userQuery = graphql('query GetUser { id }');",
+          },
+          { file: 'src/App.tsx', content: 'useQuery(userQuery);' },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.operationUsages[0].match).toEqual({
+        pattern: 'userQuery',
+        file: 'src/App.tsx',
+      });
+    });
+
+    it('resolves a fragment defined inline and spread from a gql file', () => {
+      mockedUnusedFragments.mockImplementationOnce(
+        jest.requireActual('../src/utils/fragments')
+          .findUnusedFragmentsInCorpus,
+      );
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['src/fragments.ts']);
+      mockedExtract.mockReturnValue({
+        ...entitiesWithDocument('a.gql', 'query GetUser { ...UserFields }', [
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        ]),
+        operationSpreads: ['UserFields'],
+      });
+      mockedReadSources.mockReturnValue([
+        {
+          file: 'src/fragments.ts',
+          content: 'const f = gql`fragment UserFields on User { id }`;',
+        },
+      ]);
+
+      const result = scanProject({
+        graphqlDir: './g',
+        srcDir: './s',
+        inline: true,
+      });
+
+      expect(result.unusedFragments).toEqual([]);
+    });
+
+    it('never names a source file as an orphaned file', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content: 'const q = gql`query GetUser { id }`;',
+          },
+        ],
+        { inline: true },
+      );
+
+      expect(result.unusedOperations).toHaveLength(1);
+      expect(result.orphanedFiles).toEqual([]);
+    });
+
+    it('checks inline documents against the schema when one is given', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/App.tsx',
+            content:
+              'const q = gql`\n  query GetUser {\n    user { nickname }\n  }\n`;',
+          },
+        ],
+        { inline: true },
+        buildSchema(SDL),
+      );
+
+      expect(result.deprecatedUsages).toEqual([
+        {
+          message: 'The field User.nickname is deprecated. use displayName',
+          file: 'src/App.tsx',
+          line: 3,
+        },
+      ]);
+    });
+
+    it('reports field candidates from an inline document', () => {
+      const result = scanSources(
+        [
+          {
+            file: 'src/queries.ts',
+            content: 'const q = gql`\n  query GetUser { avatarUrl }\n`;',
+          },
+          { file: 'src/App.tsx', content: 'useQuery(q);' },
+        ],
+        { inline: true, checkFields: true },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.unusedFieldCandidates).toEqual([
+        {
+          field: 'avatarUrl',
+          locations: [{ file: 'src/queries.ts', line: 2 }],
+          confidence: 'medium',
+          reason: 'heuristic-cap',
+        },
       ]);
     });
   });
@@ -1463,7 +2026,9 @@ describe('gqlPruner', () => {
       mainFunction({ json: true, annotate: true });
 
       const report = JSON.parse(logged());
-      expect(report.orphanedFiles).toEqual(['g/dead.gql']);
+      expect(report.orphanedFiles).toEqual([
+        { file: 'g/dead.gql', confidence: 'high', reason: 'name-absent' },
+      ]);
       expect(report.summary.orphanedFiles).toBe(1);
       expect(errorSpy.mock.calls.flat().join('\n')).toContain(
         '::warning file=g/dead.gql::Orphaned GraphQL file',
@@ -1488,6 +2053,7 @@ describe('gqlPruner', () => {
         [entitiesOf([])],
         ['source'],
         ['{Name}FragmentDoc'],
+        [],
       );
     });
 
@@ -1520,16 +2086,30 @@ describe('gqlPruner', () => {
       expect(out).not.toContain(CANDIDATE_REMINDER);
       const report = JSON.parse(out);
       expect(report.unusedOperations).toEqual([
-        { name: 'Unused', type: 'query', file: 'a.gql', line: 2 },
+        {
+          name: 'Unused',
+          type: 'query',
+          file: 'a.gql',
+          line: 2,
+          confidence: 'high',
+          reason: 'name-absent',
+        },
       ]);
       expect(report.unusedFragments).toEqual([
-        { name: 'DeadFrag', file: 'a.gql', line: 5 },
+        {
+          name: 'DeadFrag',
+          file: 'a.gql',
+          line: 5,
+          confidence: 'high',
+          reason: 'name-absent',
+        },
       ]);
       expect(report.summary).toEqual({
         unusedOperations: 1,
         unusedFragments: 1,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 2, medium: 0, low: 0 },
       });
     });
 
@@ -1558,6 +2138,7 @@ describe('gqlPruner', () => {
         unusedFragments: 0,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 0, medium: 0, low: 0 },
       });
     });
 
@@ -1705,6 +2286,7 @@ describe('gqlPruner', () => {
         unusedFragments: 0,
         orphanedFiles: 0,
         deprecatedUsages: 0,
+        byConfidence: { high: 0, medium: 0, low: 0 },
       });
       // …and the verbose detail went to stderr.
       const errs = errorSpy.mock.calls.flat().join('\n');
@@ -1851,6 +2433,7 @@ describe('gqlPruner', () => {
           unusedFragments: 0,
           orphanedFiles: 0,
           deprecatedUsages: 0,
+          byConfidence: { high: 0, medium: 0, low: 0 },
         });
       });
 
@@ -1939,7 +2522,12 @@ describe('gqlPruner', () => {
 
         const report = JSON.parse(logged());
         expect(report.unusedFields).toEqual([
-          { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
+          {
+            field: 'avatarUrl',
+            locations: [{ file: 'a.gql', line: 2 }],
+            confidence: 'medium',
+            reason: 'heuristic-cap',
+          },
         ]);
         expect(report.summary.unusedFields).toBe(1);
       });
@@ -1961,6 +2549,86 @@ describe('gqlPruner', () => {
 
         const report = JSON.parse(logged());
         expect(report.summary.unusedFields).toBe(1);
+      });
+    });
+
+    describe('inline documents', () => {
+      const INLINE_SOURCE = {
+        file: 'src/App.tsx',
+        content: '\nconst q = gql`query GetUser { id }`;',
+      };
+
+      /** Config file text plus a source file holding one inline document. */
+      const setUpInlineScan = (configYaml: string) => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(configYaml);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind.mockReturnValueOnce([]).mockReturnValueOnce(['src/App.tsx']);
+        mockedReadSources.mockReturnValue([INLINE_SOURCE]);
+      };
+
+      it('reports nothing from source files by default', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([]);
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('reports an inline operation with its file and line when enabled in the config', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([
+          {
+            name: 'GetUser',
+            type: 'query',
+            file: 'src/App.tsx',
+            line: 2,
+            confidence: 'high',
+            reason: 'name-absent',
+          },
+        ]);
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('turns the pass on from the --inline flag over a config that omits it', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction({ json: true, config: { inline: true } });
+
+        expect(JSON.parse(logged()).summary.unusedOperations).toBe(1);
+      });
+
+      it('counts the inline documents in the human header only when enabled', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction();
+
+        expect(logged()).toContain('Found 1 inline GraphQL documents.');
+      });
+
+      it('leaves the header alone when the pass is off', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\n');
+
+        mainFunction();
+
+        expect(logged()).not.toContain('inline GraphQL documents');
+      });
+
+      it('explains the pass under --verbose', () => {
+        setUpInlineScan('graphqlDir: ./g\nsrcDir: ./s\ninline: true\n');
+
+        mainFunction({ verbose: true });
+
+        const stderr = errorSpy.mock.calls.flat().join('\n');
+        expect(stderr).toContain('inline: true');
+        expect(stderr).toContain(
+          'Inline documents: 1 (0 skipped, did not parse)',
+        );
       });
     });
 
@@ -2271,6 +2939,206 @@ describe('gqlPruner', () => {
       );
     });
 
+    describe('with a GraphQL Code Generator config', () => {
+      /** A scan of one operation that App.tsx uses through the urql hook. */
+      const mockScannedProject = (): void => {
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesOf([{ name: 'GetUser', type: 'query', filePath: 'a.gql' }]),
+        );
+        mockedReadSources.mockReturnValue([
+          { file: 'App.tsx', content: 'useGetUserQuery()' },
+        ]);
+      };
+
+      it('runs with no gqlPrune configuration at all', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        expect(() => mainFunction()).not.toThrow();
+        expect(exitSpy).not.toHaveBeenCalled();
+        expect(logged()).toContain('No unused');
+      });
+
+      it('says which settings came from the codegen config', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction();
+        expect(logged()).toContain('Using settings derived from codegen.ts');
+        expect(logged()).toContain('graphqlDir');
+        expect(logged()).toContain('usagePatterns');
+      });
+
+      it('lists every derived value under --verbose', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction({ verbose: true });
+        const errs = errorSpy.mock.calls.flat().join('\n');
+        expect(errs).toContain('codegen config: codegen.ts');
+        expect(errs).toContain('codegen graphqlDir: src');
+        expect(errs).toContain('codegen schemaFile: ./schema.graphql');
+      });
+
+      it('leaves a project that has its own config untouched', () => {
+        mockProjectFiles({
+          './gqlPrune.config.yaml': 'graphqlDir: ./g\nsrcDir: ./s\n',
+          'codegen.ts': CODEGEN_TS,
+        });
+        mockScannedProject();
+
+        mainFunction();
+        expect(logged()).not.toContain('derived from');
+        expect(mockedFind).toHaveBeenCalledWith(
+          './g',
+          ['.gql', '.graphql'],
+          expect.any(Function),
+        );
+      });
+
+      it('exits 2 when a codegen config named by --codegen cannot be read', () => {
+        mockProjectFiles({});
+
+        expect(() =>
+          mainFunction({ config: { codegenConfig: 'tools/codegen.yml' } }),
+        ).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'tools/codegen.yml',
+        );
+      });
+
+      it('still exits 2 when the discovered config yields no directories', () => {
+        mockProjectFiles({ 'codegen.ts': 'export default { generates: {} };' });
+
+        expect(() => mainFunction()).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain('--graphql');
+      });
+
+      // Explicit configuration fails loudly; inference degrades gracefully. A
+      // schema path that is not on disk yet (downloaded or generated at build
+      // time) is normal in a codegen config, and must not stop a scan the user
+      // never asked to include a schema in.
+      describe('a derived setting that does not resolve', () => {
+        /** A scan of one operation that nothing references. */
+        const mockUnusedOperation = (): void => {
+          mockedFind
+            .mockReturnValueOnce(['a.gql'])
+            .mockReturnValueOnce(['App.tsx']);
+          mockedExtract.mockReturnValue(
+            entitiesOf([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]),
+          );
+          mockedReadSources.mockReturnValue([
+            { file: 'App.tsx', content: 'nothing here' },
+          ]);
+        };
+
+        it('skips the deprecated check when the derived schema cannot be read', () => {
+          // codegen.ts names ./schema.graphql, which this project does not have.
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+          mockUnusedOperation();
+
+          expect(() => mainFunction()).not.toThrow();
+          expect(exitSpy).not.toHaveBeenCalled();
+          // The exit code reflects the findings, not the skipped check.
+          expect(process.exitCode).toBe(1);
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('codegen.ts');
+          expect(errs).toContain('./schema.graphql');
+        });
+
+        it('carries the skipped-schema warning in the JSON report', () => {
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+          mockUnusedOperation();
+
+          mainFunction({ json: true });
+
+          const report = JSON.parse(logged());
+          expect(report.warnings).toHaveLength(1);
+          expect(report.warnings[0]).toContain('codegen.ts');
+          expect(report.warnings[0]).toContain('./schema.graphql');
+          expect(report.deprecatedUsages).toEqual([]);
+        });
+
+        it('still exits 2 when --schema names the same unreadable path', () => {
+          mockProjectFiles({ 'codegen.ts': CODEGEN_TS });
+          mockedDirExists.mockReturnValue(true);
+
+          expect(() =>
+            mainFunction({ config: { schemaFile: './schema.graphql' } }),
+          ).toThrow('process.exit:2');
+          expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+            'Could not read or parse the GraphQL schema file: ./schema.graphql.',
+          );
+        });
+
+        it('drops a derived directory that does not exist and scans the rest', () => {
+          mockProjectFiles({ 'codegen.yml': CODEGEN_TWO_DIRS });
+          mockedDirExists.mockImplementation((dir: string) => dir === 'src');
+          mockUnusedOperation();
+
+          expect(() => mainFunction()).not.toThrow();
+          expect(exitSpy).not.toHaveBeenCalled();
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('legacy');
+          expect(errs).toContain('codegen.yml');
+          expect(mockedFind).toHaveBeenCalledWith(
+            'src',
+            ['.gql', '.graphql'],
+            expect.any(Function),
+          );
+          expect(mockedFind).not.toHaveBeenCalledWith(
+            'legacy',
+            expect.anything(),
+            expect.anything(),
+          );
+        });
+
+        it('exits 2 with codegen-aware guidance when no derived directory exists', () => {
+          mockProjectFiles({ 'codegen.yml': CODEGEN_TWO_DIRS });
+          mockedDirExists.mockReturnValue(false);
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('codegen.yml');
+          expect(errs).toContain('src');
+          expect(errs).toContain('legacy');
+          expect(errs).toContain('graphqlDir');
+          expect(errs).not.toContain(
+            'These configured directories do not exist',
+          );
+        });
+
+        it('keeps the plain message for a directory the user configured', () => {
+          (fs.readFileSync as jest.Mock).mockReturnValue(
+            'graphqlDir: ./g\nsrcDir: ./s\n',
+          );
+          mockedDirExists.mockImplementation((dir: string) => dir !== './g');
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain(
+            'These configured directories do not exist: ./g.',
+          );
+          expect(errs).not.toContain('codegen');
+        });
+      });
+    });
+
     it('exits 2 with guidance when neither a config file nor flags supply dirs', () => {
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
         const err = new Error('missing') as NodeJS.ErrnoException;
@@ -2281,6 +3149,204 @@ describe('gqlPruner', () => {
       expect(() => mainFunction()).toThrow('process.exit:2');
       const errs = errorSpy.mock.calls.flat().join('\n');
       expect(errs).toContain('--graphql');
+    });
+
+    describe('confidence grading', () => {
+      /** One unused operation, scanned against a single source file. */
+      const scansOneUnusedOperation = (
+        content: string,
+        configYaml = 'graphqlDir: ./g\nsrcDir: ./s\n',
+      ) => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(configYaml);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesOf([
+            { name: 'Unused', type: 'query', filePath: 'a.gql', line: 1 },
+          ]),
+        );
+        mockedReadSources.mockReturnValue([{ file: 'App.tsx', content }]);
+      };
+
+      it('shows the grade as a column in the operations table', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction();
+
+        expect(logged()).toContain('Confidence');
+        expect(logged()).toMatch(/Unused\s+high\s+a\.gql/);
+      });
+
+      it('grades a name mentioned in ordinary source as low', () => {
+        // The bare name is there, but no usage pattern matches it.
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction();
+
+        expect(logged()).toMatch(/Unused\s+low\s+a\.gql/);
+      });
+
+      it('grades a name mentioned only in a generated file as medium', () => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(
+          'graphqlDir: ./g\nsrcDir: ./s\n',
+        );
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['src/gql/graphql.ts']);
+        // Five operations, all but one referenced from the generated file, so
+        // the coverage heuristic flags it (see detectGeneratedFiles).
+        mockedExtract.mockReturnValue(
+          entitiesOf([
+            { name: 'A', type: 'query', filePath: 'a.gql' },
+            { name: 'B', type: 'query', filePath: 'a.gql' },
+            { name: 'C', type: 'query', filePath: 'a.gql' },
+            { name: 'D', type: 'query', filePath: 'a.gql' },
+            { name: 'Unused', type: 'query', filePath: 'a.gql', line: 1 },
+          ]),
+        );
+        mockedReadSources.mockReturnValue([
+          {
+            file: 'src/gql/graphql.ts',
+            content:
+              'ADocument BDocument CDocument DDocument\nconst d = gql`query Unused { id }`;',
+          },
+        ]);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([
+          {
+            name: 'Unused',
+            type: 'query',
+            file: 'a.gql',
+            line: 1,
+            confidence: 'medium',
+            reason: 'generated-only',
+          },
+        ]);
+      });
+
+      it('carries the grade into the JSON report and its summary', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations[0]).toMatchObject({
+          confidence: 'high',
+          reason: 'name-absent',
+        });
+        // The operation and the file it leaves orphaned, both graded.
+        expect(report.summary.byConfidence).toEqual({
+          high: 2,
+          medium: 0,
+          low: 0,
+        });
+      });
+
+      it('names the grade in the annotation message', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ annotate: true });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          '::warning file=a.gql,line=1::Unused GraphQL operation "Unused" (query) [confidence: high]',
+        );
+      });
+
+      it('explains every grade with --verbose', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ verbose: true });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'confidence: operation "Unused" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        );
+      });
+
+      it('hides findings below --min-confidence and exits 0 when only those existed', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ config: { minConfidence: 'high' } });
+
+        expect(logged()).not.toContain('Unused GraphQL Operations');
+        expect(logged()).toContain('No unused');
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('keeps a finding that meets the configured minimum', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ config: { minConfidence: 'high' } });
+
+        expect(logged()).toContain('Unused GraphQL Operations');
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('drops the hidden findings from the JSON report too', () => {
+        scansOneUnusedOperation('const q = registry["Unused"];');
+
+        mainFunction({ json: true, config: { minConfidence: 'medium' } });
+
+        const report = JSON.parse(logged());
+        expect(report.unusedOperations).toEqual([]);
+        expect(report.summary.unusedOperations).toBe(0);
+        expect(report.summary.byConfidence).toEqual({
+          high: 0,
+          medium: 0,
+          low: 0,
+        });
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('reports the configured minimum with --verbose', () => {
+        scansOneUnusedOperation('');
+
+        mainFunction({ verbose: true, config: { minConfidence: 'medium' } });
+
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'minConfidence: medium',
+        );
+      });
+
+      it('exits 2 when the config file names a level that does not exist', () => {
+        scansOneUnusedOperation(
+          '',
+          'graphqlDir: ./g\nsrcDir: ./s\nminConfidence: certain\n',
+        );
+
+        expect(() => mainFunction()).toThrow('process.exit:2');
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'Invalid minConfidence: certain. Expected one of high, medium, low.',
+        );
+      });
+
+      it('leaves deprecated selections ungraded', () => {
+        (fs.readFileSync as jest.Mock).mockImplementation((file: string) =>
+          file === './schema.graphql'
+            ? SDL
+            : 'graphqlDir: ./g\nsrcDir: ./s\nschemaFile: ./schema.graphql\n',
+        );
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract.mockReturnValue(
+          entitiesWithDocument('a.gql', DEPRECATED_QUERY),
+        );
+        mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+
+        mainFunction({ json: true });
+
+        const report = JSON.parse(logged());
+        expect(report.deprecatedUsages).toHaveLength(1);
+        expect(report.deprecatedUsages[0]).not.toHaveProperty('confidence');
+        expect(report.deprecatedUsages[0]).not.toHaveProperty('reason');
+      });
     });
   });
 });

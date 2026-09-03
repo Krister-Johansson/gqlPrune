@@ -69,16 +69,20 @@ export function findUnusedFragments(
  * @param {GraphqlFileEntities[]} parsedFiles - One parsed entry per gql file.
  * @param {string[]} fileContents - The already-read source file contents.
  * @param {string[]} fragmentUsagePatterns - Templates for source references.
+ * @param {Iterable<string>} extraRoots - Fragment names the caller already knows
+ *   are used, e.g. an inline document reached through the constant it is
+ *   assigned to, which no pattern can match.
  * @returns {FragmentInfo[]} - The unused fragments across the corpus.
  */
 export function findUnusedFragmentsInCorpus(
   parsedFiles: GraphqlFileEntities[],
   fileContents: string[],
   fragmentUsagePatterns: string[] = DEFAULT_FRAGMENT_USAGE_PATTERNS,
+  extraRoots: Iterable<string> = [],
 ): FragmentInfo[] {
   const allFragments: FragmentInfo[] = [];
   const fragmentSpreads = new Map<string, string[]>();
-  const roots = new Set<string>();
+  const roots = new Set<string>(extraRoots);
 
   for (const entities of parsedFiles) {
     entities.operationSpreads.forEach((spread) => roots.add(spread));

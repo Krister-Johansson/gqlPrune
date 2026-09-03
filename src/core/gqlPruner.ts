@@ -7,8 +7,6 @@ import * as yaml from 'js-yaml';
 import path from 'path';
 import { buildSchema, GraphQLSchema } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
-import { FragmentInfo } from '../types/FragmentInfo.js';
-import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
   createExcludeMatcher,
@@ -30,10 +28,40 @@ import {
   extractGraphqlEntities,
   GraphqlFileEntities,
 } from '../utils/operations.js';
+import {
+  extractInlineDocuments,
+  findInlineIdentifierUsage,
+  InlineIdentifierUsage,
+  toInlineEntities,
+} from '../utils/inline.js';
+import {
+  CodegenDerivation,
+  deriveGqlPruneConfig,
+  discoverCodegenConfig,
+  formatCodegenInfoLine,
+  formatCodegenVerboseLines,
+  loadCodegenConfig,
+} from '../utils/codegen.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
+import {
+  CONFIDENCE_LEVELS,
+  countByConfidence,
+  describeConfidence,
+  filterByConfidence,
+  GradedField,
+  GradedFragment,
+  GradedOperation,
+  gradeFieldCandidates,
+  gradeFragments,
+  gradeOperations,
+  gradeOrphanedFiles,
+  isConfidenceLevel,
+  OrphanedFile,
+} from '../utils/confidence.js';
+import { ConfidenceLevel } from '../types/Confidence.js';
 
 // Defined in fileUtils (the directory walks need it too) and re-exported here,
 // where the exclude handling lives.
@@ -120,6 +148,15 @@ export function resolveCheckFields(config: GqlPruneConfig): boolean {
 }
 
 /**
+ * Whether the opt-in inline-document scan runs. Strictly boolean `true`, like
+ * {@link resolveCheckFields}, so a stray YAML value never silently changes what
+ * a scan considers a definition.
+ */
+export function resolveInline(config: GqlPruneConfig): boolean {
+  return config.inline === true;
+}
+
+/**
  * Returns the operations that are not referenced by any of the file contents,
  * using the given usage patterns.
  */
@@ -167,8 +204,63 @@ export function explainOperationUsage(
   });
 }
 
+/**
+ * Marks the operations of an inline document as used when the constant the
+ * document is assigned to is referenced somewhere in the corpus. This is the
+ * one usage signal no pattern can express: under the client preset the code
+ * reads `const q = graphql(...)` and then `useQuery(q)`, and the operation's own
+ * name never appears outside the document.
+ *
+ * The verdict is keyed by operation name, like every other verdict in the tool,
+ * so same-named definitions share it (`findDuplicateNameWarnings` reports that).
+ *
+ * @param {OperationUsage[]} usages - Verdicts from {@link explainOperationUsage}.
+ * @param {InlineIdentifierUsage[]} inlineUsage - The referenced inline documents.
+ * @returns {OperationUsage[]} - The verdicts, with referenced ones marked used.
+ */
+export function applyInlineIdentifierUsage(
+  usages: OperationUsage[],
+  inlineUsage: InlineIdentifierUsage[],
+): OperationUsage[] {
+  if (inlineUsage.length === 0) {
+    return usages;
+  }
+  const matchByName = new Map<string, { pattern: string; file: string }>();
+  for (const { identifier, file, operations } of inlineUsage) {
+    for (const name of operations) {
+      matchByName.set(name, { pattern: identifier, file });
+    }
+  }
+  return usages.map((usage) => {
+    if (usage.match !== undefined) {
+      return usage;
+    }
+    const match = matchByName.get(usage.operation.name);
+    return match === undefined ? usage : { ...usage, match };
+  });
+}
+
+/** Header of the confidence column, and the width every such column takes. */
+const CONFIDENCE_HEADER = 'Confidence';
+
+/**
+ * Colours one grade for the tables: the strongest evidence stands out and the
+ * weakest recedes, so a table of nothing but `high` still reads as a plain
+ * column rather than a wall of colour.
+ */
+function paintConfidence(text: string, level: ConfidenceLevel): string {
+  if (level === 'high') return kleur.red(text);
+  if (level === 'medium') return kleur.yellow(text);
+  return kleur.dim(text);
+}
+
+/** One padded, coloured confidence cell. */
+function confidenceCell(level: ConfidenceLevel): string {
+  return paintConfidence(level.padEnd(CONFIDENCE_HEADER.length), level);
+}
+
 /** Prints the aligned table of unused operations. */
-function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
+function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
   const maxTypeLength = Math.max(
     'Type'.length,
     ...unusedOperations.map((op) => op.type.length),
@@ -182,13 +274,14 @@ function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
   console.log(
     'Type'.padEnd(maxTypeLength),
     'Operation'.padEnd(maxNameLength),
+    CONFIDENCE_HEADER,
     'File',
   );
   unusedOperations.forEach((op) => {
     console.log(
       `${kleur.yellow(op.type.padEnd(maxTypeLength))} ${kleur.cyan(
         op.name.padEnd(maxNameLength),
-      )} ${kleur.magenta(path.basename(op.filePath))}`,
+      )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
     );
   });
   console.log(kleur.blue('---------------------------------'));
@@ -200,19 +293,19 @@ function reportUnusedOperations(unusedOperations: OperationInfo[]): void {
 }
 
 /** Prints the aligned table of unused fragments. */
-function reportUnusedFragments(unusedFragments: FragmentInfo[]): void {
+function reportUnusedFragments(unusedFragments: GradedFragment[]): void {
   const maxNameLength = Math.max(
     'Fragment'.length,
     ...unusedFragments.map((fragment) => fragment.name.length),
   );
 
   console.log(kleur.blue('\n--- Unused GraphQL Fragments ---\n'));
-  console.log('Fragment'.padEnd(maxNameLength), 'File');
+  console.log('Fragment'.padEnd(maxNameLength), CONFIDENCE_HEADER, 'File');
   unusedFragments.forEach((fragment) => {
     console.log(
-      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${kleur.magenta(
-        path.basename(fragment.filePath),
-      )}`,
+      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${confidenceCell(
+        fragment.confidence,
+      )} ${kleur.magenta(path.basename(fragment.filePath))}`,
     );
   });
   console.log(kleur.blue('--------------------------------'));
@@ -235,19 +328,25 @@ function formatFieldLocation(location: {
  * Prints the advisory table of field candidates: one row per selection, with
  * the key shown on its first row only.
  */
-function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
+function reportUnusedFieldCandidates(candidates: GradedField[]): void {
   const maxFieldLength = Math.max(
     'Field'.length,
     ...candidates.map((candidate) => candidate.field.length),
   );
 
   console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
-  console.log('Field'.padEnd(maxFieldLength), 'Selected in');
+  console.log('Field'.padEnd(maxFieldLength), CONFIDENCE_HEADER, 'Selected in');
   candidates.forEach((candidate) => {
     candidate.locations.forEach((location, index) => {
       const label = index === 0 ? candidate.field : '';
+      // The grade belongs to the key, not to each of its selections, so it sits
+      // on the first row with the key and the rest stay blank.
+      const grade =
+        index === 0
+          ? confidenceCell(candidate.confidence)
+          : ''.padEnd(CONFIDENCE_HEADER.length);
       console.log(
-        `${kleur.cyan(label.padEnd(maxFieldLength))} ${kleur.magenta(
+        `${kleur.cyan(label.padEnd(maxFieldLength))} ${grade} ${kleur.magenta(
           formatFieldLocation(location),
         )}`,
       );
@@ -269,10 +368,14 @@ function reportUnusedFieldCandidates(candidates: UnusedFieldInfo[]): void {
   );
 }
 /** Prints the list of orphaned GraphQL files. */
-function reportOrphanedFiles(orphanedFiles: string[]): void {
+function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
   console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
-  console.log('File');
-  orphanedFiles.forEach((file) => console.log(kleur.magenta(file)));
+  console.log(CONFIDENCE_HEADER, 'File');
+  orphanedFiles.forEach((orphan) =>
+    console.log(
+      `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
+    ),
+  );
   console.log(kleur.blue('------------------------------'));
   console.log(
     kleur.red(
@@ -321,17 +424,25 @@ export type JsonReport = {
     type: string;
     file: string;
     line?: number;
+    confidence: ConfidenceLevel;
+    reason: string;
   }[];
-  unusedFragments: { name: string; file: string; line?: number }[];
+  unusedFragments: {
+    name: string;
+    file: string;
+    line?: number;
+    confidence: ConfidenceLevel;
+    reason: string;
+  }[];
   /** Files whose every definition is unused and which nothing imports. */
-  orphanedFiles: string[];
+  orphanedFiles: OrphanedFile[];
   /** Selections of `@deprecated` fields/enum values; empty without a schema. */
   deprecatedUsages: DeprecatedUsage[];
   /**
    * Field candidates. Present only when the opt-in check ran, so an absent key
    * means "not checked" rather than "nothing found".
    */
-  unusedFields?: UnusedFieldInfo[];
+  unusedFields?: GradedField[];
   /** Advisory warnings (e.g. a suspected generated file masking results). */
   warnings: string[];
   summary: {
@@ -340,6 +451,8 @@ export type JsonReport = {
     orphanedFiles: number;
     deprecatedUsages: number;
     unusedFields?: number;
+    /** Every graded finding in this report, counted per level. */
+    byConfidence: Record<ConfidenceLevel, number>;
   };
 };
 
@@ -347,14 +460,19 @@ export type JsonReport = {
  * Builds the structured report for `--json` output. `unusedFields` is omitted
  * entirely when the opt-in field check did not run. An empty array would claim
  * a clean result the scan never looked for.
+ *
+ * Every candidate kind carries its `confidence` and the `reason` behind it;
+ * `summary.byConfidence` counts them all together. Deprecated selections are
+ * left ungraded: they are validated against a real schema, so they are facts
+ * rather than candidates.
  */
 export function buildJsonReport(
-  unusedOperations: OperationInfo[],
-  unusedFragments: FragmentInfo[],
+  unusedOperations: GradedOperation[],
+  unusedFragments: GradedFragment[],
   warnings: string[] = [],
-  orphanedFiles: string[] = [],
+  orphanedFiles: OrphanedFile[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
-  unusedFields?: UnusedFieldInfo[],
+  unusedFields?: GradedField[],
 ): JsonReport {
   return {
     unusedOperations: unusedOperations.map((op) => ({
@@ -362,11 +480,15 @@ export function buildJsonReport(
       type: op.type,
       file: op.filePath,
       line: op.line,
+      confidence: op.confidence,
+      reason: op.reason,
     })),
     unusedFragments: unusedFragments.map((fragment) => ({
       name: fragment.name,
       file: fragment.filePath,
       line: fragment.line,
+      confidence: fragment.confidence,
+      reason: fragment.reason,
     })),
     orphanedFiles,
     deprecatedUsages,
@@ -378,6 +500,12 @@ export function buildJsonReport(
       orphanedFiles: orphanedFiles.length,
       deprecatedUsages: deprecatedUsages.length,
       ...(unusedFields ? { unusedFields: unusedFields.length } : {}),
+      byConfidence: countByConfidence([
+        ...unusedOperations,
+        ...unusedFragments,
+        ...orphanedFiles,
+        ...(unusedFields ?? []),
+      ]),
     },
   };
 }
@@ -405,13 +533,17 @@ function escapeAnnotationProperty(value: string): string {
  * fragments, for each orphaned file and for each deprecated selection, so they
  * surface inline on a PR. Omits the line when unknown. Field candidates get one
  * annotation each, pinned to their first selection.
+ *
+ * Every candidate annotation ends with its confidence grade, so a reviewer can
+ * triage straight from the Files changed tab. Deprecated selections carry no
+ * grade: the schema already settled them.
  */
 export function formatAnnotations(
-  unusedOperations: OperationInfo[],
-  unusedFragments: FragmentInfo[],
-  orphanedFiles: string[] = [],
+  unusedOperations: GradedOperation[],
+  unusedFragments: GradedFragment[],
+  orphanedFiles: OrphanedFile[] = [],
   deprecatedUsages: DeprecatedUsage[] = [],
-  unusedFields: UnusedFieldInfo[] = [],
+  unusedFields: GradedField[] = [],
 ): string[] {
   const annotate = (
     file: string,
@@ -424,26 +556,37 @@ export function formatAnnotations(
       : `file=${escapedFile}`;
     return `::warning ${location}::${escapeAnnotationMessage(message)}`;
   };
+  const graded = (message: string, level: ConfidenceLevel): string =>
+    `${message} [confidence: ${level}]`;
   return [
     ...unusedOperations.map((op) =>
       annotate(
         op.filePath,
         op.line,
-        `Unused GraphQL operation "${op.name}" (${op.type})`,
+        graded(
+          `Unused GraphQL operation "${op.name}" (${op.type})`,
+          op.confidence,
+        ),
       ),
     ),
     ...unusedFragments.map((fragment) =>
       annotate(
         fragment.filePath,
         fragment.line,
-        `Unused GraphQL fragment "${fragment.name}"`,
+        graded(
+          `Unused GraphQL fragment "${fragment.name}"`,
+          fragment.confidence,
+        ),
       ),
     ),
-    ...orphanedFiles.map((file) =>
+    ...orphanedFiles.map((orphan) =>
       annotate(
-        file,
+        orphan.file,
         undefined,
-        'Orphaned GraphQL file: every definition is unused and no document imports it',
+        graded(
+          'Orphaned GraphQL file: every definition is unused and no document imports it',
+          orphan.confidence,
+        ),
       ),
     ),
     // The validator's message already names the deprecated field or enum value
@@ -455,7 +598,10 @@ export function formatAnnotations(
       annotate(
         candidate.locations[0].file,
         candidate.locations[0].line,
-        `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+        graded(
+          `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+          candidate.confidence,
+        ),
       ),
     ),
   ];
@@ -643,15 +789,10 @@ export function findDuplicateNameWarnings(
 }
 
 /**
- * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
- * values provided as CLI flags, which win per field. A missing config file is
- * fine — the CLI flags may supply everything. Throws on a malformed or
- * otherwise unreadable file so the problem isn't silently ignored.
+ * Reads `gqlPrune.config.yaml`, or returns `{}` when there is none. Throws on a
+ * malformed or otherwise unreadable file so the problem isn't silently ignored.
  */
-export function resolveConfig(
-  cliConfig: CliConfig = {},
-): Partial<GqlPruneConfig> {
-  let fileConfig: Partial<GqlPruneConfig> = {};
+function readFileConfig(): Partial<GqlPruneConfig> {
   let raw: string | undefined;
   try {
     raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
@@ -663,11 +804,212 @@ export function resolveConfig(
   }
   // An empty/whitespace-only file is treated as no config (parsing it throws),
   // so CLI flags alone can still drive the run.
-  if (raw !== undefined && raw.trim() !== '') {
-    fileConfig = (yaml.load(raw) as GqlPruneConfig) ?? {};
+  if (raw === undefined || raw.trim() === '') return {};
+  return (yaml.load(raw) as GqlPruneConfig) ?? {};
+}
+
+/** A run's configuration, plus where any codegen-derived values came from. */
+export type ResolvedRunConfig = {
+  config: Partial<GqlPruneConfig>;
+  /** Present when a codegen config supplied values that took effect. */
+  codegen?: CodegenDerivation;
+  /** Why no codegen config was used, when one was looked for (`--verbose`). */
+  codegenNotice?: string;
+  /** A config named by `--codegen`/`codegenConfig` that could not be read. */
+  codegenError?: string;
+};
+
+/**
+ * Resolves everything a run needs, in strict precedence: CLI flags, then
+ * `gqlPrune.config.yaml`, then a GraphQL Code Generator config, then the
+ * built-in defaults.
+ *
+ * The codegen layer is read in two cases only. When `--codegen`/`codegenConfig`
+ * names a file, it is read wherever it sits, and a file that cannot be read is
+ * an error the caller reports. Otherwise it is looked for in the working
+ * directory, and only when neither the config file nor a flag says which
+ * directories to scan. That is exactly the run that fails today with "No
+ * configuration found", so an inferred setting can never change the result of a
+ * project that is already configured.
+ *
+ * @param {CliConfig} cliConfig - Overrides collected from the CLI flags.
+ * @returns {ResolvedRunConfig} - The configuration and its codegen provenance.
+ */
+export function resolveRunConfig(cliConfig: CliConfig = {}): ResolvedRunConfig {
+  const merged = { ...readFileConfig(), ...cliConfig };
+  const requested =
+    typeof merged.codegenConfig === 'string' ? merged.codegenConfig.trim() : '';
+  const unconfigured =
+    resolveDirs(merged.graphqlDir).length === 0 &&
+    resolveDirs(merged.srcDir).length === 0;
+  if (requested === '' && !unconfigured) return { config: merged };
+
+  const lookup =
+    requested === '' ? discoverCodegenConfig() : loadCodegenConfig(requested);
+  if (!lookup.found) {
+    return requested === ''
+      ? { config: merged, codegenNotice: lookup.reason }
+      : { config: merged, codegenError: lookup.reason };
   }
+  // Lowest precedence: only the keys nothing else already decided.
+  const values = Object.fromEntries(
+    Object.entries(deriveGqlPruneConfig(lookup.config)).filter(
+      ([key]) => !(key in merged),
+    ),
+  );
+  return {
+    config: { ...values, ...merged },
+    ...(Object.keys(values).length > 0
+      ? { codegen: { file: lookup.config.file, values } }
+      : { codegenNotice: `Nothing to derive from ${lookup.config.file}.` }),
+  };
+}
+
+/**
+ * The codegen config a setting was derived from, or `undefined` when the user
+ * wrote it themselves.
+ *
+ * The distinction drives one rule: **explicit configuration fails loudly,
+ * inference degrades gracefully.** A value from `gqlPrune.config.yaml` or a CLI
+ * flag that does not resolve ends the run with exit code 2, because the user
+ * asked for it and a silent skip would hide their mistake. A value gqlPrune
+ * derived from a codegen config never turns a runnable scan into a fatal error:
+ * it is dropped with an advisory warning and the scan carries on.
+ *
+ * @param {ResolvedRunConfig} run - The resolved run, with its provenance.
+ * @param {keyof GqlPruneConfig} key - The setting to ask about.
+ * @returns {string | undefined} - The codegen file, when the value came from one.
+ */
+export function codegenSource(
+  run: ResolvedRunConfig,
+  key: keyof GqlPruneConfig,
+): string | undefined {
+  return run.codegen !== undefined && key in run.codegen.values
+    ? run.codegen.file
+    : undefined;
+}
+
+/**
+ * The advisory warning for a `schemaFile` that was derived from a codegen
+ * config and cannot be used. A codegen `schema` is routinely a path that is only
+ * filled in at build time, so it must cost the deprecated-selection check and
+ * nothing else.
+ */
+export function formatDerivedSchemaWarning(
+  codegenFile: string,
+  schemaFile: string,
+): string {
+  return (
+    `Skipped the deprecated-selection check: the schema "${schemaFile}" derived ` +
+    `from ${codegenFile} could not be read or parsed. Set "schemaFile" in ` +
+    'gqlPrune.config.yaml to check against a schema of your own.'
+  );
+}
+
+/** The directories a scan will walk, plus anything the caller must report. */
+export type ResolvedScanDirs = {
+  graphqlDir: string[];
+  srcDir: string[];
+  /** Advisory warnings for derived directories that were dropped. */
+  warnings: string[];
+  /** Set when nothing scannable is left; the run must stop with exit code 2. */
+  error?: string;
+};
+
+/**
+ * Turns the configured `graphqlDir`/`srcDir` values into the directories to
+ * scan: globs are expanded, and paths that are not on disk are checked.
+ *
+ * Which failures are fatal depends on where the value came from (see
+ * {@link codegenSource}). A directory the user configured that does not exist
+ * ends the run. A derived one is dropped with a warning, and only an empty
+ * result stops the run, with a message that names the codegen config: the user
+ * never wrote the path it complains about.
+ *
+ * @param {string[]} graphqlDir - Configured GraphQL directories.
+ * @param {string[]} srcDir - Configured source directories.
+ * @param {object} derived - Per field, the codegen file it was derived from.
+ * @returns {ResolvedScanDirs} - The surviving directories, warnings and error.
+ */
+export function resolveScanDirs(
+  graphqlDir: string[],
+  srcDir: string[],
+  derived: { graphqlDir?: string; srcDir?: string } = {},
+): ResolvedScanDirs {
+  const stop = (error: string, warnings: string[] = []): ResolvedScanDirs => ({
+    graphqlDir: [],
+    srcDir: [],
+    warnings,
+    error,
+  });
+
+  const expanded = [
+    { field: 'graphqlDir', configured: graphqlDir, from: derived.graphqlDir },
+    { field: 'srcDir', configured: srcDir, from: derived.srcDir },
+  ].map((field) => ({ ...field, ...expandDirPatterns(field.configured) }));
+
+  // A glob that matches nothing is checked first, before anything touches the
+  // filesystem, exactly as it always was.
+  const explicitUnmatched = expanded
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.unmatched);
+  if (explicitUnmatched.length > 0) {
+    return stop(
+      `These configured directory patterns match no directories: ${explicitUnmatched.join(', ')}.`,
+    );
+  }
+
+  const checked = expanded.map((entry) => {
+    const present = entry.dirs.filter((dir) => directoryExists(dir));
+    const missing = entry.dirs.filter((dir) => !present.includes(dir));
+    return { ...entry, present, dropped: [...entry.unmatched, ...missing] };
+  });
+
+  const explicitMissing = checked
+    .filter((entry) => entry.from === undefined)
+    .flatMap((entry) => entry.dropped);
+  if (explicitMissing.length > 0) {
+    return stop(
+      `These configured directories do not exist: ${explicitMissing.join(', ')}.`,
+    );
+  }
+
+  const warnings: string[] = [];
+  for (const entry of checked) {
+    if (entry.from === undefined || entry.dropped.length === 0) continue;
+    if (entry.present.length === 0) {
+      return stop(
+        `No directory derived from ${entry.from} for "${entry.field}" is on disk: ` +
+          `${entry.dropped.join(', ')}. Set graphqlDir and srcDir in ` +
+          'gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> ' +
+          'and --src <dir>.',
+        warnings,
+      );
+    }
+    warnings.push(
+      `Skipped "${entry.field}" ${entry.dropped.join(', ')} derived from ` +
+        `${entry.from}: not on disk. Scanning ${entry.present.join(', ')}.`,
+    );
+  }
+
+  return {
+    graphqlDir: checked[0].present,
+    srcDir: checked[1].present,
+    warnings,
+  };
+}
+
+/**
+ * Loads configuration from `gqlPrune.config.yaml` (if present) and overlays the
+ * values provided as CLI flags, which win per field. A missing config file is
+ * fine: the CLI flags may supply everything. See {@link resolveRunConfig} for
+ * the full precedence, including codegen-derived defaults.
+ */
+export function resolveConfig(
+  cliConfig: CliConfig = {},
+): Partial<GqlPruneConfig> {
   // Required fields may still be absent; mainFunction validates and narrows.
-  return { ...fileConfig, ...cliConfig };
+  return resolveRunConfig(cliConfig).config;
 }
 
 /** The result of a single project scan, free of any console output. */
@@ -675,14 +1017,20 @@ export type ScanResult = {
   gqlFileCount: number;
   sourceFileCount: number;
   operationCount: number;
+  /** Whether the opt-in inline-document pass ran (see `inline` / `--inline`). */
+  inline: boolean;
+  /** Inline documents parsed out of the source files; 0 when the pass is off. */
+  inlineDocumentCount: number;
+  /** Inline bodies that did not parse and were skipped. */
+  inlineSkippedCount: number;
   /** The `.gql`/`.graphql` files that were scanned. */
   gqlFiles: string[];
   /** Per-operation verdicts with the matching pattern/file (see `--verbose`). */
   operationUsages: OperationUsage[];
-  unusedOperations: OperationInfo[];
-  unusedFragments: FragmentInfo[];
+  unusedOperations: GradedOperation[];
+  unusedFragments: GradedFragment[];
   /** Files whose every definition is unused and which no document imports. */
-  orphanedFiles: string[];
+  orphanedFiles: OrphanedFile[];
   /**
    * Selections of `@deprecated` schema fields or enum values. Always empty
    * unless the caller passed a schema (see `schemaFile`).
@@ -692,7 +1040,7 @@ export type ScanResult = {
    * Advisory field candidates. Always empty unless `checkFields` is on: the
    * detection does not run at all when the option is off.
    */
-  unusedFieldCandidates: UnusedFieldInfo[];
+  unusedFieldCandidates: GradedField[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -713,6 +1061,41 @@ export function formatVerboseConfigLines(config: GqlPruneConfig): string[] {
     // Only when configured: the deprecated check is off by default, and an
     // empty line would suggest a setting that isn't in play.
     ...(config.schemaFile ? [`schemaFile: ${config.schemaFile}`] : []),
+    ...(resolveInline(config) ? ['inline: true'] : []),
+    ...(config.minConfidence ? [`minConfidence: ${config.minConfidence}`] : []),
+  ];
+}
+
+/**
+ * Renders the `--verbose` line for every graded finding: which grade it got and
+ * the evidence behind it. Built from the unfiltered scan, so a `minConfidence`
+ * run still explains what it decided to hide.
+ */
+export function formatVerboseConfidenceLines(
+  result: Pick<
+    ScanResult,
+    | 'unusedOperations'
+    | 'unusedFragments'
+    | 'orphanedFiles'
+    | 'unusedFieldCandidates'
+  >,
+): string[] {
+  return [
+    ...result.unusedOperations.map(
+      (op) => `confidence: operation "${op.name}" is ${describeConfidence(op)}`,
+    ),
+    ...result.unusedFragments.map(
+      (fragment) =>
+        `confidence: fragment "${fragment.name}" is ${describeConfidence(fragment)}`,
+    ),
+    ...result.orphanedFiles.map(
+      (orphan) =>
+        `confidence: orphaned file "${orphan.file}" is ${describeConfidence(orphan)}`,
+    ),
+    ...result.unusedFieldCandidates.map(
+      (candidate) =>
+        `confidence: field "${candidate.field}" is ${describeConfidence(candidate)}`,
+    ),
   ];
 }
 
@@ -742,6 +1125,11 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
   const lines = [
     `GraphQL files (${result.gqlFiles.length}): ${result.gqlFiles.join(', ')}`,
     `Source files scanned: ${result.sourceFileCount}`,
+    ...(result.inline
+      ? [
+          `Inline documents: ${result.inlineDocumentCount} (${result.inlineSkippedCount} skipped, did not parse)`,
+        ]
+      : []),
   ];
   for (const { operation, patterns, match } of result.operationUsages) {
     lines.push(
@@ -781,10 +1169,7 @@ export function scanProject(
     ),
   ];
   // Parse every gql file once; operations and the fragment scan share the result.
-  const parsedFiles = gqlFiles.map(extractGraphqlEntities);
-  const operations: OperationInfo[] = parsedFiles.flatMap(
-    (file) => file.operations,
-  );
+  const gqlEntities = gqlFiles.map(extractGraphqlEntities);
 
   const tsFiles = [
     ...new Set(
@@ -795,15 +1180,40 @@ export function scanProject(
   ];
   // Read every source file once (paired with its path), then test all operations
   // against the cache instead of re-reading each file for every operation.
-  const sources = readSourceFiles(tsFiles);
+  const rawSources = readSourceFiles(tsFiles);
+
+  // Opt-in: with the pass off, nothing is extracted and the corpus stays the
+  // raw source text. With it on, source files are definition sources too, and
+  // the corpus is searched with every inline document blanked out, so a
+  // document can never count as its own usage.
+  const inline = resolveInline(config);
+  const extractions = inline
+    ? rawSources.map((source) =>
+        extractInlineDocuments(source.file, source.content),
+      )
+    : [];
+  const inlineEntities = extractions.flatMap((extraction) =>
+    toInlineEntities(extraction.documents),
+  );
+  const sources = inline
+    ? extractions.map(({ file, blankedContent }) => ({
+        file,
+        content: blankedContent,
+      }))
+    : rawSources;
   const fileContents = sources.map((source) => source.content);
+
+  const parsedFiles = [...gqlEntities, ...inlineEntities];
+  const operations: OperationInfo[] = parsedFiles.flatMap(
+    (file) => file.operations,
+  );
+  const inlineUsage = findInlineIdentifierUsage(inlineEntities, sources);
 
   // One sweep yields both the unused set and the per-operation explanations
   // that `--verbose` reports.
-  const operationUsages = explainOperationUsage(
-    operations,
-    sources,
-    usagePatterns,
+  const operationUsages = applyInlineIdentifierUsage(
+    explainOperationUsage(operations, sources, usagePatterns),
+    inlineUsage,
   );
   const unusedOperations = operationUsages
     .filter((usage) => !usage.match)
@@ -812,6 +1222,7 @@ export function scanProject(
     parsedFiles,
     fileContents,
     fragmentUsagePatterns,
+    inlineUsage.flatMap((usage) => usage.fragments),
   );
   const generatedFiles = detectGeneratedFiles(
     sources,
@@ -828,21 +1239,49 @@ export function scanProject(
       )
     : [];
 
+  // Grade what the scan found. The bare-name search is the extra evidence the
+  // usage sweep above never gathers, and it only runs over the findings, which
+  // are few by construction.
+  const generatedPaths = new Set(generatedFiles.map((warning) => warning.file));
+  const gradedOperations = gradeOperations(
+    unusedOperations,
+    sources,
+    generatedPaths,
+  );
+  const gradedFragments = gradeFragments(
+    unusedFragments,
+    sources,
+    generatedPaths,
+  );
+
   return {
     gqlFileCount: gqlFiles.length,
     sourceFileCount: tsFiles.length,
     operationCount: operations.length,
+    inline,
+    inlineDocumentCount: extractions.reduce(
+      (total, extraction) => total + extraction.documents.length,
+      0,
+    ),
+    inlineSkippedCount: extractions.reduce(
+      (total, extraction) => total + extraction.skipped,
+      0,
+    ),
     gqlFiles,
     operationUsages,
-    unusedOperations,
-    unusedFragments,
-    orphanedFiles: findOrphanedFiles(
-      parsedFiles,
-      unusedOperations,
-      unusedFragments,
+    unusedOperations: gradedOperations,
+    unusedFragments: gradedFragments,
+    orphanedFiles: gradeOrphanedFiles(
+      findOrphanedFiles(parsedFiles, unusedOperations, unusedFragments),
+      gradedOperations,
+      gradedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
-    unusedFieldCandidates,
+    unusedFieldCandidates: gradeFieldCandidates(
+      unusedFieldCandidates,
+      sources,
+      generatedPaths,
+    ),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     generatedFiles,
@@ -867,15 +1306,33 @@ export function mainFunction(
     }
   };
 
-  let resolved: Partial<GqlPruneConfig>;
+  let run: ResolvedRunConfig;
   try {
-    resolved = resolveConfig(options.config);
+    run = resolveRunConfig(options.config);
   } catch (e) {
     console.error(kleur.red('Error reading gqlPrune.config.yaml.'));
     console.error(e);
     process.exit(2);
   }
 
+  // A codegen config the user asked for by name and that cannot be read is a
+  // broken run, like an unreadable schema; a discovered one is only a default.
+  if (run.codegenError !== undefined) {
+    console.error(kleur.red(run.codegenError));
+    process.exit(2);
+  }
+  // Report the inferred layer before anything can fail, so even a run that
+  // stops at a missing directory explains where its settings came from.
+  if (verbose) {
+    if (run.codegenNotice !== undefined) {
+      logVerbose([`codegen: ${run.codegenNotice}`]);
+    }
+    if (run.codegen !== undefined) {
+      logVerbose(formatCodegenVerboseLines(run.codegen));
+    }
+  }
+
+  const resolved = run.config;
   const graphqlDirs = resolveDirs(resolved.graphqlDir);
   const srcDirs = resolveDirs(resolved.srcDir);
 
@@ -888,45 +1345,43 @@ export function mainFunction(
     process.exit(2);
   }
 
-  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches;
-  // plain paths pass through and are checked for existence just below.
-  const expandedGraphqlDirs = expandDirPatterns(graphqlDirs);
-  const expandedSrcDirs = expandDirPatterns(srcDirs);
-  const emptyPatterns = [
-    ...expandedGraphqlDirs.unmatched,
-    ...expandedSrcDirs.unmatched,
-  ];
-  if (emptyPatterns.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directory patterns match no directories: ${emptyPatterns.join(', ')}.`,
-      ),
-    );
+  // Turn any glob (e.g. `packages/*/graphql`) into the directories it matches,
+  // and check that what is left is on disk. A configured path that is not ends
+  // the run; a derived one is dropped with a warning (see resolveScanDirs).
+  const scanDirs = resolveScanDirs(graphqlDirs, srcDirs, {
+    graphqlDir: codegenSource(run, 'graphqlDir'),
+    srcDir: codegenSource(run, 'srcDir'),
+  });
+  if (scanDirs.error !== undefined) {
+    console.error(kleur.red(scanDirs.error));
     process.exit(2);
   }
-
-  const missingDirs = [
-    ...expandedGraphqlDirs.dirs,
-    ...expandedSrcDirs.dirs,
-  ].filter((dir) => !directoryExists(dir));
-  if (missingDirs.length > 0) {
-    console.error(
-      kleur.red(
-        `These configured directories do not exist: ${missingDirs.join(', ')}.`,
-      ),
-    );
-    process.exit(2);
-  }
+  // Collected here and emitted with the scan's own warnings further down, so
+  // every advisory takes the same route to stderr, ::warning and the JSON.
+  const configWarnings = [...scanDirs.warnings];
 
   // Optional and off unless configured: a path to a local SDL file.
   const schemaFile =
     typeof resolved.schemaFile === 'string' ? resolved.schemaFile.trim() : '';
 
-  // All directories exist; carry the expanded lists forward.
+  // The gate decides what is reported and therefore the exit code, so a value
+  // outside the three levels stops the run instead of quietly gating on
+  // nothing. The CLI rejects its own bad values; this catches the config file.
+  const minConfidence = resolved.minConfidence;
+  if (minConfidence !== undefined && !isConfidenceLevel(minConfidence)) {
+    console.error(
+      kleur.red(
+        `Invalid minConfidence: ${String(minConfidence)}. Expected one of ${CONFIDENCE_LEVELS.join(', ')}.`,
+      ),
+    );
+    process.exit(2);
+  }
+
+  // Every remaining directory exists; carry the expanded lists forward.
   const config: GqlPruneConfig = {
     ...resolved,
-    graphqlDir: expandedGraphqlDirs.dirs,
-    srcDir: expandedSrcDirs.dirs,
+    graphqlDir: scanDirs.graphqlDir,
+    srcDir: scanDirs.srcDir,
     schemaFile: schemaFile === '' ? undefined : schemaFile,
   };
 
@@ -942,30 +1397,34 @@ export function mainFunction(
       }),
     );
     logVerbose([
-      ...formatExpandedDirLines(
-        'graphqlDir',
-        graphqlDirs,
-        expandedGraphqlDirs.dirs,
-      ),
-      ...formatExpandedDirLines('srcDir', srcDirs, expandedSrcDirs.dirs),
+      ...formatExpandedDirLines('graphqlDir', graphqlDirs, scanDirs.graphqlDir),
+      ...formatExpandedDirLines('srcDir', srcDirs, scanDirs.srcDir),
     ]);
   }
 
   // Build the schema here rather than inside the scan: a schema the user asked
   // for but that cannot be read or parsed is a broken run (exit 2), like a
-  // missing directory, not a silently skipped check.
+  // missing directory, not a silently skipped check. A schema derived from a
+  // codegen config is the opposite case: the user never asked for the check, so
+  // it is skipped with a warning and the scan continues.
   let schema: GraphQLSchema | undefined;
   if (schemaFile !== '') {
+    const derivedSchema = codegenSource(run, 'schemaFile');
     try {
       schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
     } catch (e) {
-      console.error(
-        kleur.red(
-          `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
-        ),
+      if (derivedSchema === undefined) {
+        console.error(
+          kleur.red(
+            `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
+          ),
+        );
+        console.error(e);
+        process.exit(2);
+      }
+      configWarnings.push(
+        formatDerivedSchemaWarning(derivedSchema, schemaFile),
       );
-      console.error(e);
-      process.exit(2);
     }
   }
 
@@ -974,14 +1433,27 @@ export function mainFunction(
     gqlFileCount,
     sourceFileCount,
     operationCount,
-    unusedOperations,
-    unusedFragments,
-    orphanedFiles,
+    inlineDocumentCount,
     deprecatedUsages,
-    unusedFieldCandidates,
     duplicateWarnings,
     generatedWarnings,
   } = result;
+  // The gate decides what is reported, and reporting is what sets the exit
+  // code: a CI job can fail on high-confidence findings alone while a local run
+  // still reviews the rest. Without it every finding is reported, as before.
+  const unusedOperations = filterByConfidence(
+    result.unusedOperations,
+    minConfidence,
+  );
+  const unusedFragments = filterByConfidence(
+    result.unusedFragments,
+    minConfidence,
+  );
+  const orphanedFiles = filterByConfidence(result.orphanedFiles, minConfidence);
+  const unusedFieldCandidates = filterByConfidence(
+    result.unusedFieldCandidates,
+    minConfidence,
+  );
   // Absent (not empty) in the JSON when the check is off, so a consumer can
   // tell "nothing found" from "never looked".
   const fieldCandidates = resolveCheckFields(config)
@@ -989,13 +1461,23 @@ export function mainFunction(
     : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
-  const advisoryWarnings = [...duplicateWarnings, ...generatedWarnings];
+  const advisoryWarnings = [
+    ...configWarnings,
+    ...duplicateWarnings,
+    ...generatedWarnings,
+  ];
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
+    // From the unfiltered scan, so a gated run still explains what it hid.
+    logVerbose(formatVerboseConfidenceLines(result));
   }
 
   if (!json) {
+    // Never leave an inferred setting invisible: name the file it came from.
+    if (run.codegen !== undefined) {
+      console.log(kleur.dim(formatCodegenInfoLine(run.codegen)));
+    }
     console.log(
       `Found ${kleur.yellow(gqlFileCount.toString())} GraphQL files.`,
     );
@@ -1005,6 +1487,11 @@ export function mainFunction(
     console.log(
       `Found ${kleur.yellow(sourceFileCount.toString())} source files.`,
     );
+    if (result.inline) {
+      console.log(
+        `Found ${kleur.yellow(inlineDocumentCount.toString())} inline GraphQL documents.`,
+      );
+    }
   }
 
   // Warn when a single file references most operations (e.g. un-excluded codegen

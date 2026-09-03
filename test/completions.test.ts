@@ -119,6 +119,14 @@ describe('completionScript registration', () => {
     expect(completionScript('fish')).not.toContain('-l fields -r');
   });
 
+  it('offers --inline as a switch in every shell', () => {
+    // Boolean like --fields, so it never asks the shell for a value.
+    expect(completionScript('bash')).toContain('--inline');
+    expect(completionScript('zsh')).toContain('(--inline)--inline[');
+    expect(completionScript('fish')).toContain('-l inline');
+    expect(completionScript('fish')).not.toContain('-l inline -r');
+  });
+
   it('completes nothing for value flags without a path value', () => {
     // --pattern takes a free-form template; the shell should not offer files.
     const bash = completionScript('bash');

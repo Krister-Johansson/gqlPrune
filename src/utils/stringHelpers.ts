@@ -10,3 +10,13 @@
 export function capitalizeFirstLetter(string: string): string {
   return string.charAt(0).toUpperCase() + string.slice(1);
 }
+
+/**
+ * Escapes a string so it can be used as a literal inside a regular expression.
+ *
+ * @param {string} value - The literal text to escape.
+ * @returns {string} - The escaped text.
+ */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
