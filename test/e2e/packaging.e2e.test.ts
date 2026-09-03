@@ -39,6 +39,19 @@ let binPath: string;
 // too short for them.
 jest.setTimeout(300_000);
 
+/** One packed package as `npm pack --json` describes it. */
+type PackEntry = { filename: string; files: { path: string }[] };
+
+/**
+ * Reads the entries out of `npm pack --json`. npm 10 prints them as an array;
+ * npm 11 and later key them by package name. Accepting both keeps the spec
+ * runnable on a developer's npm as well as on the runner's.
+ */
+function packEntries(json: string): PackEntry[] {
+  const parsed = JSON.parse(json) as PackEntry[] | Record<string, PackEntry>;
+  return Array.isArray(parsed) ? parsed : Object.values(parsed);
+}
+
 beforeAll(() => {
   workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gqlprune-pack-'));
   installDir = path.join(workDir, 'consumer');
@@ -54,10 +67,10 @@ beforeAll(() => {
     }),
   );
 
-  const packed = JSON.parse(
+  const [packed] = packEntries(
     npmSync(['pack', '--json', '--pack-destination', workDir], repoRoot),
-  ) as { filename: string }[];
-  const tarball = path.join(workDir, packed[0].filename);
+  );
+  const tarball = path.join(workDir, packed.filename);
 
   npmSync(
     [
@@ -93,9 +106,9 @@ function runInstalled(args: string[]) {
 
 describe('the published tarball', () => {
   it('ships dist and no test fixtures', () => {
-    const [dryRun] = JSON.parse(
+    const [dryRun] = packEntries(
       npmSync(['pack', '--dry-run', '--json'], repoRoot),
-    ) as { files: { path: string }[] }[];
+    );
     const files = dryRun.files.map((file) => toPosix(file.path));
 
     expect(files).toContain('dist/cli.js');
