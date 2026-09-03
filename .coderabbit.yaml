@@ -1,4 +1,25 @@
-# CodeRabbit — pulls the shared configuration for all Krister-Johansson repos.
-# Shared config: https://github.com/Krister-Johansson/shared-configs/blob/main/.coderabbit.yaml
-remote_config:
-  url: "https://raw.githubusercontent.com/Krister-Johansson/shared-configs/main/.coderabbit.yaml"
+# CodeRabbit review settings, owned here. Until 2026-09-03 this file was a
+# remote_config pointer into the shared-configs repo; that repo is being
+# retired, so the settings live in this repo like the workflows do.
+#
+# The aim is to tame review volume so a burst of small PRs does not hit the
+# hourly review rate limit. Schema and docs: https://docs.coderabbit.ai/configuration
+reviews:
+  profile: chill
+  # A quieter bot means fewer GitHub notification emails: no "currently
+  # reviewing" status comments and no walkthrough poems. The review findings
+  # themselves are unaffected.
+  review_status: false
+  in_progress_fortune: false
+  poem: false
+  auto_review:
+    enabled: true
+    # One auto review when the PR opens. Pushes that address review comments
+    # do NOT re-trigger a review. When the fixes are ready for a re-check,
+    # request one explicitly by commenting "@coderabbitai review".
+    auto_incremental_review: false
+    # Machine-generated PRs with nothing meaningful to review.
+    ignore_title_keywords:
+      - 'chore(main): release'
+    ignore_usernames:
+      - 'dependabot[bot]'
