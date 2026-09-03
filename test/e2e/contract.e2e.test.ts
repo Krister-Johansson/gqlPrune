@@ -269,10 +269,14 @@ describe('the exit-code matrix', () => {
     },
   );
 
-  it('exits 2 on an invalid minConfidence in the config file', async () => {
-    const result = await runCli([], { cwd: fixtureProject('bad-config') });
+  it.each([[[]], [['--json']]])(
+    'exits 2 on an invalid minConfidence in the config file, with %j',
+    async (args) => {
+      const result = await runCli(args, { cwd: fixtureProject('bad-config') });
 
-    expect(result.code).toBe(2);
-    expect(result.stdout).toBe('');
-  });
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('Invalid minConfidence');
+      expect(result.stdout).toBe('');
+    },
+  );
 });
