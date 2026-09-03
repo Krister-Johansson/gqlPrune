@@ -1,0 +1,14 @@
+# Used: src/useReport.ts calls useGetKeptReportQuery.
+query GetKeptReport {
+  report {
+    id
+  }
+}
+
+# Dead: nothing references useGetLostReportQuery.
+query GetLostReport {
+  report {
+    id
+    title
+  }
+}

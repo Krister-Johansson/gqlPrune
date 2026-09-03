@@ -1,0 +1,8 @@
+# Dead, and named nowhere in src/: a high-confidence finding, and an orphaned
+# file that inherits that grade.
+query GetCombinedGhost {
+  ghost {
+    id
+    seenAt
+  }
+}

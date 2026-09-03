@@ -1,0 +1,10 @@
+# FIXTURE codegen config that points at the decoy directory. gqlPrune.config.yaml
+# sits beside it and names the real directories, so nothing here may take
+# effect: if the decoy operation ever shows up in a report, the precedence rule
+# has broken.
+schema: ./schema.graphql
+documents: ./decoy/**/*.gql
+generates:
+  ./decoy/generated/graphql.ts:
+    plugins:
+      - typescript-apollo-angular

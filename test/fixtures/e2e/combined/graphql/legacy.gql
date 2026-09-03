@@ -1,0 +1,9 @@
+# Dead, but src/useUser.ts still names it in a telemetry string, so it grades
+# low, and so does the orphaned file it sits alone in. --min-confidence medium
+# is what hides both.
+query GetCombinedLegacyExport {
+  legacyExport {
+    id
+    generatedAt
+  }
+}

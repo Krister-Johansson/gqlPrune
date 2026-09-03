@@ -1,0 +1,6 @@
+# FIXTURE gqlPrune config carrying an invalid minConfidence. The directories
+# point at the clean project next door so the run gets as far as validating this
+# value instead of stopping on a missing directory first.
+graphqlDir: ../clean/graphql
+srcDir: ../clean/src
+minConfidence: bogus

@@ -5,7 +5,7 @@
 // process, so everything here deals in paths, argv, environment and exit codes
 // rather than module mocks.
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -17,6 +17,18 @@ export const cliPath = path.join(repoRoot, 'dist', 'cli.js');
 
 /** The static project tree every scan case runs against. */
 export const fixtureRoot = path.join(repoRoot, 'test', 'fixtures', 'e2e');
+
+/**
+ * The absolute path of one fixture sub-project.
+ *
+ * Several scenarios need a working directory of their own, because both
+ * `gqlPrune.config.yaml` and the GraphQL Code Generator config are looked up in
+ * the process's cwd. Running such a case from the fixture root would let one
+ * project's config decide another project's scan.
+ */
+export function fixtureProject(...segments: string[]): string {
+  return path.join(fixtureRoot, ...segments);
+}
 
 /**
  * Fails with an actionable message when the CLI has not been built. Without
@@ -102,6 +114,134 @@ export function runCli(
 ): Promise<CliResult> {
   assertCliBuilt();
   return runProcess(process.execPath, [cliPath, ...args], options);
+}
+
+/** How long stdout must stay quiet before the next prompt answer is sent. */
+const PROMPT_SETTLE_MS = 150;
+
+/**
+ * Runs the built CLI and answers its interactive prompts, for `gqlprune init`.
+ *
+ * Piping the answers in one go does not work: inquirer treats the closed stdin
+ * as an aborted prompt and the run ends with "Aborted." before it has asked
+ * anything. So the stream is kept open and each answer is written only once
+ * stdout has gone quiet, which is inquirer having finished rendering the next
+ * question. That is also why the answers cannot simply be timed: a slow runner
+ * would receive them before the prompt exists.
+ *
+ * @param {string[]} args - Arguments for the CLI, e.g. `['init']`.
+ * @param {object} options - The working directory and the answers, in order.
+ * @returns {Promise<CliResult>} - Exit code and captured streams.
+ */
+export function runCliInteractive(
+  args: string[],
+  options: { cwd: string; answers: string[] },
+): Promise<CliResult> {
+  assertCliBuilt();
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd: options.cwd,
+      env: { ...process.env, NO_COLOR: '1', NO_UPDATE_NOTIFIER: '1' },
+    });
+    const pending = [...options.answers];
+    let stdout = '';
+    let stderr = '';
+    let settle: NodeJS.Timeout | undefined;
+
+    const answerWhenQuiet = (): void => {
+      if (settle !== undefined) clearTimeout(settle);
+      settle = setTimeout(() => {
+        const answer = pending.shift();
+        if (answer !== undefined) child.stdin.write(`${answer}\n`);
+      }, PROMPT_SETTLE_MS);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      answerWhenQuiet();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (settle !== undefined) clearTimeout(settle);
+      resolve({ code: code ?? 0, stdout, stderr });
+    });
+  });
+}
+
+/**
+ * The `--json` report, typed as the suite reads it. Deliberately structural: the
+ * contract spec pins the real shape, and these fields are what the scan cases
+ * query key by key.
+ */
+export type JsonReport = {
+  unusedOperations: {
+    name: string;
+    type: string;
+    file: string;
+    line?: number;
+    confidence: string;
+    reason: string;
+  }[];
+  unusedFragments: {
+    name: string;
+    file: string;
+    line?: number;
+    confidence: string;
+    reason: string;
+  }[];
+  orphanedFiles: { file: string; confidence: string; reason: string }[];
+  deprecatedUsages: { message: string; file: string; line?: number }[];
+  unusedFields?: {
+    field: string;
+    locations: { file: string; line?: number }[];
+    confidence: string;
+    reason: string;
+  }[];
+  warnings: string[];
+  summary: Record<string, number> & {
+    byConfidence: Record<string, number>;
+  };
+};
+
+/** Parses stdout as the JSON report, failing loudly on anything else. */
+export function parseReport(result: CliResult): JsonReport {
+  try {
+    return JSON.parse(result.stdout) as JsonReport;
+  } catch {
+    throw new Error(
+      `Expected stdout to be a JSON document, got:\n${result.stdout}`,
+    );
+  }
+}
+
+/**
+ * Asserts the whole of stdout is the JSON document and nothing else. A stray
+ * info line or warning ahead of it would break every consumer piping this into
+ * jq, so this is checked wherever `--json` is exercised.
+ */
+export function expectJsonOnlyStdout(result: CliResult): void {
+  const trimmed = result.stdout.trimEnd();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    throw new Error(
+      `Expected stdout to hold only JSON, got:\n${result.stdout}`,
+    );
+  }
+  parseReport(result);
+}
+
+/** The 1-based line a fixture file's first match for `needle` sits on. */
+export function lineOf(filePath: string, needle: string): number {
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+  const index = lines.findIndex((line) => line.includes(needle));
+  if (index === -1) {
+    throw new Error(
+      `${filePath} contains no line with ${JSON.stringify(needle)}`,
+    );
+  }
+  return index + 1;
 }
 
 /**

@@ -1,0 +1,26 @@
+# The three dead operations, one per confidence grade. Nothing imports this
+# file, so it is also reported orphaned, and an orphaned file inherits the
+# weakest grade among its definitions: "low", from GetConfidenceLow.
+
+# high: this name appears in no scanned source file at all.
+query GetConfidenceHigh {
+  catalogItem(id: "1") {
+    id
+  }
+}
+
+# medium: this name appears only in src/generated/graphql.ts, which the scan
+# flags as a suspected generated file.
+query GetConfidenceMedium {
+  catalogItem(id: "2") {
+    id
+  }
+}
+
+# low: this name appears in ordinary source (src/CatalogPage.tsx), just never
+# through a usage pattern.
+query GetConfidenceLow {
+  catalogItem(id: "3") {
+    id
+  }
+}

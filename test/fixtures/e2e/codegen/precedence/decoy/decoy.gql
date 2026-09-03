@@ -1,0 +1,7 @@
+# DECOY. This directory is only ever named by codegen.yml, which loses to
+# gqlPrune.config.yaml, so this operation must never appear in a report.
+query GetDecoyThing {
+  thing {
+    id
+  }
+}

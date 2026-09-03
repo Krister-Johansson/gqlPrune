@@ -1,0 +1,10 @@
+# FIXTURE codegen config whose schema is written to disk by the build and is
+# therefore absent from a fresh checkout. gqlPrune derived that path rather than
+# being told it, so it must skip the deprecated-selection check with a warning
+# and let the scan finish, not end the run.
+schema: ./schema-from-build.graphql
+documents: ./src/**/*.gql
+generates:
+  ./src/generated/graphql.ts:
+    plugins:
+      - typescript-react-apollo

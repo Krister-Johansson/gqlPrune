@@ -492,9 +492,29 @@ describe('configGenerator', () => {
       await generateConfig();
 
       const out = logSpy.mock.calls.flat().join('\n');
-      expect(out).toContain('42');
-      expect(out).toContain('12');
-      expect(out).toContain('5');
+      expect(out).toContain(
+        '✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.',
+      );
+    });
+
+    it('writes the preview in the singular when it found one of each', async () => {
+      mockFsTree({ '.': [] }, new Set(['./graphql', './src']));
+      mockInputAnswers('./graphql', './src');
+      mockedScan.mockReturnValue({
+        gqlFileCount: 1,
+        sourceFileCount: 1,
+        operationCount: 1,
+        unusedOperations: [{ name: 'X', type: 'query', filePath: 'a.gql' }],
+        unusedFragments: [],
+        generatedWarnings: [],
+        generatedFiles: [],
+      });
+
+      await generateConfig();
+
+      expect(logSpy.mock.calls.flat().join('\n')).toContain(
+        '✓ Found 1 operation in 1 file; 1 looks unused. Run "gqlprune" to see it.',
+      );
     });
 
     it('pre-fills the exclude prompt with a detected generated file and warns', async () => {

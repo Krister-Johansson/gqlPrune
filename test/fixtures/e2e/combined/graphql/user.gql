@@ -1,0 +1,14 @@
+# Used: src/useUser.ts calls useGetCombinedUserQuery.
+#
+# It selects two fields on purpose. legacyEmail is @deprecated in the schema, so
+# it turns up in the advisory deprecated section. internalNotes is named nowhere
+# in src/, so --fields lists it as a candidate; do not write that name into any
+# source file here, not even in a comment.
+query GetCombinedUser($id: ID!) {
+  user(id: $id) {
+    id
+    name
+    legacyEmail
+    internalNotes
+  }
+}

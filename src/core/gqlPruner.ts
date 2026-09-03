@@ -43,6 +43,7 @@ import {
   loadCodegenConfig,
 } from '../utils/codegen.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
+import { pluralize } from '../utils/stringHelpers.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
@@ -285,9 +286,11 @@ function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
     );
   });
   console.log(kleur.blue('---------------------------------'));
+  const count = unusedOperations.length;
   console.log(
     kleur.red(
-      `Found ${unusedOperations.length} unused GraphQL operations. Please remove them.`,
+      `Found ${count} ${pluralize(count, 'unused GraphQL operation')}. ` +
+        `Please remove ${pluralize(count, 'it', 'them')}.`,
     ),
   );
 }
@@ -309,9 +312,11 @@ function reportUnusedFragments(unusedFragments: GradedFragment[]): void {
     );
   });
   console.log(kleur.blue('--------------------------------'));
+  const count = unusedFragments.length;
   console.log(
     kleur.red(
-      `Found ${unusedFragments.length} unused GraphQL fragments. Please remove them.`,
+      `Found ${count} ${pluralize(count, 'unused GraphQL fragment')}. ` +
+        `Please remove ${pluralize(count, 'it', 'them')}.`,
     ),
   );
 }
@@ -353,17 +358,22 @@ function reportUnusedFieldCandidates(candidates: GradedField[]): void {
     });
   });
   console.log(kleur.blue('-------------------------------'));
+  const count = candidates.length;
   console.log(
     kleur.yellow(
-      `Found ${candidates.length} field candidates whose name appears nowhere in the source.`,
+      `Found ${count} ${pluralize(count, 'field candidate')} whose ` +
+        `${pluralize(count, 'name appears', 'names appear')} nowhere in the ` +
+        'source.',
     ),
   );
+  // Only what is specific to fields. The closing reminder covers the rest, so
+  // saying "verify before deleting" here as well would print it twice.
   console.log(
     kleur.dim(
-      'These are string-search candidates, not proof: a field read through a ' +
-        'computed key, spread into props, or read by another repository looks ' +
-        'the same, and a field with a common name never reaches this list. ' +
-        'Verify each one before trimming it.',
+      'A field is matched by name alone, so one read through a computed key, ' +
+        'spread into props, or used by another repository looks the same as ' +
+        'one nothing reads. A field with a common name never reaches this ' +
+        'list at all.',
     ),
   );
 }
@@ -377,9 +387,13 @@ function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
     ),
   );
   console.log(kleur.blue('------------------------------'));
+  const count = orphanedFiles.length;
+  const them = pluralize(count, 'it', 'them');
   console.log(
     kleur.red(
-      `Found ${orphanedFiles.length} orphaned GraphQL files. Every definition in them is unused and no document imports them, so they can likely be deleted.`,
+      `Found ${count} ${pluralize(count, 'orphaned GraphQL file')}. Every ` +
+        `definition in ${them} is unused and no document imports ${them}, so ` +
+        `${pluralize(count, 'it', 'they')} can likely be deleted.`,
     ),
   );
 }
@@ -404,7 +418,9 @@ function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
   const count = deprecatedUsages.length;
   console.log(
     kleur.yellow(
-      `Found ${count} ${count === 1 ? 'selection' : 'selections'} of deprecated schema fields or enum values. They are advisory and do not affect the exit code.`,
+      `Found ${count} ${pluralize(count, 'selection')} of deprecated schema ` +
+        `fields or enum values. ${pluralize(count, 'It is', 'They are')} ` +
+        `advisory and ${pluralize(count, 'does', 'do')} not affect the exit code.`,
     ),
   );
 }
@@ -1473,23 +1489,33 @@ export function mainFunction(
     logVerbose(formatVerboseConfidenceLines(result));
   }
 
-  if (!json) {
-    // Never leave an inferred setting invisible: name the file it came from.
-    if (run.codegen !== undefined) {
-      console.log(kleur.dim(formatCodegenInfoLine(run.codegen)));
+  // Never leave an inferred setting invisible: name the file it came from. In
+  // --json mode stdout is the report and nothing else, so the notice goes to
+  // stderr there, alongside the verbose lines and the advisory warnings. It is
+  // provenance rather than a problem, so it stays out of the JSON `warnings`
+  // array, and out of the ::warning annotations under --annotate.
+  if (run.codegen !== undefined) {
+    const notice = kleur.dim(formatCodegenInfoLine(run.codegen));
+    if (json) {
+      console.error(notice);
+    } else {
+      console.log(notice);
     }
+  }
+
+  if (!json) {
     console.log(
-      `Found ${kleur.yellow(gqlFileCount.toString())} GraphQL files.`,
+      `Found ${kleur.yellow(gqlFileCount.toString())} ${pluralize(gqlFileCount, 'GraphQL file')}.`,
     );
     console.log(
-      `Found ${kleur.yellow(operationCount.toString())} GraphQL operations.`,
+      `Found ${kleur.yellow(operationCount.toString())} ${pluralize(operationCount, 'GraphQL operation')}.`,
     );
     console.log(
-      `Found ${kleur.yellow(sourceFileCount.toString())} source files.`,
+      `Found ${kleur.yellow(sourceFileCount.toString())} ${pluralize(sourceFileCount, 'source file')}.`,
     );
     if (result.inline) {
       console.log(
-        `Found ${kleur.yellow(inlineDocumentCount.toString())} inline GraphQL documents.`,
+        `Found ${kleur.yellow(inlineDocumentCount.toString())} ${pluralize(inlineDocumentCount, 'inline GraphQL document')}.`,
       );
     }
   }
@@ -1568,17 +1594,23 @@ export function mainFunction(
   if (deprecatedUsages.length > 0) {
     reportDeprecatedUsages(deprecatedUsages);
   }
-  // Advisory too, and last of the sections. It carries its own caveat instead
-  // of the closing reminder, which only the findings path prints.
+  // Advisory too, and last of the sections. Its caveat covers only what is
+  // specific to fields; the closing reminder below qualifies it like every
+  // other candidate section.
   if (unusedFieldCandidates.length > 0) {
     reportUnusedFieldCandidates(unusedFieldCandidates);
   }
 
+  // Closes any report that named a candidate: all of it comes from a string
+  // search. Field candidates count, which is why this is not tied to the exit
+  // code; deprecated selections do not, because the schema proves those. The
+  // all-clear path has nothing to qualify, so it stays silent.
+  if (!nothingUnused || unusedFieldCandidates.length > 0) {
+    console.log(kleur.dim(CANDIDATE_REMINDER));
+  }
+
   // Use exitCode (not process.exit) so all report output flushes before exit.
   if (!nothingUnused) {
-    // Closes a report that named something: everything above is a candidate.
-    // The all-clear path has nothing to qualify, so it stays silent.
-    console.log(kleur.dim(CANDIDATE_REMINDER));
     process.exitCode = 1;
   }
 }

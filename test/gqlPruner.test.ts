@@ -1870,7 +1870,52 @@ describe('gqlPruner', () => {
       mainFunction();
       expect(process.exitCode).toBe(1);
       expect(logged()).toContain('Unused');
-      expect(logged()).toContain('unused GraphQL operations');
+      // One finding reads as one finding, all the way through the sentence.
+      expect(logged()).toContain(
+        'Found 1 unused GraphQL operation. Please remove it.',
+      );
+    });
+
+    it('counts every section footer in the plural for more than one', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'graphqlDir: ./g\nsrcDir: ./s\n',
+      );
+      mockedDirExists.mockReturnValue(true);
+      mockedFind
+        .mockReturnValueOnce(['g/dead.gql', 'g/gone.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract
+        .mockReturnValueOnce(
+          entitiesOf(
+            [{ name: 'Dead', type: 'query', filePath: 'g/dead.gql' }],
+            'g/dead.gql',
+          ),
+        )
+        .mockReturnValueOnce(
+          entitiesOf(
+            [{ name: 'Gone', type: 'query', filePath: 'g/gone.gql' }],
+            'g/gone.gql',
+          ),
+        );
+      mockedReadSources.mockReturnValue([{ file: 'App.tsx', content: '' }]);
+      mockedUnusedFragments.mockReturnValueOnce([
+        { name: 'DeadFragment', filePath: 'g/dead.gql' },
+        { name: 'GoneFragment', filePath: 'g/gone.gql' },
+      ]);
+
+      mainFunction();
+
+      const out = logged();
+      expect(out).toContain(
+        'Found 2 unused GraphQL operations. Please remove them.',
+      );
+      expect(out).toContain(
+        'Found 2 unused GraphQL fragments. Please remove them.',
+      );
+      expect(out).toContain(
+        'Found 2 orphaned GraphQL files. Every definition in them is unused ' +
+          'and no document imports them, so they can likely be deleted.',
+      );
     });
 
     it('does not exit and reports success when nothing is unused', () => {
@@ -1910,7 +1955,9 @@ describe('gqlPruner', () => {
       mainFunction();
       expect(process.exitCode).toBe(1);
       expect(logged()).toContain('DeadFragment');
-      expect(logged()).toContain('unused GraphQL fragments');
+      expect(logged()).toContain(
+        'Found 1 unused GraphQL fragment. Please remove it.',
+      );
       expect(logged()).toContain(CANDIDATE_REMINDER);
     });
 
@@ -1978,6 +2025,10 @@ describe('gqlPruner', () => {
       expect(process.exitCode).toBe(1);
       expect(output).toContain('Orphaned GraphQL Files');
       expect(output).toContain('g/dead.gql');
+      expect(output).toContain(
+        'Found 1 orphaned GraphQL file. Every definition in it is unused and ' +
+          'no document imports it, so it can likely be deleted.',
+      );
       expect(output.indexOf('Unused GraphQL Operations')).toBeLessThan(
         output.indexOf('Orphaned GraphQL Files'),
       );
@@ -2446,7 +2497,18 @@ describe('gqlPruner', () => {
         expect(out).toContain('Unused Field Candidates');
         expect(out).toContain('avatarUrl');
         expect(out).toContain('a.gql:2');
-        expect(out).toContain('not proof');
+        expect(out).toContain(
+          'Found 1 field candidate whose name appears nowhere in the source.',
+        );
+        // The caveat says only what is specific to fields; the closing reminder
+        // below it carries the shared "verify before deleting" message.
+        expect(out).toContain(
+          'A field is matched by name alone, so one read through a computed ' +
+            'key, spread into props, or used by another repository looks the ' +
+            'same as one nothing reads. A field with a common name never ' +
+            'reaches this list at all.',
+        );
+        expect(out).not.toContain('before trimming it');
       });
 
       it('does not change the exit code', () => {
@@ -2457,15 +2519,51 @@ describe('gqlPruner', () => {
         expect(process.exitCode).toBe(0);
       });
 
-      it('leaves the closing reminder off the all-clear path', () => {
+      it('closes with the shared reminder even on the all-clear path', () => {
         setUpScan(enabled);
 
         mainFunction();
 
-        // The section carries its own caveat, so the reminder that accompanies
-        // findings would only repeat it here.
+        // The section lists candidates, so the line that qualifies candidates
+        // belongs under it, whether or not an operation was reported too.
         expect(logged()).toContain('Unused Field Candidates');
-        expect(logged()).not.toContain(CANDIDATE_REMINDER);
+        expect(logged()).toContain(CANDIDATE_REMINDER);
+        expect(process.exitCode).toBe(0);
+      });
+
+      it('prints the reminder once when operations were reported too', () => {
+        (fs.readFileSync as jest.Mock).mockReturnValue(enabled);
+        mockedDirExists.mockReturnValue(true);
+        mockedFind
+          .mockReturnValueOnce(['a.gql', 'dead.gql'])
+          .mockReturnValueOnce(['App.tsx']);
+        mockedExtract
+          .mockReturnValueOnce(
+            entitiesWithDocument(
+              'a.gql',
+              'query GetUser {\n  avatarUrl\n  id\n}',
+              [{ name: 'GetUser', type: 'query', filePath: 'a.gql', line: 1 }],
+            ),
+          )
+          .mockReturnValueOnce(
+            entitiesOf(
+              [{ name: 'Dead', type: 'query', filePath: 'dead.gql' }],
+              'dead.gql',
+            ),
+          );
+        mockedReadSources.mockReturnValue([
+          {
+            file: 'App.tsx',
+            content: 'const { id } = useGetUserQuery().data;',
+          },
+        ]);
+
+        mainFunction();
+
+        const lines = logSpy.mock.calls.flat().map(String);
+        expect(
+          lines.filter((line) => line.includes(CANDIDATE_REMINDER)),
+        ).toHaveLength(1);
       });
 
       it('prints after the orphaned files and before the closing reminder', () => {
@@ -2608,7 +2706,7 @@ describe('gqlPruner', () => {
 
         mainFunction();
 
-        expect(logged()).toContain('Found 1 inline GraphQL documents.');
+        expect(logged()).toContain('Found 1 inline GraphQL document.');
       });
 
       it('leaves the header alone when the pass is off', () => {
@@ -2798,7 +2896,10 @@ describe('gqlPruner', () => {
       expect(out).toContain('Deprecated Field Usage');
       expect(out).toContain('a.gql');
       expect(out).toContain('The field User.nickname is deprecated.');
-      expect(out).toContain('Found 1 selection of deprecated');
+      expect(out).toContain(
+        'Found 1 selection of deprecated schema fields or enum values. It is ' +
+          'advisory and does not affect the exit code.',
+      );
       expect(out).toContain('No unused');
     });
 
@@ -2856,7 +2957,10 @@ describe('gqlPruner', () => {
 
       const out = logged();
       expect(out).toContain('The field User.legacyName is deprecated.');
-      expect(out).toContain('Found 2 selections of deprecated');
+      expect(out).toContain(
+        'Found 2 selections of deprecated schema fields or enum values. They ' +
+          'are advisory and do not affect the exit code.',
+      );
     });
 
     it('prints no deprecated section when the schema flags nothing', () => {
@@ -2977,6 +3081,51 @@ describe('gqlPruner', () => {
         expect(logged()).toContain('Using settings derived from codegen.ts');
         expect(logged()).toContain('graphqlDir');
         expect(logged()).toContain('usagePatterns');
+      });
+
+      it('says so on stderr in --json mode, keeping stdout pure JSON', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction({ json: true });
+
+        const out = logged();
+        expect(out).not.toContain('Using settings derived from');
+        expect(() => JSON.parse(out)).not.toThrow();
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+          'Using settings derived from codegen.ts',
+        );
+      });
+
+      it('keeps the notice out of the JSON warnings array', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction({ json: true });
+
+        // The array is for things a consumer should act on. Where a setting
+        // came from is provenance, and belongs on the diagnostic stream.
+        expect(JSON.parse(logged()).warnings).toEqual([]);
+      });
+
+      it('does not dress the notice up as a ::warning under --annotate', () => {
+        mockProjectFiles({
+          'codegen.ts': CODEGEN_TS,
+          './schema.graphql': 'type Query { user: String }',
+        });
+        mockScannedProject();
+
+        mainFunction({ json: true, annotate: true });
+
+        const errs = errorSpy.mock.calls.flat().join('\n');
+        expect(errs).toContain('Using settings derived from codegen.ts');
+        expect(errs).not.toContain('::warning::Using settings derived');
       });
 
       it('lists every derived value under --verbose', () => {
