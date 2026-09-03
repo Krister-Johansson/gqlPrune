@@ -29,5 +29,7 @@ export function Dashboard() {
   // Reading every key the document above selects, so --fields has nothing to
   // say about this file: the document's own text is blanked out of the corpus,
   // and these reads are what keep the keys alive.
-  return dashboard ? `${dashboard.headline} ${dashboard.refreshedAt}` : null;
+  return dashboard
+    ? `${dashboard.id} ${dashboard.headline} ${dashboard.refreshedAt}`
+    : null;
 }

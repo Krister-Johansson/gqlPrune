@@ -253,10 +253,21 @@ describe('the exit-code matrix', () => {
 
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(message);
-    // A failed run prints nothing on stdout, so a --json consumer never has to
-    // tell an error apart from a report.
     expect(result.stdout).toBe('');
   });
+
+  // The same rows under --json: a failed run prints nothing on stdout there
+  // either, so a consumer never has to tell an error apart from a report.
+  it.each(usageFailures)(
+    'exits 2 on %s in --json mode, with an empty stdout',
+    async (_label, args, message) => {
+      const result = await runCli(['--json', ...args]);
+
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain(message);
+      expect(result.stdout).toBe('');
+    },
+  );
 
   it('exits 2 on an invalid minConfidence in the config file', async () => {
     const result = await runCli([], { cwd: fixtureProject('bad-config') });

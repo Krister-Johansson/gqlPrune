@@ -104,6 +104,18 @@ function runInstalled(args: string[]) {
   });
 }
 
+describe('packEntries', () => {
+  const entry = { filename: 'gqlprune-0.0.0.tgz', files: [] };
+
+  it('reads the array npm 10 prints', () => {
+    expect(packEntries(JSON.stringify([entry]))).toEqual([entry]);
+  });
+
+  it('reads the object keyed by package name that npm 11 and later print', () => {
+    expect(packEntries(JSON.stringify({ gqlprune: entry }))).toEqual([entry]);
+  });
+});
+
 describe('the published tarball', () => {
   it('ships dist and no test fixtures', () => {
     const [dryRun] = packEntries(
