@@ -10,6 +10,7 @@ reviews:
   # reviewing" status comments and no walkthrough poems. The review findings
   # themselves are unaffected.
   review_status: false
+  in_progress_fortune: false
   poem: false
   auto_review:
     enabled: true
