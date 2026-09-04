@@ -1237,12 +1237,20 @@ export function scanProject(
   ];
   // Parse every gql file once; operations and the fragment scan share the result.
   const gqlEntities = gqlFiles.map(extractGraphqlEntities);
+  const missingFrom = (file: string): string =>
+    `Its definitions are missing from this scan, so anything only ${file} ` +
+    'referenced may be reported unused.';
   for (const entities of gqlEntities) {
+    if (entities.readError !== undefined) {
+      readWarnings.push(
+        `Could not read ${entities.filePath}: ${entities.readError} ` +
+          missingFrom(entities.filePath),
+      );
+    }
     if (entities.parseError !== undefined) {
       readWarnings.push(
         `Could not parse ${entities.filePath}: ${entities.parseError} ` +
-          'Its definitions are missing from this scan, so anything only it ' +
-          'referenced may be reported unused.',
+          missingFrom(entities.filePath),
       );
     }
   }
@@ -1338,7 +1346,10 @@ export function scanProject(
 
   return {
     gqlFileCount: gqlFiles.length,
-    sourceFileCount: tsFiles.length,
+    // What was actually read, not what was found: if every discovered file
+    // fails to read, the corpus is empty and the zero-source warning has to
+    // fire, which counting the discovered paths would suppress.
+    sourceFileCount: rawSources.length,
     operationCount: operations.length,
     inline,
     inlineDocumentCount: extractions.reduce(

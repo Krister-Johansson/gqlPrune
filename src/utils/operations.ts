@@ -23,6 +23,8 @@ export type GraphqlFileEntities = {
    * only consumer of then looks unused.
    */
   parseError?: string;
+  /** Why the file could not be read, when it could not. See {@link parseError}. */
+  readError?: string;
   operations: OperationInfo[];
   fragments: FragmentInfo[];
   /** Names of fragments spread (directly or nested) by operations in the file. */
@@ -156,8 +158,26 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   // Imports are read off the raw text before parsing, so a document that other
   // files import still protects them when it fails to parse itself.
   let imports: string[] = [];
+  let content: string;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    // Unreadable is not unparseable: saying "could not parse" about a file
+    // permissions kept us out of would send the reader looking for a syntax
+    // error that is not there.
+    return {
+      filePath,
+      readError: error instanceof Error ? error.message : String(error),
+      operations: [],
+      fragments: [],
+      operationSpreads: [],
+      fragmentSpreads: [],
+      imports,
+      hasAnonymousOperation: false,
+      document: null,
+    };
+  }
+  try {
     imports = extractImports(content, filePath);
     // Naming the Source after the file makes every node's location carry the
     // path, so a selection or a validation error can be reported against the

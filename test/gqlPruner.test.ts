@@ -240,6 +240,32 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('a source file the scan cannot read', () => {
+    it('carries the reason through to stderr and the JSON warnings', () => {
+      // readSourceFiles reports through a callback rather than printing, so
+      // this is what proves the callback is wired all the way to the report.
+      // A source file dropped from the corpus makes whatever it uses look
+      // unused, which is the finding a reader has to be able to explain.
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['Locked.tsx']);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockImplementation(
+        (_files: string[], onReadError?: (message: string) => void) => {
+          onReadError?.('Skipped the source file Locked.tsx: EACCES.');
+          return [];
+        },
+      );
+
+      const result = scanProject({ graphqlDir: 'g', srcDir: 's' });
+
+      expect(result.readWarnings).toEqual([
+        'Skipped the source file Locked.tsx: EACCES.',
+      ]);
+      expect(result.sourceFileCount).toBe(0);
+    });
+  });
+
   describe('resolveUsagePatterns', () => {
     it('defaults when not provided', () => {
       expect(resolveUsagePatterns({ graphqlDir: 'g', srcDir: 's' })).toEqual(
@@ -462,8 +488,24 @@ describe('gqlPruner', () => {
 
   describe('resolveSourceExtensions', () => {
     it('falls back to the JavaScript and TypeScript module extensions', () => {
-      expect(resolveSourceExtensions()).toEqual(DEFAULT_SOURCE_EXTENSIONS);
-      expect(resolveSourceExtensions([])).toEqual(DEFAULT_SOURCE_EXTENSIONS);
+      // Written out rather than compared against the constant it returns: that
+      // comparison stays green if an extension is dropped, and a dropped
+      // extension means every operation used only from those files is reported
+      // unused.
+      const expected = [
+        '.ts',
+        '.tsx',
+        '.js',
+        '.jsx',
+        '.mjs',
+        '.cjs',
+        '.mts',
+        '.cts',
+      ];
+
+      expect(resolveSourceExtensions()).toEqual(expected);
+      expect(resolveSourceExtensions([])).toEqual(expected);
+      expect(DEFAULT_SOURCE_EXTENSIONS).toEqual(expected);
     });
 
     it('normalizes a configured list to lowercase with a leading dot', () => {
