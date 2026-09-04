@@ -8,6 +8,26 @@ import { wholeWordPattern } from './stringHelpers.js';
 
 const baseDir = path.resolve('./');
 
+/** Extensions a GraphQL document file can carry. */
+export const DOCUMENT_EXTENSIONS = ['.gql', '.graphql'];
+
+/**
+ * Source extensions scanned for usage when the config names none. The list
+ * covers the JavaScript and TypeScript module extensions; single-file
+ * component formats (`.vue`, `.svelte`, `.astro`) are not scanned, so a project
+ * using one has to name its extensions explicitly.
+ */
+export const DEFAULT_SOURCE_EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+];
+
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
 

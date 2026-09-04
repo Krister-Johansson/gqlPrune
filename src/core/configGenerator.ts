@@ -7,9 +7,12 @@ import input from '@inquirer/input';
 import * as yaml from 'js-yaml';
 import fs from 'fs';
 import * as path from 'path';
+import kleur from 'kleur';
 import {
   createExcludeMatcher,
+  DEFAULT_SOURCE_EXTENSIONS,
   directoryExists,
+  DOCUMENT_EXTENSIONS,
   findFilesWithExtension,
 } from '../utils/fileUtils.js';
 import {
@@ -206,10 +209,26 @@ export function codegenDirDetection(
   };
 }
 
+/**
+ * Reports a path the walk could not read. `init` suggests directories from what
+ * it finds, so a subtree it silently skipped becomes a wrong suggestion the
+ * user has no way to explain. The scan collects these as warnings; here the
+ * answer is needed in the moment, so they go straight to stderr.
+ */
+function warnOnReadError(message: string): void {
+  console.error(kleur.yellow(`⚠ ${message}`));
+}
+
 /** Suggests a `graphqlDir` from where the `.gql`/`.graphql` files live. */
 export function detectGraphqlDirs(): DirDetection {
   return detectFrom(
-    findFilesWithExtension('.', ['.gql', '.graphql'], isDetectExcluded),
+    findFilesWithExtension(
+      '.',
+      DOCUMENT_EXTENSIONS,
+      isDetectExcluded,
+      new Set(),
+      warnOnReadError,
+    ),
   );
 }
 
@@ -219,8 +238,10 @@ export function detectSrcDirs(): DirDetection {
   return detectFrom(
     findFilesWithExtension(
       '.',
-      ['.ts', '.tsx', '.js', '.jsx'],
+      DEFAULT_SOURCE_EXTENSIONS,
       isDetectExcluded,
+      new Set(),
+      warnOnReadError,
     ),
   );
 }

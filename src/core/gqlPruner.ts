@@ -15,6 +15,8 @@ import {
   ExcludeMatcher,
   expandDirPatterns,
   findFilesWithExtension,
+  DEFAULT_SOURCE_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
   findUsageMatch,
   isOperationUsedInContents,
   readSourceFiles,
@@ -107,17 +109,33 @@ export function createConfigExcludeMatcher(
  * list of directories, dropping empty/whitespace entries.
  */
 export function resolveDirs(value: string | string[] | undefined): string[] {
+  return resolveStringList(value);
+}
+
+/**
+ * Normalizes a config value that is a string or a list of strings into a
+ * trimmed list, dropping blanks.
+ *
+ * YAML can yield non-string entries (`- 8080`), which are dropped rather than
+ * crashing on `.trim()`. This is the lenient reading, right where a stray entry
+ * simply never matches anything; a setting where a stray entry would change the
+ * verdict validates instead of dropping.
+ *
+ * @param {string | string[] | undefined} value - The configured value.
+ * @returns {string[]} - The normalized entries.
+ */
+export function resolveStringList(
+  value: string | string[] | undefined,
+): string[] {
   const list = Array.isArray(value)
     ? value
     : value === undefined
       ? []
       : [value];
-  // YAML can yield non-string entries (e.g. `- 8080`); drop them rather than
-  // crash on `.trim()`.
   return (list as unknown[])
-    .filter((dir): dir is string => typeof dir === 'string')
-    .map((dir) => dir.trim())
-    .filter((dir) => dir.length > 0);
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 /**
@@ -238,26 +256,6 @@ export function applyInlineIdentifierUsage(
   });
 }
 
-/** Extensions a GraphQL document file can carry. */
-export const DOCUMENT_EXTENSIONS = ['.gql', '.graphql'];
-
-/**
- * Source extensions scanned for usage when the config names none. The list
- * covers the JavaScript and TypeScript module extensions; single-file
- * component formats (`.vue`, `.svelte`, `.astro`) are not scanned, so a project
- * using one has to name its extensions explicitly.
- */
-export const DEFAULT_SOURCE_EXTENSIONS = [
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.mts',
-  '.cts',
-];
-
 /**
  * The source extensions to scan, normalized to lowercase with a leading dot so
  * `vue`, `.VUE` and `.vue` all mean the same thing.
@@ -268,10 +266,10 @@ export const DEFAULT_SOURCE_EXTENSIONS = [
 export function resolveSourceExtensions(
   configured?: string | string[],
 ): string[] {
-  const list = resolveDirs(configured);
+  const list = resolveStringList(configured);
   if (list.length === 0) return DEFAULT_SOURCE_EXTENSIONS;
   return list.map((extension) => {
-    const lower = extension.trim().toLowerCase();
+    const lower = extension.toLowerCase();
     return lower.startsWith('.') ? lower : `.${lower}`;
   });
 }

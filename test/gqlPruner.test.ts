@@ -4,12 +4,12 @@
 import * as fs from 'fs';
 import { buildSchema, GraphQLSchema, parse, Source } from 'graphql';
 import * as fileUtils from '../src/utils/fileUtils';
+import { DEFAULT_SOURCE_EXTENSIONS } from '../src/utils/fileUtils';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import * as inline from '../src/utils/inline';
 import {
   buildJsonReport,
-  DEFAULT_SOURCE_EXTENSIONS,
   resolveSourceExtensions,
   CANDIDATE_REMINDER,
   createConfigExcludeMatcher,
