@@ -25,6 +25,11 @@ export type GraphqlFileEntities = {
   parseError?: string;
   /** Why the file could not be read, when it could not. See {@link parseError}. */
   readError?: string;
+  /**
+   * For an inline document, whether the surrounding code consumes it where it
+   * is written (`useQuery(gql`...`)`). Absent for a `.gql`/`.graphql` file.
+   */
+  consumed?: boolean;
   operations: OperationInfo[];
   fragments: FragmentInfo[];
   /** Names of fragments spread (directly or nested) by operations in the file. */

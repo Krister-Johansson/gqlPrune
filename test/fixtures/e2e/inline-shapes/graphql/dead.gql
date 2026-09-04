@@ -1,0 +1,8 @@
+# Dead: nothing references it. Present so the project always has one finding,
+# which keeps the exit code at 1 and makes "reported nothing" distinguishable
+# from "did not run".
+query ShapesControl {
+  control {
+    id
+  }
+}

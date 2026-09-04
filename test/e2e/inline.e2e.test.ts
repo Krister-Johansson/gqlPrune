@@ -165,6 +165,49 @@ describe('inline documents', () => {
   });
 });
 
+describe('inline document shapes', () => {
+  const SHAPES = [
+    '--graphql',
+    'inline-shapes/graphql',
+    '--src',
+    'inline-shapes/src',
+    '--inline',
+    '--json',
+  ];
+
+  it('reports only the documents nothing uses', async () => {
+    const result = await runCli(SHAPES);
+    const report = parseReport(result);
+
+    // ShapesConsumed is written straight into useQuery, so the statement that
+    // defines it uses it. ShapesAnnotated is reached through a constant whose
+    // type annotation runs over several lines. Both used to come back unused
+    // at high confidence, which is the verdict that gets live code deleted.
+    expect(report.unusedOperations.map((op) => op.name).sort()).toEqual([
+      'ShapesControl',
+      'ShapesOrphan',
+    ]);
+    expect(result.code).toBe(1);
+  });
+
+  it('grades the control finding, so the run really did scan', async () => {
+    const report = parseReport(await runCli(SHAPES));
+    const control = report.unusedOperations.find(
+      (op) => op.name === 'ShapesControl',
+    );
+
+    expect(control?.confidence).toBe('high');
+  });
+
+  it('never calls a source file orphaned, however dead its documents', async () => {
+    const report = parseReport(await runCli(SHAPES));
+
+    expect(report.orphanedFiles.map((orphan) => toPosix(orphan.file))).toEqual([
+      'inline-shapes/graphql/dead.gql',
+    ]);
+  });
+});
+
 describe('inline documents and .gql files together', () => {
   it('resolves spreads in both directions and finds nothing unused', async () => {
     const result = await runCli([...FRAGMENT_SCAN, '--inline', '--json']);
