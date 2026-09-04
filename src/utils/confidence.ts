@@ -11,7 +11,7 @@ import { FragmentInfo } from '../types/FragmentInfo.js';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { SourceFile } from './fileUtils.js';
-import { escapeRegExp } from './stringHelpers.js';
+import { wholeWordPattern } from './stringHelpers.js';
 
 /** Every grade, strongest first. Also the accepted `minConfidence` values. */
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;
@@ -63,7 +63,7 @@ export function gradeName(
   sources: SourceFile[],
   generatedFiles: ReadonlySet<string>,
 ): ConfidenceGrade {
-  const pattern = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+  const pattern = wholeWordPattern(name);
   const mentions = sources.filter((source) => pattern.test(source.content));
   if (mentions.length === 0) {
     return { confidence: 'high', reason: 'name-absent' };

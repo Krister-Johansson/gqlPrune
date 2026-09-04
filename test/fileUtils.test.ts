@@ -462,6 +462,23 @@ describe('fileUtils', () => {
     });
   });
 
+  describe('isOperationUsedInContents', () => {
+    it('does not count a pattern hiding inside a longer identifier', () => {
+      expect(
+        isOperationUsedInContents(['UserDocument'], ['GetUserDocument']),
+      ).toBe(false);
+    });
+
+    it('counts a pattern standing on its own', () => {
+      expect(
+        isOperationUsedInContents(
+          ['UserDocument'],
+          ['import { UserDocument } from "./gen";'],
+        ),
+      ).toBe(true);
+    });
+  });
+
   describe('directoryExists', () => {
     afterEach(() => {
       jest.resetAllMocks();

@@ -15,6 +15,7 @@ import {
   ExcludeMatcher,
   expandDirPatterns,
   findFilesWithExtension,
+  findUsageMatch,
   isOperationUsedInContents,
   readSourceFiles,
   SourceFile,
@@ -194,14 +195,10 @@ export function explainOperationUsage(
 ): OperationUsage[] {
   return operations.map((operation) => {
     const patterns = buildUsagePatterns(operation, usagePatterns);
-    for (const { file, content } of sources) {
-      for (const pattern of patterns) {
-        if (content.includes(pattern)) {
-          return { operation, patterns, match: { pattern, file } };
-        }
-      }
-    }
-    return { operation, patterns };
+    const match = findUsageMatch(patterns, sources);
+    return match === undefined
+      ? { operation, patterns }
+      : { operation, patterns, match };
   });
 }
 
@@ -723,8 +720,8 @@ export function detectGeneratedFiles(
 
   const warnings: GeneratedFileWarning[] = [];
   for (const { file, content } of sources) {
-    const matchedOperations = operationPatterns.filter((patterns) =>
-      patterns.some((pattern) => content.includes(pattern)),
+    const matchedOperations = operationPatterns.filter(
+      (patterns) => findUsageMatch(patterns, [{ file, content }]) !== undefined,
     ).length;
     const coverage = matchedOperations / operations.length;
     if (coverage < GENERATED_COVERAGE_THRESHOLD) continue;

@@ -37,3 +37,28 @@ export function pluralize(
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * Builds a regular expression that finds `text` only as a whole word.
+ *
+ * The boundary is `[\w$]`, not `\b`, because `$` is a legal identifier
+ * character in JavaScript: `\bUser\b` matches inside `$User`, which is a
+ * different identifier. Every search over source text shares this definition,
+ * so a name means the same thing to detection, confidence grading, the field
+ * check and the inline identifier lookup.
+ *
+ * A boundary is only asserted where the pattern's own edge is a word character.
+ * A pattern such as `graphql({Name})` ends in a parenthesis, and demanding a
+ * non-word character after it would be asserting something about the code that
+ * has nothing to do with the name.
+ *
+ * @param {string} text - The literal text to find.
+ * @param {string} [flags] - Regular expression flags, e.g. `g`.
+ * @returns {RegExp} - A matcher for `text` as a whole word.
+ */
+export function wholeWordPattern(text: string, flags?: string): RegExp {
+  const body = escapeRegExp(text);
+  const before = /[\w$]/.test(text[0] ?? '') ? '(?<![\\w$])' : '';
+  const after = /[\w$]/.test(text[text.length - 1] ?? '') ? '(?![\\w$])' : '';
+  return new RegExp(`${before}${body}${after}`, flags);
+}

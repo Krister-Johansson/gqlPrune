@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import picomatch from 'picomatch';
+import { wholeWordPattern } from './stringHelpers.js';
 
 const baseDir = path.resolve('./');
 
@@ -331,9 +332,44 @@ export function isOperationUsedInContents(
   patterns: string[],
   contents: string[],
 ): boolean {
-  return contents.some((content) =>
-    patterns.some((pattern) => content.includes(pattern)),
-  );
+  return findUsageMatch(patterns, contents.map(asSource)) !== undefined;
+}
+
+/** A file's text, paired with the path it came from. */
+type SearchableFile = { file: string; content: string };
+
+/** Wraps a bare string for {@link findUsageMatch}, which reports the file. */
+function asSource(content: string): SearchableFile {
+  return { file: '', content };
+}
+
+/**
+ * Finds the first expanded usage pattern that appears in any of the files, as a
+ * whole word, and says which pattern hit in which file.
+ *
+ * This is the single definition of what counts as a reference. A plain
+ * substring test would let a short operation's pattern hide inside a longer
+ * identifier, so `UserDocument`, expanded for `query User`, matched an
+ * unrelated `GetUserDocument` and reported a dead operation as alive.
+ *
+ * @param {string[]} patterns - The expanded search strings that mean usage.
+ * @param {SearchableFile[]} files - The files to search.
+ * @returns {{pattern: string, file: string} | undefined} - The first hit.
+ */
+export function findUsageMatch(
+  patterns: string[],
+  files: SearchableFile[],
+): { pattern: string; file: string } | undefined {
+  const matchers = patterns.map((pattern) => ({
+    pattern,
+    regex: wholeWordPattern(pattern),
+  }));
+  for (const { file, content } of files) {
+    for (const { pattern, regex } of matchers) {
+      if (regex.test(content)) return { pattern, file };
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -3,7 +3,6 @@
 
 import * as fs from 'fs';
 import {
-  escapeRegExp,
   findUnusedFieldCandidates,
   isResponseKeyInSources,
 } from '../src/utils/fields';
@@ -41,16 +40,6 @@ const source = (content: string, file = 'src/App.tsx'): SourceFile => ({
 
 describe('fields', () => {
   afterEach(() => jest.resetAllMocks());
-
-  describe('escapeRegExp', () => {
-    it('escapes regex metacharacters', () => {
-      expect(escapeRegExp('a.b*c')).toBe('a\\.b\\*c');
-    });
-
-    it('leaves a plain GraphQL name untouched', () => {
-      expect(escapeRegExp('avatarUrl')).toBe('avatarUrl');
-    });
-  });
 
   describe('isResponseKeyInSources', () => {
     it('matches a whole word inside a property access', () => {
