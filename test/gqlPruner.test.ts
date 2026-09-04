@@ -4,11 +4,13 @@
 import * as fs from 'fs';
 import { buildSchema, GraphQLSchema, parse, Source } from 'graphql';
 import * as fileUtils from '../src/utils/fileUtils';
+import { DEFAULT_SOURCE_EXTENSIONS } from '../src/utils/fileUtils';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import * as fragments from '../src/utils/fragments';
 import * as inline from '../src/utils/inline';
 import {
   buildJsonReport,
+  resolveSourceExtensions,
   CANDIDATE_REMINDER,
   createConfigExcludeMatcher,
   DEFAULT_EXCLUDED_FOLDERS,
@@ -238,6 +240,32 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('a source file the scan cannot read', () => {
+    it('carries the reason through to stderr and the JSON warnings', () => {
+      // readSourceFiles reports through a callback rather than printing, so
+      // this is what proves the callback is wired all the way to the report.
+      // A source file dropped from the corpus makes whatever it uses look
+      // unused, which is the finding a reader has to be able to explain.
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['Locked.tsx']);
+      mockedExtract.mockReturnValue(entitiesOf([]));
+      mockedReadSources.mockImplementation(
+        (_files: string[], onReadError?: (message: string) => void) => {
+          onReadError?.('Skipped the source file Locked.tsx: EACCES.');
+          return [];
+        },
+      );
+
+      const result = scanProject({ graphqlDir: 'g', srcDir: 's' });
+
+      expect(result.readWarnings).toEqual([
+        'Skipped the source file Locked.tsx: EACCES.',
+      ]);
+      expect(result.sourceFileCount).toBe(0);
+    });
+  });
+
   describe('resolveUsagePatterns', () => {
     it('defaults when not provided', () => {
       expect(resolveUsagePatterns({ graphqlDir: 'g', srcDir: 's' })).toEqual(
@@ -458,6 +486,41 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('resolveSourceExtensions', () => {
+    it('falls back to the JavaScript and TypeScript module extensions', () => {
+      // Written out rather than compared against the constant it returns: that
+      // comparison stays green if an extension is dropped, and a dropped
+      // extension means every operation used only from those files is reported
+      // unused.
+      const expected = [
+        '.ts',
+        '.tsx',
+        '.js',
+        '.jsx',
+        '.mjs',
+        '.cjs',
+        '.mts',
+        '.cts',
+      ];
+
+      expect(resolveSourceExtensions()).toEqual(expected);
+      expect(resolveSourceExtensions([])).toEqual(expected);
+      expect(DEFAULT_SOURCE_EXTENSIONS).toEqual(expected);
+    });
+
+    it('normalizes a configured list to lowercase with a leading dot', () => {
+      expect(resolveSourceExtensions(['vue', '.SVELTE', ' .ts '])).toEqual([
+        '.vue',
+        '.svelte',
+        '.ts',
+      ]);
+    });
+
+    it('accepts a single extension written as a scalar', () => {
+      expect(resolveSourceExtensions('.vue')).toEqual(['.vue']);
+    });
+  });
+
   describe('formatVerboseScanLines', () => {
     const baseResult = {
       gqlFileCount: 1,
@@ -474,6 +537,7 @@ describe('gqlPruner', () => {
       unusedFieldCandidates: [],
       duplicateWarnings: [],
       generatedWarnings: [],
+      readWarnings: [],
       generatedFiles: [],
     };
 
@@ -3155,6 +3219,8 @@ describe('gqlPruner', () => {
           './g',
           ['.gql', '.graphql'],
           expect.any(Function),
+          expect.any(Set),
+          expect.any(Function),
         );
       });
 
@@ -3249,9 +3315,13 @@ describe('gqlPruner', () => {
             'src',
             ['.gql', '.graphql'],
             expect.any(Function),
+            expect.any(Set),
+            expect.any(Function),
           );
           expect(mockedFind).not.toHaveBeenCalledWith(
             'legacy',
+            expect.anything(),
+            expect.anything(),
             expect.anything(),
             expect.anything(),
           );

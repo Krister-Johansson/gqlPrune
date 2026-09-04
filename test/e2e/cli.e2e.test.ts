@@ -34,6 +34,7 @@
 import {
   assertCliBuilt,
   expectInOrder,
+  fixtureProject,
   parseReport,
   runCli,
   toPosix,
@@ -339,6 +340,63 @@ describe('whole-word usage matching', () => {
     expect(report.unusedOperations.map((op) => op.name)).not.toContain(
       'GetWholeWordUser',
     );
+  });
+});
+
+describe('a file the scan cannot read', () => {
+  it('warns on stderr and in the JSON, and keeps scanning', async () => {
+    // A parse failure used to print to the console and vanish: the JSON said
+    // "warnings": [] while the broken file's definitions and fragment spreads
+    // were quietly missing from the corpus.
+    const result = await runCli([
+      '--graphql',
+      'unreadable/graphql',
+      '--src',
+      'unreadable/src',
+      '--json',
+    ]);
+    const report = parseReport(result);
+
+    expect(
+      report.warnings.filter(
+        (warning) =>
+          warning.includes('Could not parse') && warning.includes('broken.gql'),
+      ),
+    ).toHaveLength(1);
+    expect(result.stderr).toContain('broken.gql');
+    // Advisory: the readable half of the project still scanned clean.
+    expect(report.unusedOperations).toEqual([]);
+    expect(result.code).toBe(0);
+  });
+});
+
+describe('a project whose sources gqlPrune does not scan by default', () => {
+  const VUE = ['--graphql', 'vue-project/graphql', '--src', 'vue-project/src'];
+
+  it('says no source file was read instead of reporting a confident sweep', async () => {
+    const report = parseReport(await runCli([...VUE, '--json']));
+
+    // Zero source files is indistinguishable from "the source references
+    // nothing", and every operation then grades high with reason name-absent.
+    expect(
+      report.warnings.filter((warning) =>
+        warning.includes('No source files were read'),
+      ),
+    ).toHaveLength(1);
+    expect(report.unusedOperations.map((op) => op.name)).toEqual(['VueUser']);
+  });
+
+  it('scans them once sourceExtensions names the extension', async () => {
+    // Same tree, plus a config naming .vue. Run from inside it, since the
+    // config is looked up in the working directory.
+    const report = parseReport(
+      await runCli(['--json'], {
+        cwd: fixtureProject('vue-project-configured'),
+      }),
+    );
+
+    expect(report.warnings).toEqual([]);
+    expect(report.unusedOperations).toEqual([]);
   });
 });
 

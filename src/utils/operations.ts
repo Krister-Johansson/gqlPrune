@@ -16,6 +16,15 @@ export type GraphqlFileEntities = {
    * not assigned to anything.
    */
   identifier?: string;
+  /**
+   * Why the file could not be parsed, when it could not. The scan carries on
+   * without its definitions, so the caller reports this: a file dropped from
+   * the corpus takes its fragment spreads with it, and a fragment it was the
+   * only consumer of then looks unused.
+   */
+  parseError?: string;
+  /** Why the file could not be read, when it could not. See {@link parseError}. */
+  readError?: string;
   operations: OperationInfo[];
   fragments: FragmentInfo[];
   /** Names of fragments spread (directly or nested) by operations in the file. */
@@ -149,8 +158,26 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   // Imports are read off the raw text before parsing, so a document that other
   // files import still protects them when it fails to parse itself.
   let imports: string[] = [];
+  let content: string;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    // Unreadable is not unparseable: saying "could not parse" about a file
+    // permissions kept us out of would send the reader looking for a syntax
+    // error that is not there.
+    return {
+      filePath,
+      readError: error instanceof Error ? error.message : String(error),
+      operations: [],
+      fragments: [],
+      operationSpreads: [],
+      fragmentSpreads: [],
+      imports,
+      hasAnonymousOperation: false,
+      document: null,
+    };
+  }
+  try {
     imports = extractImports(content, filePath);
     // Naming the Source after the file makes every node's location carry the
     // path, so a selection or a validation error can be reported against the
@@ -158,14 +185,9 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
     const ast = parse(new Source(content, filePath));
     return buildGraphqlEntities(ast, filePath, imports);
   } catch (error) {
-    console.error(`Error parsing GraphQL file: ${filePath}`);
-    if (error instanceof Error) {
-      console.error(error.message);
-    } else {
-      console.error(error);
-    }
     return {
       filePath,
+      parseError: error instanceof Error ? error.message : String(error),
       operations: [],
       fragments: [],
       operationSpreads: [],

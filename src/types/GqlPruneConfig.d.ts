@@ -24,6 +24,12 @@ export interface GqlPruneConfig {
    */
   exclude?: string | string[];
   /**
+   * File extensions to scan for usage, e.g. `['.ts', '.vue']`. Defaults to the
+   * JavaScript and TypeScript module extensions. Set this for a project whose
+   * components live in a single-file format gqlPrune does not scan by default.
+   */
+  sourceExtensions?: string | string[];
+  /**
    * @deprecated Use `exclude` instead. Folder names (e.g. `__generated__`) or
    * paths relative to the project root (e.g. `src/generated`) to exclude. Still
    * honored — merged into the same matcher as `exclude`.

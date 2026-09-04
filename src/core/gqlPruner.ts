@@ -15,6 +15,8 @@ import {
   ExcludeMatcher,
   expandDirPatterns,
   findFilesWithExtension,
+  DEFAULT_SOURCE_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
   findUsageMatch,
   isOperationUsedInContents,
   readSourceFiles,
@@ -107,17 +109,33 @@ export function createConfigExcludeMatcher(
  * list of directories, dropping empty/whitespace entries.
  */
 export function resolveDirs(value: string | string[] | undefined): string[] {
+  return resolveStringList(value);
+}
+
+/**
+ * Normalizes a config value that is a string or a list of strings into a
+ * trimmed list, dropping blanks.
+ *
+ * YAML can yield non-string entries (`- 8080`), which are dropped rather than
+ * crashing on `.trim()`. This is the lenient reading, right where a stray entry
+ * simply never matches anything; a setting where a stray entry would change the
+ * verdict validates instead of dropping.
+ *
+ * @param {string | string[] | undefined} value - The configured value.
+ * @returns {string[]} - The normalized entries.
+ */
+export function resolveStringList(
+  value: string | string[] | undefined,
+): string[] {
   const list = Array.isArray(value)
     ? value
     : value === undefined
       ? []
       : [value];
-  // YAML can yield non-string entries (e.g. `- 8080`); drop them rather than
-  // crash on `.trim()`.
   return (list as unknown[])
-    .filter((dir): dir is string => typeof dir === 'string')
-    .map((dir) => dir.trim())
-    .filter((dir) => dir.length > 0);
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 /**
@@ -235,6 +253,24 @@ export function applyInlineIdentifierUsage(
     }
     const match = matchByName.get(usage.operation.name);
     return match === undefined ? usage : { ...usage, match };
+  });
+}
+
+/**
+ * The source extensions to scan, normalized to lowercase with a leading dot so
+ * `vue`, `.VUE` and `.vue` all mean the same thing.
+ *
+ * @param {string | string[]} [configured] - The configured extensions, if any.
+ * @returns {string[]} - The extensions to match.
+ */
+export function resolveSourceExtensions(
+  configured?: string | string[],
+): string[] {
+  const list = resolveStringList(configured);
+  if (list.length === 0) return DEFAULT_SOURCE_EXTENSIONS;
+  return list.map((extension) => {
+    const lower = extension.toLowerCase();
+    return lower.startsWith('.') ? lower : `.${lower}`;
   });
 }
 
@@ -1057,6 +1093,8 @@ export type ScanResult = {
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
+  /** Files and directories the scan could not read or parse, as warnings. */
+  readWarnings: string[];
   /** Raw suspected-generated files, so callers can act on the paths (e.g.
    * `gqlprune init` pre-filling them into `exclude`), not just the messages. */
   generatedFiles: GeneratedFileWarning[];
@@ -1174,26 +1212,65 @@ export function scanProject(
   const fragmentUsagePatterns = resolveFragmentUsagePatterns(config);
 
   // Scan every configured directory and de-duplicate (dirs may overlap/nest).
+  // Everything the scan could not read or parse. These are collected rather
+  // than printed, so they travel the same route as every other advisory: the
+  // stderr line, the JSON `warnings` array and the CI annotation. Each one
+  // means part of the corpus is missing, which makes whatever it referenced
+  // look unused.
+  const readWarnings: string[] = [];
+  const collect = (message: string): void => {
+    readWarnings.push(message);
+  };
+
   const gqlFiles = [
     ...new Set(
       resolveDirs(config.graphqlDir).flatMap((dir) =>
-        findFilesWithExtension(dir, ['.gql', '.graphql'], isExcluded),
+        findFilesWithExtension(
+          dir,
+          DOCUMENT_EXTENSIONS,
+          isExcluded,
+          new Set(),
+          collect,
+        ),
       ),
     ),
   ];
   // Parse every gql file once; operations and the fragment scan share the result.
   const gqlEntities = gqlFiles.map(extractGraphqlEntities);
+  const missingFrom = (file: string): string =>
+    `Its definitions are missing from this scan, so anything only ${file} ` +
+    'referenced may be reported unused.';
+  for (const entities of gqlEntities) {
+    if (entities.readError !== undefined) {
+      readWarnings.push(
+        `Could not read ${entities.filePath}: ${entities.readError} ` +
+          missingFrom(entities.filePath),
+      );
+    }
+    if (entities.parseError !== undefined) {
+      readWarnings.push(
+        `Could not parse ${entities.filePath}: ${entities.parseError} ` +
+          missingFrom(entities.filePath),
+      );
+    }
+  }
 
   const tsFiles = [
     ...new Set(
       resolveDirs(config.srcDir).flatMap((dir) =>
-        findFilesWithExtension(dir, ['.ts', '.tsx', '.js', '.jsx'], isExcluded),
+        findFilesWithExtension(
+          dir,
+          resolveSourceExtensions(config.sourceExtensions),
+          isExcluded,
+          new Set(),
+          collect,
+        ),
       ),
     ),
   ];
   // Read every source file once (paired with its path), then test all operations
   // against the cache instead of re-reading each file for every operation.
-  const rawSources = readSourceFiles(tsFiles);
+  const rawSources = readSourceFiles(tsFiles, collect);
 
   // Opt-in: with the pass off, nothing is extracted and the corpus stays the
   // raw source text. With it on, source files are definition sources too, and
@@ -1269,7 +1346,10 @@ export function scanProject(
 
   return {
     gqlFileCount: gqlFiles.length,
-    sourceFileCount: tsFiles.length,
+    // What was actually read, not what was found: if every discovered file
+    // fails to read, the corpus is empty and the zero-source warning has to
+    // fire, which counting the discovered paths would suppress.
+    sourceFileCount: rawSources.length,
     operationCount: operations.length,
     inline,
     inlineDocumentCount: extractions.reduce(
@@ -1297,6 +1377,7 @@ export function scanProject(
     ),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
+    readWarnings,
     generatedFiles,
   };
 }
@@ -1450,6 +1531,7 @@ export function mainFunction(
     deprecatedUsages,
     duplicateWarnings,
     generatedWarnings,
+    readWarnings,
   } = result;
   // The gate decides what is reported, and reporting is what sets the exit
   // code: a CI job can fail on high-confidence findings alone while a local run
@@ -1474,10 +1556,23 @@ export function mainFunction(
     : undefined;
   // All advisory warnings share one pipeline: stderr lines (or ::warning in
   // annotate mode) plus the JSON report's `warnings` array.
+  // A scan that read no source file cannot tell "nothing references these" from
+  // "nothing was read", and every operation grades high with reason
+  // name-absent. Say so, loudly, rather than reporting a confident sweep.
+  if (sourceFileCount === 0) {
+    readWarnings.push(
+      `No source files were read from ${scanDirs.srcDir.join(', ')}. ` +
+        'Every operation will look unused. Check the directory, and set ' +
+        '"sourceExtensions" if this project uses extensions gqlPrune does not ' +
+        `scan by default (${DEFAULT_SOURCE_EXTENSIONS.join(', ')}).`,
+    );
+  }
+
   const advisoryWarnings = [
     ...configWarnings,
     ...duplicateWarnings,
     ...generatedWarnings,
+    ...readWarnings,
   ];
 
   if (verbose) {
