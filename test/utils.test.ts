@@ -57,6 +57,20 @@ describe('wholeWordPattern', () => {
     expect(wholeWordPattern('User').test('User$')).toBe(false);
   });
 
+  it('treats a non-ASCII identifier character as part of the word', () => {
+    // A word boundary is ASCII-only, so it would let UserDocument match inside
+    // the perfectly legal identifier below and report a dead operation as used.
+    expect(wholeWordPattern('UserDocument').test('\u03C0UserDocument')).toBe(
+      false,
+    );
+    expect(wholeWordPattern('UserDocument').test('UserDocument\u00E9')).toBe(
+      false,
+    );
+    expect(wholeWordPattern('UserDocument').test('{ UserDocument }')).toBe(
+      true,
+    );
+  });
+
   it('asserts a boundary only where the pattern itself ends in a word', () => {
     // A custom pattern can end in punctuation; demanding a non-word character
     // after a parenthesis would be asserting something about the code that has

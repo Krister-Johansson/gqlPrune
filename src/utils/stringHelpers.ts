@@ -39,13 +39,24 @@ export function escapeRegExp(value: string): string {
 }
 
 /**
+ * Everything JavaScript accepts inside an identifier: the Unicode continue set,
+ * plus `$`, `_`, and the two zero-width joiners the spec allows. Written as a
+ * character class so it can be dropped into a lookaround.
+ */
+const IDENTIFIER_CLASS = '[\\p{ID_Continue}$\\u200C\\u200D]';
+
+/** The same set, as a matcher for a single character. */
+const IDENTIFIER_CHARACTER = new RegExp(`^${IDENTIFIER_CLASS}$`, 'u');
+
+/**
  * Builds a regular expression that finds `text` only as a whole word.
  *
- * The boundary is `[\w$]`, not `\b`, because `$` is a legal identifier
- * character in JavaScript: `\bUser\b` matches inside `$User`, which is a
- * different identifier. Every search over source text shares this definition,
- * so a name means the same thing to detection, confidence grading, the field
- * check and the inline identifier lookup.
+ * The boundary is every character JavaScript lets an identifier continue with,
+ * not `\b`. `\b` is ASCII-only and knows nothing of `$`, so `\bUser\b` matches
+ * inside `$User` and inside `\u03C0User`, both of which are different
+ * identifiers. Every search over source text shares this definition, so a name
+ * means the same thing to detection, confidence grading, the field check and
+ * the inline identifier lookup.
  *
  * A boundary is only asserted where the pattern's own edge is a word character.
  * A pattern such as `graphql({Name})` ends in a parenthesis, and demanding a
@@ -58,7 +69,11 @@ export function escapeRegExp(value: string): string {
  */
 export function wholeWordPattern(text: string, flags?: string): RegExp {
   const body = escapeRegExp(text);
-  const before = /[\w$]/.test(text[0] ?? '') ? '(?<![\\w$])' : '';
-  const after = /[\w$]/.test(text[text.length - 1] ?? '') ? '(?![\\w$])' : '';
-  return new RegExp(`${before}${body}${after}`, flags);
+  const edge = (character: string): boolean =>
+    character !== '' && IDENTIFIER_CHARACTER.test(character);
+  const before = edge(text[0] ?? '') ? `(?<!${IDENTIFIER_CLASS})` : '';
+  const after = edge(text[text.length - 1] ?? '')
+    ? `(?!${IDENTIFIER_CLASS})`
+    : '';
+  return new RegExp(`${before}${body}${after}`, `u${flags ?? ''}`);
 }
