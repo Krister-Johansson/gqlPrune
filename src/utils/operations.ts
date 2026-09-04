@@ -54,6 +54,10 @@ export type GraphqlFileEntities = {
 // string elsewhere in the document is not mistaken for one.
 const IMPORT_LINE = /^[ \t]*#[ \t]*import[ \t]+(["'])(.+?)\1/gm;
 
+// Any comment line, used to tell a file that only imports from one that also
+// defines something. GraphQL comments run from `#` to the end of the line.
+const COMMENT_LINE = /^[ \t]*#[^\n]*$/gm;
+
 /**
  * Returns the documents a file imports through `#import "..."` comment lines,
  * resolved against the importing file's directory so the same document has one
@@ -184,6 +188,22 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
   }
   try {
     imports = extractImports(content, filePath);
+    // A file of nothing but `#import` lines is the barrel pattern the loaders
+    // support, and it is exactly what `extractImports` exists to read. graphql
+    // rejects a document with no definitions, so parsing it would report a
+    // syntax error on every run for a file that is doing nothing wrong.
+    if (content.replace(COMMENT_LINE, '').trim() === '') {
+      return {
+        filePath,
+        operations: [],
+        fragments: [],
+        operationSpreads: [],
+        fragmentSpreads: [],
+        imports,
+        hasAnonymousOperation: false,
+        document: null,
+      };
+    }
     // Naming the Source after the file makes every node's location carry the
     // path, so a selection or a validation error can be reported against the
     // right file without extra bookkeeping.

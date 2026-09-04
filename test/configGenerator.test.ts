@@ -109,6 +109,15 @@ function announcedKeys(logSpy: jest.SpyInstance): string[] {
 
 describe('configGenerator', () => {
   describe('splitFolders', () => {
+    it('keeps a comma inside a brace group with its pattern', () => {
+      // A brace group is one glob. Splitting it produced two halves that
+      // matched nothing, so the exclude the user typed silently did nothing.
+      expect(splitFolders('src/**/*.generated.{ts,tsx}, dist')).toEqual([
+        'src/**/*.generated.{ts,tsx}',
+        'dist',
+      ]);
+    });
+
     it('splits and trims a comma-separated list', () => {
       expect(splitFolders('node_modules, dist ,  __generated__')).toEqual([
         'node_modules',

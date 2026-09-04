@@ -10,6 +10,22 @@ import {
 } from '../src/utils/args';
 
 describe('parseArgs', () => {
+  it('rejects a value passed to a flag that takes none', () => {
+    // --json=false used to switch the flag ON, so a workflow written as
+    // --annotate=${{ inputs.annotate }} always annotated whatever the input said.
+    const result = parseArgs(['--json=false']);
+
+    expect(result.errors).toEqual([
+      '--json takes no value, but got "false". Pass --json on its own to ' +
+        'switch it on, or leave it out.',
+    ]);
+    expect(result.json).toBe(false);
+  });
+
+  it('still accepts the flag on its own', () => {
+    expect(parseArgs(['--json']).json).toBe(true);
+  });
+
   it('defaults to no command, all flags false, empty config', () => {
     expect(parseArgs([])).toEqual({
       command: undefined,

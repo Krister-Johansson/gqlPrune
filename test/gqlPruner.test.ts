@@ -31,6 +31,7 @@ import {
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
   resolveRunConfig,
+  ConfigError,
   resolveUsagePatterns,
   scanProject,
 } from '../src/core/gqlPruner';
@@ -273,14 +274,18 @@ describe('gqlPruner', () => {
       );
     });
 
-    it('defaults when given an empty array', () => {
+    it('respects an explicit empty array rather than defaulting', () => {
+      // Matches resolveFragmentUsagePatterns, which already honoured an empty
+      // list, and gives the codegen client preset a way to say "no pattern
+      // applies here" instead of falling through to {Name}Document and
+      // matching its own generated output.
       expect(
         resolveUsagePatterns({
           graphqlDir: 'g',
           srcDir: 's',
           usagePatterns: [],
         }),
-      ).toEqual(DEFAULT_USAGE_PATTERNS);
+      ).toEqual([]);
     });
 
     it('uses configured patterns when provided', () => {
@@ -518,6 +523,43 @@ describe('gqlPruner', () => {
 
     it('accepts a single extension written as a scalar', () => {
       expect(resolveSourceExtensions('.vue')).toEqual(['.vue']);
+    });
+  });
+
+  describe('resolveUsagePatterns', () => {
+    it('accepts a single pattern written as a YAML scalar', () => {
+      // A scalar used to be discarded in favour of the built-in defaults, so
+      // the convention the user configured was never searched for and every
+      // operation using it came back unused.
+      expect(
+        resolveUsagePatterns({
+          usagePatterns: '{Name}Doc',
+        } as unknown as GqlPruneConfig),
+      ).toEqual(['{Name}Doc']);
+    });
+
+    it('respects an explicit empty list instead of falling back', () => {
+      expect(
+        resolveUsagePatterns({
+          usagePatterns: [],
+        } as unknown as GqlPruneConfig),
+      ).toEqual([]);
+    });
+
+    it('falls back to the defaults when the key is absent', () => {
+      expect(resolveUsagePatterns({} as GqlPruneConfig)).toEqual(
+        DEFAULT_USAGE_PATTERNS,
+      );
+    });
+
+    it('rejects a non-string entry rather than crashing later', () => {
+      // A YAML list of ports reached expandPattern as a number, where
+      // pattern.replace threw and took the run down with a stack trace.
+      expect(() =>
+        resolveUsagePatterns({
+          usagePatterns: [8080],
+        } as unknown as GqlPruneConfig),
+      ).toThrow(ConfigError);
     });
   });
 

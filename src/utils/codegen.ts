@@ -159,8 +159,15 @@ export const CODEGEN_PATTERN_MAPPINGS: readonly CodegenPatternMapping[] = [
     // The client preset hands the caller a constant: `const q = graphql(...)`
     // followed by `useQuery(q)` never names the operation, so no pattern can
     // find it. The inline scan follows the constant instead.
+    //
+    // The empty lists say that deliberately. Omitting the keys let the built-in
+    // {Name}Document default through, and it then matched the preset's own
+    // generated GetDeadDocument, so every operation looked used and the preset
+    // this mapping exists for reported nothing.
     name: 'client',
     kind: 'preset',
+    usagePatterns: [],
+    fragmentUsagePatterns: [],
     inline: true,
   },
 ];

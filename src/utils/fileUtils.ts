@@ -78,6 +78,9 @@ function toExcludeGlobs(pattern: string): string[] {
  */
 export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
   const cleaned = patterns.map((p) => p.trim()).filter(Boolean);
+  // `toExcludeGlobs` drops a pattern that normalizes to nothing, which is what
+  // keeps a lone `!`, a bare `/` or a stray `./` out of picomatch. It throws on
+  // an empty pattern, and the throw would take the whole scan with it.
   const positives = cleaned
     .filter((p) => !p.startsWith('!'))
     .flatMap(toExcludeGlobs);

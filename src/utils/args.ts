@@ -365,6 +365,17 @@ export function parseArgs(argv: string[]): CliOptions {
     }
 
     if (!spec.takesValue) {
+      // A switch takes no value, so `--json=false` is a mistake worth naming.
+      // Silently accepting it turned the flag ON, which is the opposite of what
+      // it says, and a workflow written as `--annotate=${{ inputs.annotate }}`
+      // enabled annotations whatever the input said.
+      if (inlineValue !== undefined) {
+        errors.push(
+          `${name} takes no value, but got "${inlineValue}". ` +
+            `Pass ${name} on its own to switch it on, or leave it out.`,
+        );
+        continue;
+      }
       if (spec.option !== undefined) options[spec.option] = true;
       if (spec.configFlag !== undefined) configFlags.add(spec.configFlag);
       continue;

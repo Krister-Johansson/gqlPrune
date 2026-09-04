@@ -27,12 +27,30 @@ import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 // Folders never worth scanning when auto-detecting the project layout.
 const isDetectExcluded = createExcludeMatcher(['node_modules', '.git', 'dist']);
 
-/** Splits a comma-separated input into a trimmed list, dropping empty entries. */
+/**
+ * Splits a comma-separated input into a trimmed list, dropping empty entries.
+ *
+ * A comma inside a brace group belongs to the glob, not to the list, so
+ * `src/**\/*.generated.{ts,tsx}` stays one pattern. Splitting it produced two
+ * halves that matched nothing, and the user only found out when the exclude
+ * silently stopped working.
+ */
 export function splitFolders(input: string): string[] {
-  return input
-    .split(',')
-    .map((folder) => folder.trim())
-    .filter(Boolean);
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const character of input) {
+    if (character === '{') depth += 1;
+    if (character === '}') depth = Math.max(0, depth - 1);
+    if (character === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+  parts.push(current);
+  return parts.map((folder) => folder.trim()).filter(Boolean);
 }
 
 /**
