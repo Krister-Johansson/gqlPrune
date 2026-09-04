@@ -1,0 +1,15 @@
+# Two operations whose default {Name}Document patterns are substrings of each
+# other: "UserDocument" sits inside "GetUserDocument". Only the longer one is
+# referenced, so the shorter one is dead and must be reported.
+query WholeWordUser {
+  user {
+    id
+  }
+}
+
+query GetWholeWordUser {
+  user {
+    id
+    name
+  }
+}

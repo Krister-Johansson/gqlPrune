@@ -181,13 +181,17 @@ describe('property-based invariants', () => {
   });
 
   describe('isOperationUsedInContents', () => {
-    it('finds a pattern wherever it is embedded, and only then', () => {
+    // Anything that cannot continue a JavaScript identifier, so the pattern
+    // stands as its own word wherever it is dropped in.
+    const separatorArb = fc.stringMatching(/^[ ;(),.[\]{}=<>+*/!?:'"`\n\t-]*$/);
+
+    it('finds a pattern standing as its own word, and only then', () => {
       fc.assert(
         fc.property(
           identifierArb,
-          fc.string(),
-          fc.string(),
-          fc.array(fc.string(), { maxLength: 4 }),
+          separatorArb,
+          separatorArb,
+          fc.array(separatorArb, { maxLength: 4 }),
           (pattern, before, after, otherContents) => {
             const embedded = `${before}${pattern}${after}`;
             expect(
@@ -196,12 +200,26 @@ describe('property-based invariants', () => {
                 [...otherContents, embedded],
               ),
             ).toBe(true);
-            const without = otherContents.filter(
-              (content) => !content.includes(pattern),
+            expect(isOperationUsedInContents([pattern], otherContents)).toBe(
+              false,
             );
-            expect(isOperationUsedInContents([pattern], without)).toBe(false);
           },
         ),
+      );
+    });
+
+    it('never finds a pattern welded into a longer identifier', () => {
+      fc.assert(
+        fc.property(identifierArb, identifierArb, (pattern, glued) => {
+          // Either side is enough to make it a different identifier, which is
+          // what stops a short operation name hiding inside a longer one.
+          expect(
+            isOperationUsedInContents([pattern], [`${glued}${pattern}`]),
+          ).toBe(false);
+          expect(
+            isOperationUsedInContents([pattern], [`${pattern}${glued}`]),
+          ).toBe(false);
+        }),
       );
     });
   });

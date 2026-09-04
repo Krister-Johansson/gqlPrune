@@ -313,6 +313,35 @@ describe('a directory pattern ending in **', () => {
   });
 });
 
+describe('whole-word usage matching', () => {
+  const WHOLE_WORD = [
+    '--graphql',
+    'whole-word/graphql',
+    '--src',
+    'whole-word/src',
+    '--json',
+  ];
+
+  it('does not let a longer identifier vouch for a shorter operation', async () => {
+    // The source names GetWholeWordUserDocument and nothing else. The shorter
+    // operation's pattern, WholeWordUserDocument, sits inside that identifier,
+    // and a substring test judged the dead operation alive because of it.
+    const report = parseReport(await runCli(WHOLE_WORD));
+
+    expect(report.unusedOperations.map((op) => op.name)).toEqual([
+      'WholeWordUser',
+    ]);
+  });
+
+  it('still counts the operation the identifier really names', async () => {
+    const report = parseReport(await runCli(WHOLE_WORD));
+
+    expect(report.unusedOperations.map((op) => op.name)).not.toContain(
+      'GetWholeWordUser',
+    );
+  });
+});
+
 describe('usage errors', () => {
   it('exits 2 on an unknown flag', async () => {
     const result = await runCli(['--nope']);

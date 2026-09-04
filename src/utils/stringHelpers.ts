@@ -37,3 +37,43 @@ export function pluralize(
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * Everything JavaScript accepts inside an identifier: the Unicode continue set,
+ * plus `$`, `_`, and the two zero-width joiners the spec allows. Written as a
+ * character class so it can be dropped into a lookaround.
+ */
+const IDENTIFIER_CLASS = '[\\p{ID_Continue}$\\u200C\\u200D]';
+
+/** The same set, as a matcher for a single character. */
+const IDENTIFIER_CHARACTER = new RegExp(`^${IDENTIFIER_CLASS}$`, 'u');
+
+/**
+ * Builds a regular expression that finds `text` only as a whole word.
+ *
+ * The boundary is every character JavaScript lets an identifier continue with,
+ * not `\b`. `\b` is ASCII-only and knows nothing of `$`, so `\bUser\b` matches
+ * inside `$User` and inside `\u03C0User`, both of which are different
+ * identifiers. Every search over source text shares this definition, so a name
+ * means the same thing to detection, confidence grading, the field check and
+ * the inline identifier lookup.
+ *
+ * A boundary is only asserted where the pattern's own edge is a word character.
+ * A pattern such as `graphql({Name})` ends in a parenthesis, and demanding a
+ * non-word character after it would be asserting something about the code that
+ * has nothing to do with the name.
+ *
+ * @param {string} text - The literal text to find.
+ * @param {string} [flags] - Regular expression flags, e.g. `g`.
+ * @returns {RegExp} - A matcher for `text` as a whole word.
+ */
+export function wholeWordPattern(text: string, flags?: string): RegExp {
+  const body = escapeRegExp(text);
+  const edge = (character: string): boolean =>
+    character !== '' && IDENTIFIER_CHARACTER.test(character);
+  const before = edge(text[0] ?? '') ? `(?<!${IDENTIFIER_CLASS})` : '';
+  const after = edge(text[text.length - 1] ?? '')
+    ? `(?!${IDENTIFIER_CLASS})`
+    : '';
+  return new RegExp(`${before}${body}${after}`, `u${flags ?? ''}`);
+}

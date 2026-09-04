@@ -3,7 +3,7 @@
 
 import { DocumentNode, parse, Source } from 'graphql';
 import { SourceFile } from './fileUtils.js';
-import { escapeRegExp } from './fields.js';
+import { wholeWordPattern } from './stringHelpers.js';
 import { buildGraphqlEntities, GraphqlFileEntities } from './operations.js';
 
 /** A half-open `[start, end)` range of offsets within a source file. */
@@ -448,9 +448,7 @@ export function findInlineIdentifierUsage(
   for (const entities of inlineFiles) {
     const { identifier } = entities;
     if (identifier === undefined) continue;
-    const pattern = new RegExp(
-      `(?<![\\w$])${escapeRegExp(identifier)}(?![\\w$])`,
-    );
+    const pattern = wholeWordPattern(identifier);
     const reference = sources.find((source) => pattern.test(source.content));
     if (reference === undefined) continue;
     usages.push({

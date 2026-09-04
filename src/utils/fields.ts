@@ -8,15 +8,11 @@ import { FieldLocation, UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { SourceFile } from './fileUtils.js';
 import { reachableFragments } from './fragments.js';
 import { getFragmentSpreads, GraphqlFileEntities } from './operations.js';
-import { escapeRegExp } from './stringHelpers.js';
+import { wholeWordPattern } from './stringHelpers.js';
 
 // Clients and normalized caches add `__typename` themselves. Application code
 // rarely names it, so flagging it would only ever be noise.
 const IGNORED_RESPONSE_KEYS = new Set(['__typename']);
-
-// Re-exported from its home in stringHelpers, where the confidence grading
-// reaches for the same whole-word search this file's key lookup uses.
-export { escapeRegExp };
 
 /**
  * Whether a response key appears as a whole word in any scanned source file.
@@ -30,7 +26,7 @@ export function isResponseKeyInSources(
   key: string,
   sources: SourceFile[],
 ): boolean {
-  const pattern = new RegExp(`\\b${escapeRegExp(key)}\\b`);
+  const pattern = wholeWordPattern(key);
   return sources.some((source) => pattern.test(source.content));
 }
 
