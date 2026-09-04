@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [3.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.12.0...gqlprune-v3.0.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scan:** usage patterns match as whole words. An operation that was reported used only because its expanded pattern appeared inside a longer identifier is now reported unused, which is the correct answer and may add findings to an existing project's report.
+* **scan:** the `--json` report's `orphanedFiles` is now a list of objects (`{ file, confidence, reason }`) instead of a list of path strings, so an orphaned file carries the same grade as every other finding. Read the path as `entry.file`. `summary.orphanedFiles` is unchanged, and no other key changed position or meaning.
+
+### Features
+
+* **config:** derive settings from a GraphQL Code Generator config ([#151](https://github.com/Krister-Johansson/gqlPrune/issues/151)) ([c5d9da0](https://github.com/Krister-Johansson/gqlPrune/commit/c5d9da092011827a2e2d887d47cd676e43510b67))
+* **scan:** grade findings by confidence ([#153](https://github.com/Krister-Johansson/gqlPrune/issues/153)) ([487c3b1](https://github.com/Krister-Johansson/gqlPrune/commit/487c3b1ec98f56737f491b5de971499d324e6ee9))
+* **scan:** opt-in inline GraphQL document scanning ([#149](https://github.com/Krister-Johansson/gqlPrune/issues/149)) ([dbfd428](https://github.com/Krister-Johansson/gqlPrune/commit/dbfd428dbbc301db33934c887e3837fa20cdefee))
+
+
+### Bug Fixes
+
+* **cli:** reject unusable input instead of crashing or misreading it ([#175](https://github.com/Krister-Johansson/gqlPrune/issues/175)) ([3473566](https://github.com/Krister-Johansson/gqlPrune/commit/3473566f40f54cec49cf32f2070a672f5607b2d0))
+* **scan:** match exclude patterns against whole paths, not basenames ([#171](https://github.com/Krister-Johansson/gqlPrune/issues/171)) ([c320512](https://github.com/Krister-Johansson/gqlPrune/commit/c320512e6411b6a9979536989c7cdebb5d54a471)), closes [#165](https://github.com/Krister-Johansson/gqlPrune/issues/165)
+* **scan:** match usage patterns as whole words, not substrings ([#173](https://github.com/Krister-Johansson/gqlPrune/issues/173)) ([5ba1540](https://github.com/Krister-Johansson/gqlPrune/commit/5ba154059f918b4f3c1dac2b3a3ff6b789618035))
+* **scan:** report the files a scan could not read or parse ([#174](https://github.com/Krister-Johansson/gqlPrune/issues/174)) ([fb46e02](https://github.com/Krister-Johansson/gqlPrune/commit/fb46e02d7a21939623081fc3231b02c895bd5ac1))
+* **scan:** stop inline scanning reporting live documents as unused ([#172](https://github.com/Krister-Johansson/gqlPrune/issues/172)) ([fcc5019](https://github.com/Krister-Johansson/gqlPrune/commit/fcc5019957be63dcbb0a759c2724d243e2018ba8))
+
 ## [2.12.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.11.2...gqlprune-v2.12.0) (2026-08-15)
 
 
