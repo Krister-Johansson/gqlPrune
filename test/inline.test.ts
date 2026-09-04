@@ -398,6 +398,41 @@ describe('toInlineEntities', () => {
   });
 });
 
+describe('a multi-line type annotation', () => {
+  it('still captures the constant the document is assigned to', () => {
+    // What Prettier and codegen produce once the annotation passes the print
+    // width. Losing the identifier here loses the only usage signal the client
+    // preset has.
+    const content = [
+      'export const GetUserDoc: TypedDocumentNode<',
+      '  GetUserQuery,',
+      '  GetUserQueryVariables',
+      '> = graphql(`query GetUser { user { id } }`);',
+    ].join('\n');
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites).toHaveLength(1);
+    expect(sites[0].identifier).toBe('GetUserDoc');
+  });
+});
+
+describe('a body that does not parse', () => {
+  it('is left in the usage corpus instead of being blanked away', () => {
+    // A half-written template is normal while editing. Blanking it erases the
+    // fragment spreads it mentions, so a fragment it was the only consumer of
+    // gets reported unused at high confidence.
+    const content =
+      'const broken = gql`query Half { ...UserFields`;\nconst ok = 1;';
+
+    const extraction = extractInlineDocuments('src/App.tsx', content);
+
+    expect(extraction.skipped).toBe(1);
+    expect(extraction.documents).toEqual([]);
+    expect(extraction.blankedContent).toContain('UserFields');
+  });
+});
+
 describe('findInlineIdentifierUsage', () => {
   const entitiesFor = (content: string, file = 'src/App.tsx') =>
     toInlineEntities(extractInlineDocuments(file, content).documents);
@@ -452,13 +487,56 @@ describe('findInlineIdentifierUsage', () => {
     expect(usage[0].operations).toEqual([]);
   });
 
-  it('ignores documents that are not assigned to a constant', () => {
+  it('keeps a document that is consumed where it is written', () => {
+    // The plain Apollo idiom: the document is an argument, so the code that
+    // defines it is the code that uses it. Its own statement is blanked out of
+    // the corpus, so nothing else can ever vouch for it.
     const entities = entitiesFor('useQuery(gql`query GetUser { id }`);');
+
+    const usage = findInlineIdentifierUsage(entities, [
+      { file: 'src/App.tsx', content: 'useQuery();' },
+    ]);
+
+    expect(usage).toHaveLength(1);
+    expect(usage[0].operations).toEqual(['GetUser']);
+    expect(usage[0].file).toBe('src/App.tsx');
+  });
+
+  it('still reports a document standing alone as a statement', () => {
+    const entities = entitiesFor('graphql(`query GetUser { id }`);');
 
     expect(
       findInlineIdentifierUsage(entities, [
-        { file: 'src/Page.tsx', content: 'GetUser' },
+        { file: 'src/App.tsx', content: ';' },
       ]),
     ).toEqual([]);
+  });
+
+  it("does not let another file's same-named constant vouch for a document", () => {
+    // Both files call their document `query`, which is what the client preset
+    // encourages. b.tsx uses its own; that must not keep a.tsx's dead document
+    // alive.
+    const dead = toInlineEntities(
+      extractInlineDocuments(
+        'src/a.tsx',
+        'const query = graphql(`query DeadOne { a }`);',
+      ).documents,
+    );
+    const live = toInlineEntities(
+      extractInlineDocuments(
+        'src/b.tsx',
+        'const query = graphql(`query LiveOne { b }`);\nuseQuery(query);',
+      ).documents,
+    );
+    const sources = [
+      { file: 'src/a.tsx', content: '' },
+      { file: 'src/b.tsx', content: '\nuseQuery(query);' },
+    ];
+
+    // The real scan grades every inline file in one call, which is what lets
+    // it see that both files claim the name.
+    const usage = findInlineIdentifierUsage([...dead, ...live], sources);
+
+    expect(usage.flatMap((entry) => entry.operations)).toEqual(['LiveOne']);
   });
 });

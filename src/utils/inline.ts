@@ -20,6 +20,13 @@ export type InlineSite = {
   /** The constant the document is assigned to, when the statement declares one. */
   identifier?: string;
   /**
+   * Whether the surrounding code consumes the document where it is written, as
+   * in `useQuery(gql`...`)`. Such a document is used by construction: the
+   * statement that defines it is the statement that uses it. False for one
+   * standing alone as its own statement, which nothing has to consume.
+   */
+  consumed: boolean;
+  /**
    * The parts of the file to blank when building the usage corpus: the whole
    * defining statement, minus the interpolations (whose names are real
    * references to other documents and must stay searchable).
@@ -33,6 +40,8 @@ export type InlineDocument = {
   filePath: string;
   /** The constant the document is assigned to, when the statement declares one. */
   identifier?: string;
+  /** See {@link InlineSite.consumed}. */
+  consumed: boolean;
   /** The parsed document, located against the source file's real lines. */
   document: DocumentNode;
 };
@@ -60,7 +69,9 @@ export type InlineIdentifierUsage = {
 
 /**
  * Start of an inline document: an optional `const|let|var IDENT =` (an `export`
- * in front and a type annotation after the name are both fine), then the `gql`
+ * in front and a type annotation after the name are both fine, including one
+ * broken over several lines, which is what a printer does to a long
+ * `TypedDocumentNode<...>`), then the `gql`
  * or `graphql` tag, possibly reached through a member expression, and then
  * either a backtick (tagged template) or a parenthesis and the opening quote of
  * a single string argument. The lookarounds keep `mygql` and `graphqlDir` out.
@@ -69,7 +80,7 @@ export type InlineIdentifierUsage = {
  * decided is code rather than a comment or a string.
  */
 const DOCUMENT_START =
-  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=\n]*)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
+  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]*)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
 
 /** First character of a JavaScript identifier, where a tag can begin. */
 const IDENTIFIER_START = /[A-Za-z_$]/;
@@ -257,6 +268,11 @@ function locationTracker(content: string): (index: number) => {
 export function findInlineDocumentSites(content: string): InlineSite[] {
   const sites: InlineSite[] = [];
   const locate = locationTracker(content);
+  // The last character of real code seen before the current offset, comments
+  // and whitespace skipped. It is what tells a document being passed to
+  // something (`useQuery(` ends in an open paren) from one standing alone as
+  // its own statement (the previous statement ended in `;` or a brace).
+  let lastCodeChar = '';
   let i = 0;
   while (i < content.length) {
     const char = content[i];
@@ -270,28 +286,41 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
     }
     if (!IDENTIFIER_START.test(char)) {
       // Any other literal belongs to the surrounding code, not to a document.
-      i =
-        char === "'" || char === '"' || char === '`'
-          ? skipLiteral(content, i)
-          : i + 1;
+      if (char === "'" || char === '"' || char === '`') {
+        i = skipLiteral(content, i);
+        lastCodeChar = 'x'; // a literal is a value, like an identifier
+        continue;
+      }
+      if (!/\s/.test(char)) lastCodeChar = char;
+      i += 1;
       continue;
     }
 
     DOCUMENT_START.lastIndex = i;
     const match = DOCUMENT_START.exec(content);
     const end =
-      match === null ? null : readDocument(content, match, sites, locate);
+      match === null
+        ? null
+        : readDocument(content, match, sites, locate, lastCodeChar);
     if (end !== null) {
       i = end;
+      lastCodeChar = content[end - 1] ?? '';
       continue;
     }
     // Not a document after all: step over the whole identifier so the text it
     // introduces (a plain string, say) is read in its own right.
     i += 1;
     while (i < content.length && IDENTIFIER_PART.test(content[i])) i += 1;
+    lastCodeChar = content[i - 1] ?? '';
   }
   return sites;
 }
+
+/**
+ * Characters that end a statement. A document whose defining expression follows
+ * one of these, or which opens the file, is not being passed to anything.
+ */
+const STATEMENT_BOUNDARY = new Set(['', ';', '{', '}']);
 
 /**
  * Turns one `DOCUMENT_START` match into a site and appends it, returning the
@@ -305,6 +334,7 @@ function readDocument(
   match: RegExpExecArray,
   sites: InlineSite[],
   locate: (index: number) => { line: number; column: number },
+  lastCodeChar: string,
 ): number | null {
   const [matched, identifier, paren, quote] = match;
   if (paren === undefined && quote !== '`') return null;
@@ -343,6 +373,7 @@ function readDocument(
     body,
     ...locate(bodyStart),
     ...(identifier === undefined ? {} : { identifier }),
+    consumed: identifier === undefined && !STATEMENT_BOUNDARY.has(lastCodeChar),
     blankRanges,
   });
   return end;
@@ -371,6 +402,7 @@ export function extractInlineDocuments(
 ): InlineExtraction {
   const sites = findInlineDocumentSites(content);
   const documents: InlineDocument[] = [];
+  const parsed: InlineSite[] = [];
   let skipped = 0;
 
   for (const site of sites) {
@@ -385,14 +417,19 @@ export function extractInlineDocuments(
         ...(site.identifier === undefined
           ? {}
           : { identifier: site.identifier }),
+        consumed: site.consumed,
         document: parse(new Source(padded, filePath)),
       });
+      parsed.push(site);
     } catch {
       skipped += 1;
     }
   }
 
-  const ranges = sites.flatMap((site) => site.blankRanges);
+  // Only what parsed is blanked. Blanking a half-written template would erase
+  // the fragment names it spreads along with it, and those names are the only
+  // evidence that the fragments they refer to are alive.
+  const ranges = parsed.flatMap((site) => site.blankRanges);
   let blankedContent = content;
   for (const range of ranges) {
     blankedContent =
@@ -421,6 +458,7 @@ export function toInlineEntities(
     ...(document.identifier === undefined
       ? {}
       : { identifier: document.identifier }),
+    consumed: document.consumed,
   }));
 }
 
@@ -444,19 +482,49 @@ export function findInlineIdentifierUsage(
   inlineFiles: GraphqlFileEntities[],
   sources: SourceFile[],
 ): InlineIdentifierUsage[] {
+  // Which files define an inline document under a given constant name. Two
+  // files using the same obvious name (`query`, `doc`) is the norm under the
+  // client preset, and without this one file's use of its own document would
+  // vouch for another file's dead one.
+  const definedIn = new Map<string, Set<string>>();
+  for (const entities of inlineFiles) {
+    if (entities.identifier === undefined) continue;
+    const files = definedIn.get(entities.identifier) ?? new Set<string>();
+    files.add(entities.filePath);
+    definedIn.set(entities.identifier, files);
+  }
+
   const usages: InlineIdentifierUsage[] = [];
   for (const entities of inlineFiles) {
-    const { identifier } = entities;
-    if (identifier === undefined) continue;
-    const pattern = wholeWordPattern(identifier);
-    const reference = sources.find((source) => pattern.test(source.content));
-    if (reference === undefined) continue;
-    usages.push({
-      identifier,
-      file: reference.file,
+    const names = {
       operations: entities.operations.map((operation) => operation.name),
       fragments: entities.fragments.map((fragment) => fragment.name),
-    });
+    };
+    const { identifier } = entities;
+
+    // A document written straight into a call is used by the statement that
+    // defines it. Nothing else can vouch for it, because that statement is
+    // exactly what gets blanked out of the corpus.
+    if (identifier === undefined) {
+      if (entities.consumed === true) {
+        usages.push({
+          identifier: 'its definition site',
+          file: entities.filePath,
+          ...names,
+        });
+      }
+      continue;
+    }
+
+    const shadows = definedIn.get(identifier) ?? new Set<string>();
+    const pattern = wholeWordPattern(identifier);
+    const reference = sources.find(
+      (source) =>
+        (source.file === entities.filePath || !shadows.has(source.file)) &&
+        pattern.test(source.content),
+    );
+    if (reference === undefined) continue;
+    usages.push({ identifier, file: reference.file, ...names });
   }
   return usages;
 }
