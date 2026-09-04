@@ -5,7 +5,7 @@ import fs from 'fs';
 import kleur from 'kleur';
 import * as yaml from 'js-yaml';
 import path from 'path';
-import { buildSchema, GraphQLSchema } from 'graphql';
+import { assertValidSchema, buildSchema, GraphQLSchema } from 'graphql';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { CliConfig, GqlPruneConfig } from '../types/GqlPruneConfig.js';
 import {
@@ -139,13 +139,56 @@ export function resolveStringList(
 }
 
 /**
+ * A configuration value the run cannot proceed with. Thrown from the pure
+ * resolvers so they stay testable, and turned into the exit-2 message by
+ * `mainFunction`, which owns every exit path.
+ */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
+/**
  * Returns the configured usage patterns, falling back to the defaults when none
  * are provided.
  */
 export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
-  return Array.isArray(config.usagePatterns) && config.usagePatterns.length > 0
-    ? config.usagePatterns
-    : DEFAULT_USAGE_PATTERNS;
+  return resolvePatternList(config.usagePatterns, DEFAULT_USAGE_PATTERNS);
+}
+
+/**
+ * Normalizes a configured pattern list. A single pattern written as a YAML
+ * scalar counts, an omitted key falls back to the defaults, and an explicit
+ * empty list is respected rather than treated as absent.
+ *
+ * Every entry has to be a string. A YAML list of ports or version numbers
+ * reaches `expandPattern` as a number otherwise, where `pattern.replace` throws
+ * and takes the whole run down with a stack trace.
+ *
+ * @param {unknown} configured - The value read from the config or the flags.
+ * @param {string[]} fallback - The patterns to use when none are configured.
+ * @returns {string[]} - The patterns to search for.
+ */
+export function resolvePatternList(
+  configured: unknown,
+  fallback: string[],
+  setting = 'usagePatterns',
+): string[] {
+  if (configured === undefined || configured === null) return fallback;
+  const list = Array.isArray(configured) ? configured : [configured];
+  const patterns = list
+    .filter((pattern) => typeof pattern === 'string')
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern !== '');
+  if (patterns.length !== list.length) {
+    throw new ConfigError(
+      `Every entry in "${setting}" must be a non-empty string. Got: ` +
+        `${list.map((pattern) => JSON.stringify(pattern)).join(', ')}.`,
+    );
+  }
+  return patterns;
 }
 
 /**
@@ -154,9 +197,11 @@ export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
  * disables source-reference detection, leaving spread-graph reachability only).
  */
 export function resolveFragmentUsagePatterns(config: GqlPruneConfig): string[] {
-  return Array.isArray(config.fragmentUsagePatterns)
-    ? config.fragmentUsagePatterns
-    : DEFAULT_FRAGMENT_USAGE_PATTERNS;
+  return resolvePatternList(
+    config.fragmentUsagePatterns,
+    DEFAULT_FRAGMENT_USAGE_PATTERNS,
+    'fragmentUsagePatterns',
+  );
 }
 
 /**
@@ -900,14 +945,27 @@ export function resolveRunConfig(cliConfig: CliConfig = {}): ResolvedRunConfig {
       ? { config: merged, codegenNotice: lookup.reason }
       : { config: merged, codegenError: lookup.reason };
   }
-  // Lowest precedence: only the keys nothing else already decided.
+  // Lowest precedence: only the keys nothing else already decided. A key that
+  // is present but empty (`graphqlDir:` on its own, which js-yaml reads as
+  // null) has decided nothing, so it must not block the derived value. Testing
+  // for the key alone made such a config derive everything except the two
+  // directories and then stop, advising the user to run `gqlprune init`, which
+  // is what had just written the file.
+  const decided = (key: string): boolean =>
+    merged[key as keyof typeof merged] !== undefined &&
+    merged[key as keyof typeof merged] !== null;
   const values = Object.fromEntries(
     Object.entries(deriveGqlPruneConfig(lookup.config)).filter(
-      ([key]) => !(key in merged),
+      ([key]) => !decided(key),
     ),
   );
+  // An empty key decided nothing, so it must not overwrite the derived value
+  // it just let through either.
+  const stated = Object.fromEntries(
+    Object.entries(merged).filter(([key]) => decided(key)),
+  );
   return {
-    config: { ...values, ...merged },
+    config: { ...values, ...stated },
     ...(Object.keys(values).length > 0
       ? { codegen: { file: lookup.config.file, values } }
       : { codegenNotice: `Nothing to derive from ${lookup.config.file}.` }),
@@ -1481,14 +1539,33 @@ export function mainFunction(
 
   // ---------------- Main Logic ----------------
 
+  // A configuration value the run cannot use is a broken run, like a missing
+  // directory: exit 2 with the reason, never a stack trace. Both the verbose
+  // lines and the scan resolve the same configured patterns, so both go
+  // through this; --verbose used to turn the clean exit into a raw throw that
+  // cli.ts printed as a trace.
+  const orExitTwo = <T>(read: () => T): T => {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        console.error(kleur.red(error.message));
+        process.exit(2);
+      }
+      throw error;
+    }
+  };
+
   if (verbose) {
     // Report what was configured, then what any glob among it expanded to.
     logVerbose(
-      formatVerboseConfigLines({
-        ...config,
-        graphqlDir: graphqlDirs,
-        srcDir: srcDirs,
-      }),
+      orExitTwo(() =>
+        formatVerboseConfigLines({
+          ...config,
+          graphqlDir: graphqlDirs,
+          srcDir: srcDirs,
+        }),
+      ),
     );
     logVerbose([
       ...formatExpandedDirLines('graphqlDir', graphqlDirs, scanDirs.graphqlDir),
@@ -1505,7 +1582,14 @@ export function mainFunction(
   if (schemaFile !== '') {
     const derivedSchema = codegenSource(run, 'schemaFile');
     try {
-      schema = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
+      const built = buildSchema(fs.readFileSync(schemaFile, 'utf-8'));
+      // buildSchema only runs the SDL-level rules. Whether the result is a
+      // usable schema (a Query root, resolvable type references) is asserted
+      // later, inside graphql's validate, which runs deep in the scan outside
+      // any handler. Asking here keeps both failures on this one path, and
+      // assigning only afterwards keeps an invalid schema out of the scan.
+      assertValidSchema(built);
+      schema = built;
     } catch (e) {
       if (derivedSchema === undefined) {
         console.error(
@@ -1513,7 +1597,9 @@ export function mainFunction(
             `Could not read or parse the GraphQL schema file: ${schemaFile}.`,
           ),
         );
-        console.error(e);
+        // The reason, not the stack: this is a configuration problem the user
+        // can fix, not a crash they should have to read a trace to understand.
+        console.error(kleur.red(e instanceof Error ? e.message : String(e)));
         process.exit(2);
       }
       configWarnings.push(
@@ -1522,7 +1608,7 @@ export function mainFunction(
     }
   }
 
-  const result = scanProject(config, schema);
+  const result = orExitTwo(() => scanProject(config, schema));
   const {
     gqlFileCount,
     sourceFileCount,

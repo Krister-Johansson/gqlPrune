@@ -400,6 +400,64 @@ describe('a project whose sources gqlPrune does not scan by default', () => {
   });
 });
 
+describe('input the CLI cannot use', () => {
+  it('names the mistake when a switch is given a value', async () => {
+    // --json=false used to switch the flag on, so a workflow written as
+    // --annotate=${{ inputs.annotate }} annotated whatever the input said.
+    const result = await runCli([...CLEAN_SCAN, '--json=false']);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('--json takes no value');
+    expect(result.stdout).toBe('');
+  });
+
+  it('reports a schema that parses but is not a usable schema', async () => {
+    // buildSchema accepts this; only assertValidSchema rejects it, and that
+    // used to run deep in the scan where nothing caught it, so the CLI died
+    // with a raw stack trace and no JSON at all.
+    const result = await runCli([
+      ...CLEAN_SCAN,
+      '--schema',
+      'schema-no-query.graphql',
+      '--json',
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      'Could not read or parse the GraphQL schema file',
+    );
+    expect(result.stderr).not.toContain('    at ');
+    expect(result.stdout).toBe('');
+  });
+
+  it('reports a bad usage pattern under --verbose too', async () => {
+    // The verbose lines resolve the same patterns the scan does, so they used
+    // to throw before the guard and print a stack trace instead of the message.
+    const result = await runCli(['--verbose'], {
+      cwd: fixtureProject('bad-patterns'),
+    });
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      'Every entry in "usagePatterns" must be a non-empty string',
+    );
+    expect(result.stderr).not.toContain('    at ');
+  });
+
+  it('reports a usage pattern that is not a string', async () => {
+    const result = await runCli(['--json'], {
+      cwd: fixtureProject('bad-patterns'),
+    });
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      'Every entry in "usagePatterns" must be a non-empty string',
+    );
+    expect(result.stderr).not.toContain('    at ');
+    expect(result.stdout).toBe('');
+  });
+});
+
 describe('usage errors', () => {
   it('exits 2 on an unknown flag', async () => {
     const result = await runCli(['--nope']);

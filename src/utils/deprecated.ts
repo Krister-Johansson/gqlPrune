@@ -47,11 +47,14 @@ export function findDeprecatedUsages(
     return [];
   }
 
-  return validate(schema, concatAST(documents), [NoDeprecatedCustomRule]).map(
-    (error) => ({
-      message: error.message,
-      file: error.source?.name ?? '',
-      line: error.locations?.[0]?.line,
-    }),
-  );
+  // graphql stops at 100 errors by default and replaces the rest with a single
+  // "too many errors" entry, which has no source and renders as a blank row.
+  // Every deprecated selection is a finding here, so there is no cap.
+  return validate(schema, concatAST(documents), [NoDeprecatedCustomRule], {
+    maxErrors: Number.MAX_SAFE_INTEGER,
+  }).map((error) => ({
+    message: error.message,
+    file: error.source?.name ?? '',
+    line: error.locations?.[0]?.line,
+  }));
 }

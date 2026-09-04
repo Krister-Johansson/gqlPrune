@@ -1,0 +1,4 @@
+graphqlDir: graphql
+srcDir: src
+usagePatterns:
+  - 8080
