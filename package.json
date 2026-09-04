@@ -1,6 +1,6 @@
 {
   "name": "gqlprune",
-  "version": "2.12.0",
+  "version": "3.0.0",
   "description": "Finds unused GraphQL operations and fragments by scanning .gql/.graphql files and checking whether each one is referenced in your TypeScript/JavaScript source. No schema or running server needed.",
   "bin": {
     "gqlprune": "./dist/cli.js"
