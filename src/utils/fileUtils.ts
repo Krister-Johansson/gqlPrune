@@ -11,6 +11,11 @@ const baseDir = path.resolve('./');
 // Folders that are always excluded from traversal, regardless of config.
 export const DEFAULT_EXCLUDED_FOLDERS = ['node_modules', '.git'];
 
+/** The message of a thrown value, whatever it turned out to be. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Tests a project-root-relative path against the configured exclude patterns. */
 export type ExcludeMatcher = (relativePath: string) => boolean;
 
@@ -82,10 +87,16 @@ export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
  * and an aliased directory is scanned only once. Broken symlinks are logged
  * and skipped.
  *
+ * A directory or symlink that cannot be read is skipped, and the reason is
+ * handed to `onReadError` rather than printed. A subtree dropped from the scan
+ * makes every operation referenced only inside it look unused, so the caller
+ * has to be able to put that in the report instead of a stray log line.
+ *
  * @param {string} dir - The directory to start searching from.
  * @param {string[]} extensions - The list of file extensions to match.
  * @param {ExcludeMatcher} isExcluded - Predicate marking paths to skip.
  * @param {Set<string>} visited - Real paths of directories already walked.
+ * @param {(message: string) => void} [onReadError] - Receives each skip reason.
  * @returns {string[]} - The matching file paths.
  */
 export function findFilesWithExtension(
@@ -93,6 +104,7 @@ export function findFilesWithExtension(
   extensions: string[],
   isExcluded: ExcludeMatcher,
   visited: Set<string> = new Set(),
+  onReadError: (message: string) => void = () => {},
 ): string[] {
   let files: string[] = [];
 
@@ -119,31 +131,32 @@ export function findFilesWithExtension(
         try {
           isDirectory = fs.statSync(itemPath).isDirectory();
         } catch (error) {
-          console.error(`Error reading stats for: ${itemPath}`);
-          if (error instanceof Error) {
-            console.error(error.message);
-          } else {
-            console.error(error);
-          }
-          continue; // Broken symlink — skip it and continue with the next one
+          onReadError(
+            `Skipped ${itemPath}: could not read it. ${describeError(error)}`,
+          );
+          continue; // Broken symlink: skip it and continue with the next one
         }
       }
 
       if (isDirectory) {
         files = files.concat(
-          findFilesWithExtension(itemPath, extensions, isExcluded, visited),
+          findFilesWithExtension(
+            itemPath,
+            extensions,
+            isExcluded,
+            visited,
+            onReadError,
+          ),
         );
       } else if (extensions.includes(path.extname(item.name).toLowerCase())) {
         files.push(itemPath);
       }
     }
   } catch (error) {
-    console.error(`Error reading directory: ${dir}`);
-    if (error instanceof Error) {
-      console.error(error.message);
-    } else {
-      console.error(error);
-    }
+    onReadError(
+      `Skipped the directory ${dir}: could not read it. ${describeError(error)} ` +
+        'Anything it holds is missing from this scan.',
+    );
   }
 
   return files;
@@ -302,18 +315,19 @@ export type SourceFile = { file: string; content: string };
  * @param {string[]} filePaths - The files to read.
  * @returns {SourceFile[]} - One entry per readable file.
  */
-export function readSourceFiles(filePaths: string[]): SourceFile[] {
+export function readSourceFiles(
+  filePaths: string[],
+  onReadError: (message: string) => void = () => {},
+): SourceFile[] {
   const sources: SourceFile[] = [];
   for (const file of filePaths) {
     try {
       sources.push({ file, content: fs.readFileSync(file, 'utf-8') });
     } catch (error) {
-      console.error(`Error reading file: ${file}`);
-      if (error instanceof Error) {
-        console.error(error.message);
-      } else {
-        console.error(error);
-      }
+      onReadError(
+        `Skipped the source file ${file}: could not read it. ` +
+          `${describeError(error)} Anything it uses looks unused in this scan.`,
+      );
     }
   }
   return sources;

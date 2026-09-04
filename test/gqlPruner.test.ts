@@ -9,6 +9,8 @@ import * as fragments from '../src/utils/fragments';
 import * as inline from '../src/utils/inline';
 import {
   buildJsonReport,
+  DEFAULT_SOURCE_EXTENSIONS,
+  resolveSourceExtensions,
   CANDIDATE_REMINDER,
   createConfigExcludeMatcher,
   DEFAULT_EXCLUDED_FOLDERS,
@@ -458,6 +460,25 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('resolveSourceExtensions', () => {
+    it('falls back to the JavaScript and TypeScript module extensions', () => {
+      expect(resolveSourceExtensions()).toEqual(DEFAULT_SOURCE_EXTENSIONS);
+      expect(resolveSourceExtensions([])).toEqual(DEFAULT_SOURCE_EXTENSIONS);
+    });
+
+    it('normalizes a configured list to lowercase with a leading dot', () => {
+      expect(resolveSourceExtensions(['vue', '.SVELTE', ' .ts '])).toEqual([
+        '.vue',
+        '.svelte',
+        '.ts',
+      ]);
+    });
+
+    it('accepts a single extension written as a scalar', () => {
+      expect(resolveSourceExtensions('.vue')).toEqual(['.vue']);
+    });
+  });
+
   describe('formatVerboseScanLines', () => {
     const baseResult = {
       gqlFileCount: 1,
@@ -474,6 +495,7 @@ describe('gqlPruner', () => {
       unusedFieldCandidates: [],
       duplicateWarnings: [],
       generatedWarnings: [],
+      readWarnings: [],
       generatedFiles: [],
     };
 
@@ -3155,6 +3177,8 @@ describe('gqlPruner', () => {
           './g',
           ['.gql', '.graphql'],
           expect.any(Function),
+          expect.any(Set),
+          expect.any(Function),
         );
       });
 
@@ -3249,9 +3273,13 @@ describe('gqlPruner', () => {
             'src',
             ['.gql', '.graphql'],
             expect.any(Function),
+            expect.any(Set),
+            expect.any(Function),
           );
           expect(mockedFind).not.toHaveBeenCalledWith(
             'legacy',
+            expect.anything(),
+            expect.anything(),
             expect.anything(),
             expect.anything(),
           );

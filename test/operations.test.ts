@@ -101,8 +101,11 @@ describe('operationUtils', () => {
       );
     });
 
-    it('returns an empty structure on parse error', () => {
+    it('returns an empty structure on parse error, carrying the reason', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('query Broken {');
+      // The reason travels as data so the caller can put it in the report. A
+      // file dropped from the corpus takes its fragment spreads with it, and a
+      // fragment it was the only consumer of then looks unused.
       expect(extractGraphqlEntities('f.gql')).toEqual({
         operations: [],
         fragments: [],
@@ -112,6 +115,7 @@ describe('operationUtils', () => {
         imports: [],
         hasAnonymousOperation: false,
         document: null,
+        parseError: expect.stringContaining('Syntax Error'),
       });
     });
 

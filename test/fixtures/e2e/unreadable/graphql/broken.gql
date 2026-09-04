@@ -1,0 +1,4 @@
+# Deliberately unparseable. The scan must carry on and say so in the report,
+# because this file's definitions and fragment spreads are missing from the
+# corpus, which makes anything only it referenced look unused.
+query UnreadableBroken {

@@ -16,6 +16,13 @@ export type GraphqlFileEntities = {
    * not assigned to anything.
    */
   identifier?: string;
+  /**
+   * Why the file could not be parsed, when it could not. The scan carries on
+   * without its definitions, so the caller reports this: a file dropped from
+   * the corpus takes its fragment spreads with it, and a fragment it was the
+   * only consumer of then looks unused.
+   */
+  parseError?: string;
   operations: OperationInfo[];
   fragments: FragmentInfo[];
   /** Names of fragments spread (directly or nested) by operations in the file. */
@@ -158,14 +165,9 @@ export function extractGraphqlEntities(filePath: string): GraphqlFileEntities {
     const ast = parse(new Source(content, filePath));
     return buildGraphqlEntities(ast, filePath, imports);
   } catch (error) {
-    console.error(`Error parsing GraphQL file: ${filePath}`);
-    if (error instanceof Error) {
-      console.error(error.message);
-    } else {
-      console.error(error);
-    }
     return {
       filePath,
+      parseError: error instanceof Error ? error.message : String(error),
       operations: [],
       fragments: [],
       operationSpreads: [],

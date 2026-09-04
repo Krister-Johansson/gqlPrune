@@ -286,7 +286,8 @@ minConfidence: high
 ```
 
 - `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
-- `srcDir`: directory, array of directories, or glob pattern covering your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
+- `srcDir`: directory, array of directories, or glob pattern covering your source files.
+- `sourceExtensions` (optional): the file extensions to scan for usage. Defaults to `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`. Single-file component formats are not scanned unless you name them, so a Vue, Svelte or Astro project needs `sourceExtensions: ['.vue']` or the equivalent. A scan that reads no source file at all warns and tells you this, because every operation would otherwise look unused.
 - `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere in the tree (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. Excluding a directory excludes everything under it, and `./src/gql`, `src/gql/` and `src/gql` are the same pattern written three ways. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
