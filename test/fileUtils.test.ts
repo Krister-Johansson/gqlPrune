@@ -154,6 +154,21 @@ describe('fileUtils', () => {
       ]);
     });
 
+    it('matches an extension whatever its case', () => {
+      // Windows-authored and older trees carry Query.GQL and App.TSX. Skipping
+      // them drops documents from the scan and, on the source side, reports
+      // every operation they reference as unused.
+      (fs.readdirSync as jest.Mock).mockReturnValue([
+        dirent('Query.GQL'),
+        dirent('other.GraphQL'),
+        dirent('notes.md'),
+      ]);
+
+      expect(
+        findFilesWithExtension('./', ['.gql', '.graphql'], () => false).sort(),
+      ).toEqual(['Query.GQL', 'other.GraphQL']);
+    });
+
     it('skips excluded directories and files via the matcher', () => {
       (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
         p === './'
@@ -351,6 +366,31 @@ describe('fileUtils', () => {
       });
     });
 
+    it('includes the base directory itself for a trailing **', () => {
+      // "src/**" reads as "src and everything under it". Expanding it to the
+      // subdirectories alone drops src's own files from the scan, which is how
+      // a live operation defined in src/index.ts came back reported unused.
+      mockTree({ src: ['components'], 'src/components': [] });
+
+      expect(expandDirPatterns(['src/**'])).toEqual({
+        dirs: ['src', 'src/components'],
+        unmatched: [],
+      });
+    });
+
+    it('includes each intermediate directory for a nested trailing **', () => {
+      mockTree({
+        packages: ['api'],
+        'packages/api': ['src'],
+        'packages/api/src': [],
+      });
+
+      expect(expandDirPatterns(['packages/*/**']).dirs).toEqual([
+        'packages/api',
+        'packages/api/src',
+      ]);
+    });
+
     it('reports a glob that matches no directory', () => {
       mockTree({ packages: ['web'], 'packages/web': ['src'] });
       expect(expandDirPatterns(['packages/*/graphql', './src'])).toEqual({
@@ -495,6 +535,45 @@ describe('fileUtils', () => {
       expect(createExcludeMatcher(['!keep.ts', 'keep.ts'])('src/keep.ts')).toBe(
         false,
       );
+    });
+
+    // The four spellings below all name the same directory. Before the walk
+    // matched on the whole path they silently did nothing, so a project whose
+    // generated output sat in src/gql got a clean bill of health from three of
+    // the four ways of excluding it.
+    it.each([
+      ['a trailing glob', 'src/gql/**'],
+      ['a "./" prefix', './src/gql'],
+      ['a trailing slash', 'src/gql/'],
+      ['the bare path', 'src/gql'],
+    ])('excludes a nested directory written with %s', (_label, pattern) => {
+      const ex = createExcludeMatcher([pattern]);
+
+      expect(ex('src/gql/graphql.ts')).toBe(true);
+      expect(ex('src/components/App.tsx')).toBe(false);
+    });
+
+    it('anchors a path pattern that carries glob magic', () => {
+      const ex = createExcludeMatcher(['packages/*/generated/**']);
+
+      expect(ex('packages/api/generated/types.ts')).toBe(true);
+      expect(ex('vendor/packages/api/generated/types.ts')).toBe(false);
+    });
+
+    it('matches a nested file pattern at any depth below its anchor', () => {
+      const ex = createExcludeMatcher(['src/**/*.gen.ts']);
+
+      expect(ex('src/a.gen.ts')).toBe(true);
+      expect(ex('src/deep/nested/a.gen.ts')).toBe(true);
+      expect(ex('lib/a.gen.ts')).toBe(false);
+    });
+
+    it('excludes everything under an excluded directory', () => {
+      const ex = createExcludeMatcher(['__generated__']);
+
+      expect(ex('src/__generated__')).toBe(true);
+      expect(ex('src/__generated__/graphql.ts')).toBe(true);
+      expect(ex('src/__generated__/deep/types.ts')).toBe(true);
     });
 
     it('excludes nothing when there are no positive patterns', () => {

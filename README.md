@@ -287,7 +287,7 @@ minConfidence: high
 
 - `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
 - `srcDir`: directory, array of directories, or glob pattern covering your source files (`.ts`, `.tsx`, `.js`, `.jsx`).
-- `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere by basename (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
+- `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere in the tree (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. Excluding a directory excludes everything under it, and `./src/gql`, `src/gql/` and `src/gql` are the same pattern written three ways. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
 - `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
 - `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
@@ -315,7 +315,7 @@ graphqlDir: 'packages/*/graphql'
 srcDir: 'packages/*/src'
 ```
 
-`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
+`*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces. A pattern ending in `**` covers the directory it names as well as everything under it, so `src/**` scans `src` itself. Quote the pattern in YAML, since a value starting with `*` is not valid YAML otherwise. `node_modules` and `.git` are never searched. A glob never expands inside them either, so a pattern such as `node_modules/*/graphql` matches nothing rather than reaching in. A pattern that matches no directory ends the run with exit code 2, the same as a directory that does not exist, so a typo or a moved folder cannot pass as a clean scan.
 
 ### Reading your codegen config
 

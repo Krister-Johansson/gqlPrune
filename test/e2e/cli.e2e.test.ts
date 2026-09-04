@@ -253,6 +253,66 @@ describe('directory globs', () => {
   });
 });
 
+describe('--exclude', () => {
+  // The masked project's pretend-codegen/graphql.ts references every operation,
+  // so excluding it is what lets the dead ones surface. All four spellings name
+  // that one directory; before the matcher tested whole paths, three of them
+  // quietly excluded nothing and the run reported a clean project.
+  it.each([
+    ['a trailing glob', 'masked/src/pretend-codegen/**'],
+    ['a "./" prefix', './masked/src/pretend-codegen'],
+    ['a trailing slash', 'masked/src/pretend-codegen/'],
+    ['a bare folder name', 'pretend-codegen'],
+  ])(
+    'takes the masking file out of the scan, written as %s',
+    async (_label, pattern) => {
+      const result = await runCli([
+        ...MASKED_SCAN,
+        '--exclude',
+        pattern,
+        '--json',
+      ]);
+      const report = parseReport(result);
+
+      expect(result.code).toBe(1);
+      expect(report.unusedOperations.map((op) => op.name).sort()).toEqual([
+        'GetCatalogFacets',
+        'GetCatalogItem',
+        'GetInventoryAlerts',
+        'GetInventoryLevels',
+        'UpdateCatalogItem',
+      ]);
+    },
+  );
+
+  it('scans the masking file when nothing excludes it', async () => {
+    const result = await runCli([...MASKED_SCAN, '--json']);
+
+    expect(result.code).toBe(0);
+    expect(parseReport(result).unusedOperations).toEqual([]);
+  });
+});
+
+describe('a directory pattern ending in **', () => {
+  it('scans the directory it names, not only its subdirectories', async () => {
+    // packages/*/src holds the files that prove both workspaces' operations
+    // alive; "packages/*/src/**" must still reach them, not just any nested
+    // folder underneath.
+    const withGlob = await runCli([
+      '--graphql',
+      'packages/*/graphql',
+      '--src',
+      'packages/*/src/**',
+      '--json',
+    ]);
+    const plain = await runCli([...GLOB_SCAN, '--json']);
+
+    expect(parseReport(withGlob).unusedOperations.map((op) => op.name)).toEqual(
+      parseReport(plain).unusedOperations.map((op) => op.name),
+    );
+  });
+});
+
 describe('usage errors', () => {
   it('exits 2 on an unknown flag', async () => {
     const result = await runCli(['--nope']);
