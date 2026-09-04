@@ -70,17 +70,23 @@ export type InlineIdentifierUsage = {
 /**
  * Start of an inline document: an optional `const|let|var IDENT =` (an `export`
  * in front and a type annotation after the name are both fine, including one
- * broken over several lines, which is what a printer does to a long
- * `TypedDocumentNode<...>`), then the `gql`
+ * broken over several lines inside its type arguments, which is what a printer
+ * does to a long `TypedDocumentNode<...>`), then the `gql`
  * or `graphql` tag, possibly reached through a member expression, and then
  * either a backtick (tagged template) or a parenthesis and the opening quote of
  * a single string argument. The lookarounds keep `mygql` and `graphqlDir` out.
+ *
+ * The annotation may only cross a line break inside `<...>`. Letting it cross
+ * one anywhere made it run past the end of its own statement: `let cache:
+ * Map<string, unknown>` followed by `const doc = graphql(...)` matched as one
+ * declaration and captured `cache`, so the real constant was never tracked and
+ * the document it names came back unused.
  *
  * Sticky, because the scanner only ever tries it at an offset it has already
  * decided is code rather than a comment or a string.
  */
 const DOCUMENT_START =
-  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]*)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
+  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;<\n]*(?:<[^=;]*>[^=;\n]*)?)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
 
 /** First character of a JavaScript identifier, where a tag can begin. */
 const IDENTIFIER_START = /[A-Za-z_$]/;

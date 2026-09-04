@@ -417,6 +417,40 @@ describe('a multi-line type annotation', () => {
   });
 });
 
+describe('a declaration before an inline document', () => {
+  it('does not lend its identifier to the document that follows', () => {
+    // The annotation may only cross a line break inside its type arguments.
+    // Letting it cross one anywhere made these two statements match as one, so
+    // the document was tracked under `cache` and the constant that really
+    // names it was never seen, which reported a live document as unused.
+    const content = [
+      'let cache: Map<string, unknown>',
+      'const useQueryDoc = graphql(`query GetUser { id }`);',
+    ].join('\n');
+
+    const sites = findInlineDocumentSites(content);
+
+    expect(sites).toHaveLength(1);
+    expect(sites[0].identifier).toBe('useQueryDoc');
+  });
+
+  it('handles a declaration with no initializer at all', () => {
+    const content = [
+      'declare let __DEV__: boolean',
+      'export const Doc = graphql(`query GetUser { id }`);',
+    ].join('\n');
+
+    expect(findInlineDocumentSites(content)[0]?.identifier).toBe('Doc');
+  });
+
+  it('still reads an annotation carrying a union after its type arguments', () => {
+    const content =
+      'const Doc: TypedDocumentNode<A, B> | undefined = graphql(`query G { id }`);';
+
+    expect(findInlineDocumentSites(content)[0]?.identifier).toBe('Doc');
+  });
+});
+
 describe('a body that does not parse', () => {
   it('is left in the usage corpus instead of being blanked away', () => {
     // A half-written template is normal while editing. Blanking it erases the
