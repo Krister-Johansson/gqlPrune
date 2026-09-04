@@ -502,6 +502,32 @@ describe('findInlineIdentifierUsage', () => {
     expect(usage[0].file).toBe('src/App.tsx');
   });
 
+  it('still reports a standalone document after a line without a semicolon', () => {
+    // JavaScript ends the previous statement at the line break, so this
+    // document stands alone however the line before it ended. A project
+    // written without semicolons would otherwise have every standalone
+    // document counted as used.
+    const entities = entitiesFor(
+      'const n = 1\ngraphql(`query GetUser { id }`)',
+    );
+
+    expect(
+      findInlineIdentifierUsage(entities, [
+        { file: 'src/App.tsx', content: 'const n = 1\n' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('keeps a document on the line after an expression that continues', () => {
+    const entities = entitiesFor('useQuery(\n  gql`query GetUser { id }`,\n);');
+
+    expect(
+      findInlineIdentifierUsage(entities, [
+        { file: 'src/App.tsx', content: 'useQuery(\n  \n);' },
+      ]),
+    ).toHaveLength(1);
+  });
+
   it('still reports a document standing alone as a statement', () => {
     const entities = entitiesFor('graphql(`query GetUser { id }`);');
 

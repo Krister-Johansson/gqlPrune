@@ -273,6 +273,12 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
   // something (`useQuery(` ends in an open paren) from one standing alone as
   // its own statement (the previous statement ended in `;` or a brace).
   let lastCodeChar = '';
+  // Whether a line break separates `lastCodeChar` from the current offset.
+  // JavaScript ends a statement at a line break unless the line cannot end
+  // there, so a document after one is standalone however the line before it
+  // ended. Without this, a project written without semicolons would have every
+  // standalone document counted as used.
+  let newlineSince = false;
   let i = 0;
   while (i < content.length) {
     const char = content[i];
@@ -289,9 +295,15 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
       if (char === "'" || char === '"' || char === '`') {
         i = skipLiteral(content, i);
         lastCodeChar = 'x'; // a literal is a value, like an identifier
+        newlineSince = false;
         continue;
       }
-      if (!/\s/.test(char)) lastCodeChar = char;
+      if (/\s/.test(char)) {
+        if (char === '\n' || char === '\r') newlineSince = true;
+      } else {
+        lastCodeChar = char;
+        newlineSince = false;
+      }
       i += 1;
       continue;
     }
@@ -301,10 +313,19 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
     const end =
       match === null
         ? null
-        : readDocument(content, match, sites, locate, lastCodeChar);
+        : readDocument(
+            content,
+            match,
+            sites,
+            locate,
+            newlineSince && !CONTINUES_EXPRESSION.has(lastCodeChar)
+              ? ''
+              : lastCodeChar,
+          );
     if (end !== null) {
       i = end;
       lastCodeChar = content[end - 1] ?? '';
+      newlineSince = false;
       continue;
     }
     // Not a document after all: step over the whole identifier so the text it
@@ -312,6 +333,7 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
     i += 1;
     while (i < content.length && IDENTIFIER_PART.test(content[i])) i += 1;
     lastCodeChar = content[i - 1] ?? '';
+    newlineSince = false;
   }
   return sites;
 }
@@ -321,6 +343,34 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
  * one of these, or which opens the file, is not being passed to anything.
  */
 const STATEMENT_BOUNDARY = new Set(['', ';', '{', '}']);
+
+/**
+ * Characters a statement cannot end on, so a line break after one of them
+ * continues the expression rather than closing it. Everything else means
+ * JavaScript inserts a semicolon at the break, which makes a document on the
+ * next line a statement of its own however the previous line ended.
+ */
+const CONTINUES_EXPRESSION = new Set([
+  '(',
+  ',',
+  '[',
+  '=',
+  ':',
+  '?',
+  '+',
+  '-',
+  '*',
+  '/',
+  '%',
+  '&',
+  '|',
+  '^',
+  '!',
+  '~',
+  '<',
+  '>',
+  '.',
+]);
 
 /**
  * Turns one `DOCUMENT_START` match into a site and appends it, returning the
