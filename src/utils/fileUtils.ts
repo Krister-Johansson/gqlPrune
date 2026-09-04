@@ -19,22 +19,50 @@ function toRelativePosix(itemPath: string): string {
 }
 
 /**
+ * Rewrites one gitignore-flavored pattern into the globs that implement it.
+ *
+ * A `./` prefix and a trailing slash are spelling, not meaning, so both are
+ * normalized away first: `./src/gql`, `src/gql/` and `src/gql` are one pattern.
+ * A pattern without a slash names a file or folder anywhere in the tree, which
+ * is `**\/` in front of it; one with a slash is anchored to the project root
+ * and passes through. Either way it also gets a `/**` twin, so excluding a
+ * directory excludes everything under it.
+ *
+ * Doing this by hand is what picomatch's `basename` option looks like it would
+ * do. It does not: `basename` applies only to patterns with no slash, and it
+ * makes every pattern that mixes a slash with glob magic match nothing at all.
+ */
+function toExcludeGlobs(pattern: string): string[] {
+  const normalized = pattern.replace(/^\.\//, '').replace(/\/+$/, '');
+  if (normalized === '') return [];
+  const anchored = normalized.includes('/') ? normalized : `**/${normalized}`;
+  return [anchored, `${anchored}/**`];
+}
+
+/**
  * Builds a matcher from gitignore-flavored glob patterns. A pattern without a
- * slash matches anywhere (by basename); one with a slash is anchored to the
- * project root; `**` matches any depth; a leading `!` re-includes. Returns a
- * predicate over project-root-relative paths; never excludes when no positive
- * patterns are given.
+ * slash matches anywhere; one with a slash is anchored to the project root;
+ * `**` matches any depth; a leading `!` re-includes. Returns a predicate over
+ * project-root-relative paths; never excludes when no positive patterns are
+ * given.
+ *
+ * As in gitignore, a `!` cannot re-include a path whose parent directory is
+ * excluded: the walk never enters an excluded directory, so nothing inside it
+ * is ever offered to this matcher.
  */
 export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
   const cleaned = patterns.map((p) => p.trim()).filter(Boolean);
-  const positives = cleaned.filter((p) => !p.startsWith('!'));
+  const positives = cleaned
+    .filter((p) => !p.startsWith('!'))
+    .flatMap(toExcludeGlobs);
   const negatives = cleaned
     .filter((p) => p.startsWith('!'))
-    .map((p) => p.slice(1));
+    .map((p) => p.slice(1))
+    .flatMap(toExcludeGlobs);
   if (positives.length === 0) {
     return () => false;
   }
-  const options = { dot: true, basename: true };
+  const options = { dot: true };
   const matchPositive = picomatch(positives, options);
   const matchNegative: ExcludeMatcher = negatives.length
     ? picomatch(negatives, options)
@@ -104,7 +132,7 @@ export function findFilesWithExtension(
         files = files.concat(
           findFilesWithExtension(itemPath, extensions, isExcluded, visited),
         );
-      } else if (extensions.includes(path.extname(item.name))) {
+      } else if (extensions.includes(path.extname(item.name).toLowerCase())) {
         files.push(itemPath);
       }
     }
@@ -144,10 +172,18 @@ function findMatchingDirs(
   glob: string,
   prefix: string,
 ): string[] {
-  const isMatch = picomatch(glob, { dot: true });
+  // A trailing `**` reads as "this directory and everything under it", so the
+  // directory the glob points at is a match in its own right. picomatch cannot
+  // express that: no glob matches the empty relative path. Stripping the `/**`
+  // gives the pattern that does, and a bare `**` means the walk's own base.
+  const globs = glob.endsWith('/**') ? [glob, glob.slice(0, -3)] : [glob];
+  const isMatch = picomatch(globs, { dot: true });
   const depthLimit = /\*\*|\{/.test(glob) ? Infinity : glob.split('/').length;
   const matches: string[] = [];
   const visited = new Set<string>();
+  if (glob === '**' && base !== '') {
+    matches.push(`${prefix}${base}`);
+  }
 
   const walk = (dir: string, relative: string, depth: number): void => {
     let items: fs.Dirent[];
