@@ -430,13 +430,29 @@ describe('input the CLI cannot use', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('reports a bad usage pattern under --verbose too', async () => {
+    // The verbose lines resolve the same patterns the scan does, so they used
+    // to throw before the guard and print a stack trace instead of the message.
+    const result = await runCli(['--verbose'], {
+      cwd: fixtureProject('bad-patterns'),
+    });
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      'Every entry in "usagePatterns" must be a non-empty string',
+    );
+    expect(result.stderr).not.toContain('    at ');
+  });
+
   it('reports a usage pattern that is not a string', async () => {
     const result = await runCli(['--json'], {
       cwd: fixtureProject('bad-patterns'),
     });
 
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain('Usage patterns must be non-empty strings');
+    expect(result.stderr).toContain(
+      'Every entry in "usagePatterns" must be a non-empty string',
+    );
     expect(result.stderr).not.toContain('    at ');
     expect(result.stdout).toBe('');
   });

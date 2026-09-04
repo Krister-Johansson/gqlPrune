@@ -160,14 +160,13 @@ export const CODEGEN_PATTERN_MAPPINGS: readonly CodegenPatternMapping[] = [
     // followed by `useQuery(q)` never names the operation, so no pattern can
     // find it. The inline scan follows the constant instead.
     //
-    // The empty lists say that deliberately. Omitting the keys let the built-in
-    // {Name}Document default through, and it then matched the preset's own
-    // generated GetDeadDocument, so every operation looked used and the preset
-    // this mapping exists for reported nothing.
+    // It states no patterns on purpose, and does NOT state empty ones: a client
+    // preset project can still hold .gql files used through ordinary hooks, and
+    // an empty list would make every one of them undetectable. What keeps the
+    // preset's own generated {Name}Document constants from vouching for their
+    // operations is the `generates` path, which derivation puts into `exclude`.
     name: 'client',
     kind: 'preset',
-    usagePatterns: [],
-    fragmentUsagePatterns: [],
     inline: true,
   },
 ];
@@ -716,6 +715,15 @@ export function deriveGqlPruneConfig(
   const fragmentUsagePatterns = unique(
     matched.flatMap((mapping) => mapping.fragmentUsagePatterns ?? []),
   );
+  // A mapping that states a list means it, empty included, so the derived
+  // config carries it rather than falling through to the built-in defaults.
+  // No mapping states an empty list today; the check exists so one can.
+  const statesUsagePatterns = matched.some(
+    (mapping) => mapping.usagePatterns !== undefined,
+  );
+  const statesFragmentPatterns = matched.some(
+    (mapping) => mapping.fragmentUsagePatterns !== undefined,
+  );
   const inline =
     included.some((glob) =>
       globExtensions(glob).some((extension) =>
@@ -727,8 +735,8 @@ export function deriveGqlPruneConfig(
     ...(dirs.length > 0 ? { graphqlDir: dirs, srcDir: dirs } : {}),
     ...(exclude.length > 0 ? { exclude } : {}),
     ...(schemaFile === undefined ? {} : { schemaFile }),
-    ...(usagePatterns.length > 0 ? { usagePatterns } : {}),
-    ...(fragmentUsagePatterns.length > 0 ? { fragmentUsagePatterns } : {}),
+    ...(statesUsagePatterns ? { usagePatterns } : {}),
+    ...(statesFragmentPatterns ? { fragmentUsagePatterns } : {}),
     ...(inline ? { inline: true } : {}),
   };
 }

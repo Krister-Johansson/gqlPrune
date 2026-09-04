@@ -174,6 +174,7 @@ export function resolveUsagePatterns(config: GqlPruneConfig): string[] {
 export function resolvePatternList(
   configured: unknown,
   fallback: string[],
+  setting = 'usagePatterns',
 ): string[] {
   if (configured === undefined || configured === null) return fallback;
   const list = Array.isArray(configured) ? configured : [configured];
@@ -183,7 +184,7 @@ export function resolvePatternList(
     .filter((pattern) => pattern !== '');
   if (patterns.length !== list.length) {
     throw new ConfigError(
-      'Usage patterns must be non-empty strings. Got: ' +
+      `Every entry in "${setting}" must be a non-empty string. Got: ` +
         `${list.map((pattern) => JSON.stringify(pattern)).join(', ')}.`,
     );
   }
@@ -199,6 +200,7 @@ export function resolveFragmentUsagePatterns(config: GqlPruneConfig): string[] {
   return resolvePatternList(
     config.fragmentUsagePatterns,
     DEFAULT_FRAGMENT_USAGE_PATTERNS,
+    'fragmentUsagePatterns',
   );
 }
 
@@ -1537,14 +1539,33 @@ export function mainFunction(
 
   // ---------------- Main Logic ----------------
 
+  // A configuration value the run cannot use is a broken run, like a missing
+  // directory: exit 2 with the reason, never a stack trace. Both the verbose
+  // lines and the scan resolve the same configured patterns, so both go
+  // through this; --verbose used to turn the clean exit into a raw throw that
+  // cli.ts printed as a trace.
+  const orExitTwo = <T>(read: () => T): T => {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        console.error(kleur.red(error.message));
+        process.exit(2);
+      }
+      throw error;
+    }
+  };
+
   if (verbose) {
     // Report what was configured, then what any glob among it expanded to.
     logVerbose(
-      formatVerboseConfigLines({
-        ...config,
-        graphqlDir: graphqlDirs,
-        srcDir: srcDirs,
-      }),
+      orExitTwo(() =>
+        formatVerboseConfigLines({
+          ...config,
+          graphqlDir: graphqlDirs,
+          srcDir: srcDirs,
+        }),
+      ),
     );
     logVerbose([
       ...formatExpandedDirLines('graphqlDir', graphqlDirs, scanDirs.graphqlDir),
@@ -1587,20 +1608,7 @@ export function mainFunction(
     }
   }
 
-  // A configuration value the scan cannot use is a broken run, like a missing
-  // directory: exit 2 with the reason, never a stack trace. In --json mode
-  // nothing has been written to stdout yet, so a consumer sees an empty stream
-  // and a non-zero code rather than half a report.
-  let result: ScanResult;
-  try {
-    result = scanProject(config, schema);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      console.error(kleur.red(error.message));
-      process.exit(2);
-    }
-    throw error;
-  }
+  const result = orExitTwo(() => scanProject(config, schema));
   const {
     gqlFileCount,
     sourceFileCount,

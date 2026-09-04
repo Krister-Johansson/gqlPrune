@@ -31,7 +31,6 @@ import {
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
   resolveRunConfig,
-  ConfigError,
   resolveUsagePatterns,
   scanProject,
 } from '../src/core/gqlPruner';
@@ -559,7 +558,19 @@ describe('gqlPruner', () => {
         resolveUsagePatterns({
           usagePatterns: [8080],
         } as unknown as GqlPruneConfig),
-      ).toThrow(ConfigError);
+      ).toThrow(/Every entry in "usagePatterns"/);
+    });
+  });
+
+  describe('resolveFragmentUsagePatterns', () => {
+    it('names the setting the bad value came from', () => {
+      // The shared resolver used to blame usagePatterns whichever key was at
+      // fault, sending the user to the wrong line of their config.
+      expect(() =>
+        resolveFragmentUsagePatterns({
+          fragmentUsagePatterns: [7],
+        } as unknown as GqlPruneConfig),
+      ).toThrow(/Every entry in "fragmentUsagePatterns"/);
     });
   });
 
