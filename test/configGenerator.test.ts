@@ -36,6 +36,9 @@ jest.mock('../src/core/gqlPruner', () => ({
   scanProject: jest.fn(),
   resolveDirs: (value: unknown) =>
     Array.isArray(value) ? value : value ? [value] : [],
+  // Real, so `init` expands globs and checks directories exactly as a scan
+  // does; the mocked fs tree below is what it walks.
+  resolveScanDirs: jest.requireActual('../src/core/gqlPruner').resolveScanDirs,
 }));
 
 const mockedScan = scanProject as jest.Mock;
@@ -160,6 +163,40 @@ describe('configGenerator', () => {
     it('returns [] without scanning when a directory is missing', () => {
       mockFsTree({}, new Set(['./graphql'])); // ./src does not exist
       expect(detectGeneratedExcludes('./graphql', './src')).toEqual([]);
+      expect(mockedScan).not.toHaveBeenCalled();
+    });
+
+    it('expands a directory glob before scanning, as the scan itself does', () => {
+      mockFsTree(
+        {
+          packages: ['a', 'b'],
+          'packages/a': ['graphql'],
+          'packages/b': ['graphql'],
+        },
+        new Set([
+          'packages',
+          'packages/a',
+          'packages/a/graphql',
+          'packages/b',
+          'packages/b/graphql',
+          './src',
+        ]),
+      );
+      mockedScan.mockReturnValue({ generatedFiles: [] });
+      expect(detectGeneratedExcludes('packages/*/graphql', './src')).toEqual(
+        [],
+      );
+      expect(mockedScan).toHaveBeenCalledWith({
+        graphqlDir: ['packages/a/graphql', 'packages/b/graphql'],
+        srcDir: ['./src'],
+      });
+    });
+
+    it('returns [] without scanning when a glob matches nothing', () => {
+      mockFsTree({ packages: [] }, new Set(['packages', './src']));
+      expect(detectGeneratedExcludes('packages/*/graphql', './src')).toEqual(
+        [],
+      );
       expect(mockedScan).not.toHaveBeenCalled();
     });
   });
@@ -503,6 +540,50 @@ describe('configGenerator', () => {
       const out = logSpy.mock.calls.flat().join('\n');
       expect(out).toContain(
         '✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.',
+      );
+    });
+
+    it('previews through an expanded directory glob', async () => {
+      mockFsTree(
+        { '.': ['packages'], packages: ['a'], 'packages/a': ['graphql'] },
+        new Set(['packages', 'packages/a', 'packages/a/graphql', './src']),
+      );
+      mockInputAnswers('packages/*/graphql', './src');
+      mockedScan.mockReturnValue({
+        gqlFileCount: 2,
+        sourceFileCount: 3,
+        operationCount: 4,
+        unusedOperations: [],
+        unusedFragments: [],
+        generatedWarnings: [],
+        generatedFiles: [],
+      });
+
+      await generateConfig();
+
+      expect(mockedScan).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          graphqlDir: ['packages/a/graphql'],
+          srcDir: ['./src'],
+        }),
+      );
+      expect(logSpy.mock.calls.flat().join('\n')).toContain(
+        '✓ Found 4 operations in 2 files; 0 look unused.',
+      );
+    });
+
+    it('prints the fallback line instead of a preview when a glob matches nothing', async () => {
+      mockFsTree(
+        { '.': ['packages'], packages: [] },
+        new Set(['packages', './src']),
+      );
+      mockInputAnswers('packages/*/graphql', './src');
+
+      await generateConfig();
+
+      expect(mockedScan).not.toHaveBeenCalled();
+      expect(logSpy.mock.calls.flat().join('\n')).toContain(
+        'Run "gqlprune" to scan for unused GraphQL operations.',
       );
     });
 

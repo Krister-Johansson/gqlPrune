@@ -20,7 +20,7 @@ import {
   deriveGqlPruneConfig,
   discoverCodegenConfig,
 } from '../utils/codegen.js';
-import { resolveDirs, scanProject } from './gqlPruner.js';
+import { resolveDirs, resolveScanDirs, scanProject } from './gqlPruner.js';
 import { pluralize } from '../utils/stringHelpers.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
@@ -54,20 +54,41 @@ export function splitFolders(input: string): string[] {
 }
 
 /**
+ * The directories `init`'s answers expand to, ready for a scan, or `undefined`
+ * when there is nothing to scan yet. The answers go through the same
+ * expansion and existence check as a real run, so a monorepo glob such as
+ * `packages/*\/graphql` reaches the same directories here that it will reach
+ * on the first `gqlprune`. Every answer is the user's own, so any failure
+ * (an empty answer, a glob matching nothing, a directory not on disk) means
+ * "nothing to scan" rather than an error to report: `init` still writes the
+ * config, and the first real run reports the problem with exit code 2.
+ */
+function scannableDirs(
+  graphqlDir: string | string[],
+  srcDir: string | string[],
+): { graphqlDir: string[]; srcDir: string[] } | undefined {
+  const graphqlDirs = resolveDirs(graphqlDir);
+  const srcDirs = resolveDirs(srcDir);
+  if (graphqlDirs.length === 0 || srcDirs.length === 0) return undefined;
+  const scanDirs = resolveScanDirs(graphqlDirs, srcDirs);
+  return scanDirs.error === undefined
+    ? { graphqlDir: scanDirs.graphqlDir, srcDir: scanDirs.srcDir }
+    : undefined;
+}
+
+/**
  * Detects source files that would mask unused results (a generated file inside
- * `srcDir` referencing most operations — see {@link detectGeneratedFiles}) so
+ * `srcDir` referencing most operations, see {@link detectGeneratedFiles}) so
  * `init` can pre-fill them into `exclude`. Returns their project-root-relative
- * paths, or `[]` when a directory is missing (nothing to scan yet).
+ * paths, or `[]` when there is nothing to scan yet.
  */
 export function detectGeneratedExcludes(
   graphqlDir: string | string[],
   srcDir: string | string[],
 ): string[] {
-  const dirs = [...resolveDirs(graphqlDir), ...resolveDirs(srcDir)];
-  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
-    return [];
-  }
-  return scanProject({ graphqlDir, srcDir }).generatedFiles.map((warning) =>
+  const dirs = scannableDirs(graphqlDir, srcDir);
+  if (dirs === undefined) return [];
+  return scanProject(dirs).generatedFiles.map((warning) =>
     warning.file.replace(/\\/g, '/'),
   );
 }
@@ -264,18 +285,15 @@ export function detectSrcDirs(): DirDetection {
   );
 }
 
-/** Prints a one-line preview of what a real run would find, when the dirs exist. */
+/** Prints a one-line preview of what a real run would find, when it can run. */
 function printPreview(config: GqlPruneConfig): void {
-  const dirs = [
-    ...resolveDirs(config.graphqlDir),
-    ...resolveDirs(config.srcDir),
-  ];
-  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
+  const dirs = scannableDirs(config.graphqlDir, config.srcDir);
+  if (dirs === undefined) {
     console.log('Run "gqlprune" to scan for unused GraphQL operations.');
     return;
   }
   const { operationCount, gqlFileCount, unusedOperations, unusedFragments } =
-    scanProject(config);
+    scanProject({ ...config, ...dirs });
   const unused = unusedOperations.length + unusedFragments.length;
   console.log(
     `✓ Found ${operationCount} ${pluralize(operationCount, 'operation')} in ` +
