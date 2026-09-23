@@ -74,20 +74,6 @@ export function gradeName(
 }
 
 /**
- * Lowers a grade to `max` when the evidence claims more than the detection can
- * support, recording `heuristic-cap` as the reason. A grade already at or below
- * the cap passes through untouched.
- */
-export function capConfidence(
-  grade: ConfidenceGrade,
-  max: ConfidenceLevel,
-): ConfidenceGrade {
-  return RANK[grade.confidence] <= RANK[max]
-    ? grade
-    : { confidence: max, reason: 'heuristic-cap' };
-}
-
-/**
  * The weakest of a set of grades. An empty set grades `high`, which only
  * happens where there is nothing to weaken the verdict.
  */
@@ -160,22 +146,24 @@ export function gradeFragments(
 }
 
 /**
- * Grades every field candidate, capped at `medium`. The candidates come from a
- * name-absence heuristic that cannot see a field read through a rename, a
- * spread, or a computed key, so however absent the name is, calling one of them
- * high confidence would claim more than the check can know.
+ * Grades every field candidate `medium`, the ceiling for the field check. A
+ * candidate only exists because its name appears nowhere in the scanned
+ * source, which is the evidence that grades an operation `high`; but the
+ * name-absence heuristic cannot see a field read through a rename, a spread,
+ * or a computed key, so however absent the name is, calling one of them high
+ * confidence would claim more than the check can know. Nothing is searched
+ * here: the sweep that produced the candidate already established the absence.
+ *
+ * @param {UnusedFieldInfo[]} candidates - The field candidates to grade.
+ * @returns {GradedField[]} - The same candidates, each graded medium.
  */
 export function gradeFieldCandidates(
   candidates: UnusedFieldInfo[],
-  sources: SourceFile[],
-  generatedFiles: ReadonlySet<string>,
 ): GradedField[] {
   return candidates.map((candidate) => ({
     ...candidate,
-    ...capConfidence(
-      gradeName(candidate.field, sources, generatedFiles),
-      'medium',
-    ),
+    confidence: 'medium',
+    reason: 'heuristic-cap',
   }));
 }
 

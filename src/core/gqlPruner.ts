@@ -1428,11 +1428,7 @@ export function scanProject(
       gradedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
-    unusedFieldCandidates: gradeFieldCandidates(
-      unusedFieldCandidates,
-      sources,
-      generatedPaths,
-    ),
+    unusedFieldCandidates: gradeFieldCandidates(unusedFieldCandidates),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     readWarnings,
