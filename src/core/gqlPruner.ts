@@ -18,7 +18,6 @@ import {
   DEFAULT_SOURCE_EXTENSIONS,
   DOCUMENT_EXTENSIONS,
   findUsageMatch,
-  isOperationUsedInContents,
   readSourceFiles,
   SourceFile,
 } from '../utils/fileUtils.js';
@@ -221,21 +220,6 @@ export function resolveInline(config: GqlPruneConfig): boolean {
   return config.inline === true;
 }
 
-/**
- * Returns the operations that are not referenced by any of the file contents,
- * using the given usage patterns.
- */
-export function findUnusedOperations(
-  operations: OperationInfo[],
-  fileContents: string[],
-  usagePatterns: string[],
-): OperationInfo[] {
-  return operations.filter((op) => {
-    const patterns = buildUsagePatterns(op, usagePatterns);
-    return !isOperationUsedInContents(patterns, fileContents);
-  });
-}
-
 /** How a single operation's used/unused verdict was reached. */
 export type OperationUsage = {
   operation: OperationInfo;
@@ -246,10 +230,10 @@ export type OperationUsage = {
 };
 
 /**
- * Determines, for every operation, whether it is referenced in the sources —
+ * Determines, for every operation, whether it is referenced in the sources,
  * and when it is, which expanded pattern matched in which file. The unused set
- * derived from this (`!usage.match`) is identical to `findUnusedOperations`;
- * the extra detail exists so `--verbose` can explain each verdict.
+ * is what has no `match`; the detail is what lets `--verbose` explain each
+ * verdict. This is the one sweep the scan runs over the sources for operations.
  */
 export function explainOperationUsage(
   operations: OperationInfo[],

@@ -17,7 +17,6 @@ import {
   detectGeneratedFiles,
   explainOperationUsage,
   findDuplicateNameWarnings,
-  findUnusedOperations,
   formatAnnotations,
   formatExpandedDirLines,
   formatGeneratedFileWarnings,
@@ -42,7 +41,7 @@ import { OperationInfo } from '../src/types/OperationInfo';
 import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
 
 jest.mock('fs');
-// Partial mock: keep the pure helpers (isOperationUsedInContents) real, stub the
+// Partial mock: keep the pure helpers (findUsageMatch) real, stub the
 // filesystem-backed ones so mainFunction's orchestration can be driven directly.
 jest.mock('../src/utils/fileUtils', () => {
   const actual = jest.requireActual('../src/utils/fileUtils');
@@ -348,39 +347,6 @@ describe('gqlPruner', () => {
     });
   });
 
-  describe('findUnusedOperations', () => {
-    const ops: OperationInfo[] = [
-      { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-      { name: 'Unused', type: 'query', filePath: 'a.gql' },
-    ];
-
-    it('returns only operations not referenced in any content', () => {
-      expect(
-        findUnusedOperations(
-          ops,
-          ['const r = useGetUserQuery()'],
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      ).toEqual([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]);
-    });
-
-    it('returns all when nothing references them', () => {
-      expect(
-        findUnusedOperations(ops, ['nothing here'], DEFAULT_USAGE_PATTERNS),
-      ).toEqual(ops);
-    });
-
-    it('returns none when all are used', () => {
-      expect(
-        findUnusedOperations(
-          ops,
-          ['useGetUserQuery() UnusedDocument'],
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      ).toEqual([]);
-    });
-  });
-
   describe('explainOperationUsage', () => {
     const ops: OperationInfo[] = [
       { name: 'GetUser', type: 'query', filePath: 'a.gql' },
@@ -417,24 +383,6 @@ describe('gqlPruner', () => {
         'useUnusedSuspenseQuery',
         'UnusedDocument',
       ]);
-    });
-
-    it('agrees with findUnusedOperations on the unused set', () => {
-      const usages = explainOperationUsage(
-        ops,
-        sources,
-        DEFAULT_USAGE_PATTERNS,
-      );
-      const unusedViaExplain = usages
-        .filter((usage) => !usage.match)
-        .map((usage) => usage.operation);
-      expect(unusedViaExplain).toEqual(
-        findUnusedOperations(
-          ops,
-          sources.map((source) => source.content),
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      );
     });
 
     it('returns [] for no operations', () => {
