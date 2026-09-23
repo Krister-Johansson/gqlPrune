@@ -56,7 +56,7 @@ export function buildUsagePatterns(
 
 /**
  * Default patterns used to detect whether a fragment is referenced directly in
- * source code — e.g. GraphQL Code Generator's `<Name>FragmentDoc` constant under
+ * source code, e.g. GraphQL Code Generator's `<Name>FragmentDoc` constant under
  * fragment masking. Only `{name}` / `{Name}` placeholders apply (fragments have
  * no operation type). Override via `fragmentUsagePatterns` in the config.
  */

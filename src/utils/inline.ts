@@ -323,7 +323,7 @@ function readDocument(
  * their defining statements blanked out.
  *
  * The blanked text is what the scan searches for usage. Without it a document
- * would count as its own usage — its GraphQL text and the constant it is
+ * would count as its own usage: its GraphQL text and the constant it is
  * assigned to both sit in the very file being searched, which a `.gql` corpus
  * never does. Interpolated names survive the blanking, since `${UserFragmentDoc}`
  * is a genuine reference to another document.
@@ -410,7 +410,7 @@ export function toInlineEntities(
  * The corpus passed in has the defining statements blanked out (see
  * {@link extractInlineDocuments}), so a constant only appears here when other
  * code reads it. The match is whole-word, which keeps a one-letter constant
- * from matching the middle of an unrelated word — though a constant named after
+ * from matching the middle of an unrelated word, though a constant named after
  * a common word can still match something unrelated and mask a real finding.
  *
  * @param {GraphqlFileEntities[]} inlineFiles - Entities of the inline documents.

@@ -78,7 +78,7 @@ export function findUnusedFragments(
 }
 
 /**
- * Walks the parsed GraphQL corpus and returns fragments that are unused — i.e.
+ * Walks the parsed GraphQL corpus and returns fragments that are unused, i.e.
  * neither (a) reachable via fragment spreads from any operation, nor (b)
  * referenced in the application source (e.g. a `<Name>FragmentDoc` constant
  * under fragment masking). Operates on pre-parsed entities (see
@@ -86,7 +86,7 @@ export function findUnusedFragments(
  * never touches the filesystem. Schema-free.
  *
  * Note: a fragment is considered used as soon as any operation spreads it, even
- * if that operation is itself unused — that operation is reported separately, so
+ * if that operation is itself unused: that operation is reported separately, so
  * this avoids flagging a fragment that becomes orphaned only after the operation
  * is deleted (caught on the next run).
  *

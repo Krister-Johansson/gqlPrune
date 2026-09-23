@@ -152,9 +152,13 @@ function formatDir(dir: string): string {
  * Turns a set of detected files into a suggestion plus multi-root candidates.
  * When `.` is itself one of the roots (a file sits directly in the project
  * root) it subsumes the others, so no checklist is offered and the plain `.`
- * suggestion stands.
+ * suggestion stands. Pure: the filesystem walk that finds the files happens
+ * in the callers, so this rule is tested on plain path lists.
+ *
+ * @param {string[]} filePaths - The detected files, relative to the project root.
+ * @returns {DirDetection} - The suggestion and any roots to choose between.
  */
-function detectFrom(filePaths: string[]): DirDetection {
+export function detectFrom(filePaths: string[]): DirDetection {
   const dir = commonParentDir(filePaths);
   if (dir === undefined) return { suggestion: undefined, candidates: [] };
   const roots = dir === '.' ? topLevelRoots(filePaths) : [];
@@ -334,7 +338,15 @@ async function askForDir(
   });
 }
 
-export async function generateConfig() {
+/**
+ * Runs `gqlprune init`: asks for the directories (starting from what the
+ * codegen config or the filesystem suggests), pre-fills the exclusions a
+ * generated file would need, writes `gqlPrune.config.yaml`, and prints a
+ * preview of what a real run would find.
+ *
+ * @returns {Promise<void>} - Resolves when the config is written, or kept.
+ */
+export async function generateConfig(): Promise<void> {
   // Never clobber an existing (possibly hand-tuned) config without asking.
   if (fs.existsSync(CONFIG_FILE)) {
     const overwrite = await confirm({
@@ -414,10 +426,8 @@ export async function generateConfig() {
     ...derivedConfigExtras(codegen?.values),
   };
 
-  // Write the answers to a configuration file
   fs.writeFileSync(CONFIG_FILE, yaml.dump(answers));
   console.log('Configuration generated successfully!');
 
-  // Show an instant preview of what a real run would find.
   printPreview(answers);
 }

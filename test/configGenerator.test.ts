@@ -10,6 +10,7 @@ import input from '@inquirer/input';
 import {
   commonParentDir,
   derivedConfigExtras,
+  detectFrom,
   detectGeneratedExcludes,
   detectGraphqlDirs,
   detectSrcDirs,
@@ -300,6 +301,33 @@ describe('configGenerator', () => {
       expect(
         derivedConfigExtras({ schemaFile: './schema.graphql', inline: true }),
       ).toEqual({ schemaFile: './schema.graphql', inline: true });
+    });
+  });
+
+  describe('detectFrom', () => {
+    it('suggests the common parent, with no candidates, for one root', () => {
+      expect(detectFrom(['src/a/x.gql', 'src/b/y.gql'])).toEqual({
+        suggestion: './src',
+        candidates: [],
+      });
+    });
+
+    it('offers the top-level roots as candidates when files span several', () => {
+      expect(detectFrom(['apps/web/a.gql', 'packages/ui/b.gql'])).toEqual({
+        suggestion: '.',
+        candidates: ['./apps', './packages'],
+      });
+    });
+
+    it('keeps the plain root suggestion when a file sits in the project root', () => {
+      expect(detectFrom(['root.gql', 'apps/web/a.gql'])).toEqual({
+        suggestion: '.',
+        candidates: [],
+      });
+    });
+
+    it('returns no suggestion for no files', () => {
+      expect(detectFrom([])).toEqual({ suggestion: undefined, candidates: [] });
     });
   });
 

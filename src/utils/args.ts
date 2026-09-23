@@ -35,7 +35,7 @@ export type ValueTarget =
 /**
  * One row of the CLI's flag table. `parseArgs`, `formatHelp` and the shell
  * completion generators all read this, so a flag can only be added in one
- * place — the parser, the help screen and the completions cannot drift apart.
+ * place: the parser, the help screen and the completions cannot drift apart.
  */
 export type FlagSpec = {
   /** The long form, including the leading `--`. */
@@ -313,7 +313,7 @@ function setConfigValue(
  * flag sets either its `CliOptions` field or, when the table gives it a
  * `configFlag`, the matching boolean on the config override. Unknown
  * flags, flags missing their value, and stray positional
- * arguments are collected into `errors` rather than silently dropped — the
+ * arguments are collected into `errors` rather than silently dropped: the
  * caller decides how to report them.
  *
  * @param {string[]} argv - Arguments, e.g. `process.argv.slice(2)`.

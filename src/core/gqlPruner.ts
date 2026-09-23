@@ -88,7 +88,7 @@ export function resolveExcludePatterns(config: GqlPruneConfig): string[] {
 /**
  * Builds the scan's exclude matcher. The always-excluded folders
  * ({@link DEFAULT_EXCLUDED_FOLDERS}) live in their own matcher, OR-ed with one
- * built from the user's `exclude`/`excludedFolders` patterns — so a `!`
+ * built from the user's `exclude`/`excludedFolders` patterns, so a `!`
  * negation applies only within the user's own patterns and can never
  * re-include `node_modules` or `.git`, as the docs have always promised.
  */
@@ -725,7 +725,7 @@ export const GENERATED_COVERAGE_THRESHOLD = 0.7;
 
 /**
  * Minimum number of operations before the coverage heuristic applies. Below
- * this, "one file references most operations" is uninformative — a small project
+ * this, "one file references most operations" is uninformative: a small project
  * legitimately references everything from just a few places.
  */
 export const GENERATED_MIN_OPERATIONS = 5;
@@ -792,15 +792,15 @@ function looksGeneratedHeader(content: string): boolean {
 
 /**
  * Detects source files that likely mask unused results because a single file
- * references most operations — the classic failure mode where GraphQL Code
+ * references most operations, the classic failure mode where GraphQL Code
  * Generator output lives inside `srcDir` un-excluded, so every operation looks
  * "used" and nothing is ever reported unused.
  *
  * The trigger is coverage: a file referencing at least
  * {@link GENERATED_COVERAGE_THRESHOLD} of all operations, and only when there
  * are at least {@link GENERATED_MIN_OPERATIONS}. A generated-looking filename or
- * header never triggers on its own — a generated file that references no
- * operations is harmless — but is reported as a corroborating reason.
+ * header never triggers on its own (a generated file that references no
+ * operations is harmless) but is reported as a corroborating reason.
  */
 export function detectGeneratedFiles(
   sources: SourceFile[],
@@ -859,7 +859,7 @@ export function formatGeneratedFileWarnings(
 /**
  * Advisory warnings for operation/fragment names defined more than once across
  * the parsed corpus. Detection is name-keyed, so duplicate definitions are
- * conflated — every definition shares one used/unused verdict. Returned as
+ * conflated: every definition shares one used/unused verdict. Returned as
  * data so the caller can route them per the I/O rules (stderr + the JSON
  * `warnings` array), like the generated-file warnings.
  */
@@ -907,7 +907,7 @@ function readFileConfig(): Partial<GqlPruneConfig> {
     raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error; // permissions or similar — surface it rather than hide it
+      throw error; // permissions or similar: surface it rather than hide it
     }
     // No config file: rely entirely on CLI flags.
   }
@@ -1247,7 +1247,7 @@ export function formatExpandedDirLines(
 
 /**
  * Renders the scan's findings as `--verbose` lines: the files scanned, then one
- * verdict per operation — with the matching pattern and file for used ones, and
+ * verdict per operation, with the matching pattern and file for used ones, and
  * the searched-but-unmatched patterns for unused ones.
  */
 export function formatVerboseScanLines(result: ScanResult): string[] {
@@ -1456,6 +1456,17 @@ export function scanProject(
   };
 }
 
+/**
+ * Runs a scan end to end: resolves the configuration, expands and checks the
+ * directories, loads the optional schema, scans, and reports. Everything it
+ * decides is delegated to the pure helpers above; this function only wires
+ * them to the filesystem, the console and the exit code. A run that cannot
+ * start ends with exit code 2 here; findings set `process.exitCode` to 1 so
+ * buffered output still flushes.
+ *
+ * @param {object} [options] - The CLI flags and the parsed CLI configuration.
+ * @returns {void}
+ */
 export function mainFunction(
   options: {
     json?: boolean;
@@ -1463,7 +1474,7 @@ export function mainFunction(
     verbose?: boolean;
     config?: CliConfig;
   } = {},
-) {
+): void {
   const json = options.json ?? false;
   const annotate = options.annotate ?? false;
   const verbose = options.verbose ?? false;
