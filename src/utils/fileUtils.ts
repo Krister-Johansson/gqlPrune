@@ -277,7 +277,14 @@ function findMatchingDirs(
     matches.push(`${prefix}${base}`);
   }
 
-  walkDirectory(base === '' ? '.' : base, {
+  // A base that is not on disk matches nothing, and the caller reports that
+  // as the configuration mistake it is; a walk warning on top would only
+  // repeat it. A base that exists but cannot be read is a different story,
+  // and the walk reports the reason.
+  const start = base === '' ? '.' : base;
+  if (!directoryExists(start)) return matches;
+
+  walkDirectory(start, {
     include: (entry) => !DEFAULT_EXCLUDED_FOLDERS.includes(entry.name),
     directory: (entry) => {
       if (isMatch(entry.relative)) {

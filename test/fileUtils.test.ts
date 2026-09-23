@@ -238,6 +238,7 @@ describe('fileUtils', () => {
     // names of its children. A name carrying a file extension (`graphql.ts`) is
     // a file; everything else, dotfolders included, is a directory.
     const mockTree = (tree: Record<string, string[]>) => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
@@ -418,15 +419,37 @@ describe('fileUtils', () => {
       });
     });
 
-    it('reports a glob whose static base cannot be read', () => {
+    it('reports a glob whose static base does not exist, without a warning', () => {
+      // The "matches nothing" report already says everything a missing base
+      // can say; a walk warning on top would repeat it.
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['missing/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['missing/*/graphql']);
+      expect(messages).toEqual([]);
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('reports a glob whose static base exists but cannot be read', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
       (fs.readdirSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT');
+        throw new Error('EACCES');
       });
-      expect(expandDirPatterns(['missing/*/graphql']).unmatched).toEqual([
-        'missing/*/graphql',
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['locked/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['locked/*/graphql']);
+      expect(messages).toEqual([
+        'Skipped the directory locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
       ]);
     });
 
@@ -519,8 +542,9 @@ describe('fileUtils', () => {
           ? [dirent('broken', { link: true }), dirent('web', { dir: true })]
           : [dirent('graphql', { dir: true })],
       );
-      (fs.statSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT: dangling link');
+      (fs.statSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/broken') throw new Error('ENOENT: dangling link');
+        return { isDirectory: () => true };
       });
 
       expect(expandDirPatterns(['packages/*/graphql']).dirs).toEqual([

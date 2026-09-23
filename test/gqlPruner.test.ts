@@ -424,10 +424,12 @@ describe('gqlPruner', () => {
     afterEach(() => {
       (fs.readdirSync as jest.Mock).mockReset();
       (fs.realpathSync as unknown as jest.Mock).mockReset();
+      (fs.statSync as jest.Mock).mockReset();
       mockedDirExists.mockReset();
     });
 
     it('carries a subtree the glob walk could not read as a warning', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
@@ -456,18 +458,19 @@ describe('gqlPruner', () => {
     });
 
     it('keeps the walk warnings when a glob matches nothing', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
       (fs.readdirSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT');
+        throw new Error('EACCES');
       });
 
-      const scanDirs = resolveScanDirs(['missing/*/graphql'], ['./src']);
+      const scanDirs = resolveScanDirs(['locked/*/graphql'], ['./src']);
 
       expect(scanDirs.error).toContain('match no directories');
       expect(scanDirs.warnings).toHaveLength(1);
-      expect(scanDirs.warnings[0]).toContain('Skipped the directory missing');
+      expect(scanDirs.warnings[0]).toContain('Skipped the directory locked');
     });
   });
 
@@ -2877,6 +2880,8 @@ describe('gqlPruner', () => {
     // A directory tree for the glob expansion below: each key is a directory,
     // each value the names of its (directory) children.
     const mockDirTree = (tree: Record<string, string[]>) => {
+      // Every directory in the tree is on disk; the glob walk checks its base.
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
@@ -3419,6 +3424,32 @@ describe('gqlPruner', () => {
           expect(errs).toContain('graphqlDir');
           expect(errs).not.toContain(
             'These configured directories do not exist',
+          );
+        });
+
+        it('prints the walk warnings before a directory error ends the run', () => {
+          // A glob base that exists but cannot be read matches nothing. The
+          // run stops, and the reason it saw less is the EACCES, which has to
+          // reach the user along with the error.
+          (fs.readFileSync as jest.Mock).mockReturnValue(
+            'graphqlDir: locked/*/graphql\nsrcDir: ./s\n',
+          );
+          (fs.statSync as jest.Mock).mockReturnValue({
+            isDirectory: () => true,
+          });
+          (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+            (p: string) => p,
+          );
+          (fs.readdirSync as jest.Mock).mockImplementation(() => {
+            throw new Error('EACCES');
+          });
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('Skipped the directory locked');
+          expect(errs).toContain('EACCES');
+          expect(errs.indexOf('Skipped the directory locked')).toBeLessThan(
+            errs.indexOf('match no directories'),
           );
         });
 

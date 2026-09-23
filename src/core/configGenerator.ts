@@ -61,16 +61,20 @@ export function splitFolders(input: string): string[] {
  * on the first `gqlprune`. Every answer is the user's own, so any failure
  * (an empty answer, a glob matching nothing, a directory not on disk) means
  * "nothing to scan" rather than an error to report: `init` still writes the
- * config, and the first real run reports the problem with exit code 2.
+ * config, and the first real run reports the problem with exit code 2. What
+ * the expansion could not read goes to `onWarning`: a subtree skipped here
+ * is a generated file `init` never sees, so the user has to hear about it.
  */
 function scannableDirs(
   graphqlDir: string | string[],
   srcDir: string | string[],
+  onWarning: (message: string) => void = () => {},
 ): { graphqlDir: string[]; srcDir: string[] } | undefined {
   const graphqlDirs = resolveDirs(graphqlDir);
   const srcDirs = resolveDirs(srcDir);
   if (graphqlDirs.length === 0 || srcDirs.length === 0) return undefined;
   const scanDirs = resolveScanDirs(graphqlDirs, srcDirs);
+  scanDirs.warnings.forEach(onWarning);
   return scanDirs.error === undefined
     ? { graphqlDir: scanDirs.graphqlDir, srcDir: scanDirs.srcDir }
     : undefined;
@@ -86,7 +90,7 @@ export function detectGeneratedExcludes(
   graphqlDir: string | string[],
   srcDir: string | string[],
 ): string[] {
-  const dirs = scannableDirs(graphqlDir, srcDir);
+  const dirs = scannableDirs(graphqlDir, srcDir, warnOnReadError);
   if (dirs === undefined) return [];
   return scanProject(dirs).generatedFiles.map((warning) =>
     warning.file.replace(/\\/g, '/'),
@@ -289,7 +293,12 @@ export function detectSrcDirs(): DirDetection {
   );
 }
 
-/** Prints a one-line preview of what a real run would find, when it can run. */
+/**
+ * Prints a one-line preview of what a real run would find, when it can run.
+ * The directories were already expanded, and any walk warning already
+ * printed, by the generated-file detection a moment earlier, so this
+ * expansion stays quiet rather than repeating them.
+ */
 function printPreview(config: GqlPruneConfig): void {
   const dirs = scannableDirs(config.graphqlDir, config.srcDir);
   if (dirs === undefined) {

@@ -151,10 +151,20 @@ export function skipLiteral(text: string, index: number): number {
   return text.length;
 }
 
+/** Whether `char` ends a line as far as a JavaScript line continuation goes. */
+function isLineTerminator(char: string | undefined): boolean {
+  return (
+    char === '\n' || char === '\r' || char === '\u2028' || char === '\u2029'
+  );
+}
+
 /**
  * Reads the string literal at `index`. Returns `null` when there is none, when
  * it never closes, or when it interpolates: `` `${root}/src/**` `` has no value
  * that can be known without running the file, so it is simply not extracted.
+ * A backslash before a line break is a line continuation, and JavaScript
+ * drops both characters from the value; so does this, since keeping the
+ * break would turn a wrapped glob into one that matches nothing.
  */
 export function readString(
   text: string,
@@ -167,7 +177,13 @@ export function readString(
   while (i < text.length) {
     const char = text[i];
     if (char === '\\') {
-      value += text[i + 1] ?? '';
+      const next = text[i + 1];
+      if (isLineTerminator(next)) {
+        // CRLF is one terminator, so the LF after a CR is part of it.
+        i += next === '\r' && text[i + 2] === '\n' ? 3 : 2;
+        continue;
+      }
+      value += next ?? '';
       i += 2;
       continue;
     }

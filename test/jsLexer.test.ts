@@ -153,6 +153,20 @@ describe('jsLexer', () => {
       expect(readString('`${root}/src`', 0)).toBeNull();
     });
 
+    it('drops a line continuation, as JavaScript does', () => {
+      // A backslash before a line terminator removes both characters from
+      // the value; keeping the newline would produce a glob that matches
+      // nothing. Every terminator JavaScript recognizes counts.
+      expect(readString("'src/\\\n**'", 0)).toEqual({
+        value: 'src/**',
+        end: 10,
+      });
+      expect(readString("'a\\\r\nb'", 0)).toEqual({ value: 'ab', end: 7 });
+      expect(readString("'a\\\rb'", 0)).toEqual({ value: 'ab', end: 6 });
+      expect(readString("'a\\\u2028b'", 0)).toEqual({ value: 'ab', end: 6 });
+      expect(readString("'a\\\u2029b'", 0)).toEqual({ value: 'ab', end: 6 });
+    });
+
     it('returns null when there is no literal at the offset', () => {
       expect(readString('abc', 0)).toBeNull();
     });

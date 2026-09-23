@@ -193,6 +193,46 @@ describe('configGenerator', () => {
       });
     });
 
+    it('prints a subtree the glob walk could not read, then scans the rest', () => {
+      const errorSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      mockFsTree(
+        { packages: ['a', 'locked'], 'packages/a': ['graphql'] },
+        new Set([
+          'packages',
+          'packages/a',
+          'packages/a/graphql',
+          'packages/locked',
+          './src',
+        ]),
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/locked') throw new Error('EACCES');
+        const tree: Record<string, string[]> = {
+          packages: ['a', 'locked'],
+          'packages/a': ['graphql'],
+        };
+        return (tree[p] ?? []).map((name) => ({
+          name,
+          isDirectory: () => true,
+          isSymbolicLink: () => false,
+        }));
+      });
+      mockedScan.mockReturnValue({ generatedFiles: [] });
+
+      detectGeneratedExcludes('packages/*/graphql', './src');
+
+      expect(mockedScan).toHaveBeenCalledWith({
+        graphqlDir: ['packages/a/graphql'],
+        srcDir: ['./src'],
+      });
+      const errs = errorSpy.mock.calls.flat().join('\n');
+      expect(errs).toContain('Skipped the directory packages/locked');
+      expect(errs).toContain('EACCES');
+      errorSpy.mockRestore();
+    });
+
     it('returns [] without scanning when a glob matches nothing', () => {
       mockFsTree({ packages: [] }, new Set(['packages', './src']));
       expect(detectGeneratedExcludes('packages/*/graphql', './src')).toEqual(

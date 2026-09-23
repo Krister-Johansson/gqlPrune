@@ -1484,6 +1484,15 @@ export function mainFunction(
       console.error(kleur.dim(`[verbose] ${line}`));
     }
   };
+  // One advisory line on stderr: in CI an (escaped) ::warning workflow
+  // command like the other annotations, otherwise a coloured line for humans.
+  const printAdvisory = (line: string): void => {
+    console.error(
+      annotate
+        ? `::warning::${escapeAnnotationMessage(line)}`
+        : kleur.yellow(`⚠ ${line}`),
+    );
+  };
 
   let run: ResolvedRunConfig;
   try {
@@ -1532,6 +1541,9 @@ export function mainFunction(
     srcDir: codegenSource(run, 'srcDir'),
   });
   if (scanDirs.error !== undefined) {
+    // What the glob walk could not read explains why it matched less, so it
+    // comes out before the error that ends the run.
+    scanDirs.warnings.forEach(printAdvisory);
     console.error(kleur.red(scanDirs.error));
     process.exit(2);
   }
@@ -1729,15 +1741,7 @@ export function mainFunction(
   // output): it would silently make every operation look "used" and report
   // nothing unused. Emit to stderr so it surfaces in --json mode too without
   // corrupting the JSON on stdout.
-  for (const line of advisoryWarnings) {
-    // In CI, surface it as an (escaped) ::warning workflow command like the other
-    // annotations; otherwise a coloured stderr line for humans.
-    console.error(
-      annotate
-        ? `::warning::${escapeAnnotationMessage(line)}`
-        : kleur.yellow(`⚠ ${line}`),
-    );
-  }
+  advisoryWarnings.forEach(printAdvisory);
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
   if (annotate) {
