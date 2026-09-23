@@ -306,6 +306,36 @@ export function resolveSourceExtensions(
 /** Header of the confidence column, and the width every such column takes. */
 const CONFIDENCE_HEADER = 'Confidence';
 
+/** The banner that opens a report section. */
+export function sectionTitle(name: string): string {
+  return `--- ${name} ---`;
+}
+
+/**
+ * The dash rule that closes a report section, exactly as wide as its banner.
+ * Derived from the name rather than typed out, so renaming a section cannot
+ * leave the rule a character short with nothing to notice.
+ */
+export function sectionRule(name: string): string {
+  return '-'.repeat(sectionTitle(name).length);
+}
+
+/**
+ * Prints one report section: the banner, whatever `body` prints, then the
+ * closing rule. The count line each section ends with is the caller's, since
+ * its wording and colour differ per section.
+ */
+function printSection(name: string, body: () => void): void {
+  console.log(kleur.blue(`\n${sectionTitle(name)}\n`));
+  body();
+  console.log(kleur.blue(sectionRule(name)));
+}
+
+/** The width a column needs: its header, or its widest value. */
+function columnWidth(header: string, values: string[]): number {
+  return Math.max(header.length, ...values.map((value) => value.length));
+}
+
 /**
  * Colours one grade for the tables: the strongest evidence stands out and the
  * weakest recedes, so a table of nothing but `high` still reads as a plain
@@ -324,30 +354,30 @@ function confidenceCell(level: ConfidenceLevel): string {
 
 /** Prints the aligned table of unused operations. */
 function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
-  const maxTypeLength = Math.max(
-    'Type'.length,
-    ...unusedOperations.map((op) => op.type.length),
+  const typeWidth = columnWidth(
+    'Type',
+    unusedOperations.map((op) => op.type),
   );
-  const maxNameLength = Math.max(
-    'Operation'.length,
-    ...unusedOperations.map((op) => op.name.length),
+  const nameWidth = columnWidth(
+    'Operation',
+    unusedOperations.map((op) => op.name),
   );
 
-  console.log(kleur.blue('\n--- Unused GraphQL Operations ---\n'));
-  console.log(
-    'Type'.padEnd(maxTypeLength),
-    'Operation'.padEnd(maxNameLength),
-    CONFIDENCE_HEADER,
-    'File',
-  );
-  unusedOperations.forEach((op) => {
+  printSection('Unused GraphQL Operations', () => {
     console.log(
-      `${kleur.yellow(op.type.padEnd(maxTypeLength))} ${kleur.cyan(
-        op.name.padEnd(maxNameLength),
-      )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
+      'Type'.padEnd(typeWidth),
+      'Operation'.padEnd(nameWidth),
+      CONFIDENCE_HEADER,
+      'File',
     );
+    unusedOperations.forEach((op) => {
+      console.log(
+        `${kleur.yellow(op.type.padEnd(typeWidth))} ${kleur.cyan(
+          op.name.padEnd(nameWidth),
+        )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
+      );
+    });
   });
-  console.log(kleur.blue('---------------------------------'));
   const count = unusedOperations.length;
   console.log(
     kleur.red(
@@ -359,21 +389,21 @@ function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
 
 /** Prints the aligned table of unused fragments. */
 function reportUnusedFragments(unusedFragments: GradedFragment[]): void {
-  const maxNameLength = Math.max(
-    'Fragment'.length,
-    ...unusedFragments.map((fragment) => fragment.name.length),
+  const nameWidth = columnWidth(
+    'Fragment',
+    unusedFragments.map((fragment) => fragment.name),
   );
 
-  console.log(kleur.blue('\n--- Unused GraphQL Fragments ---\n'));
-  console.log('Fragment'.padEnd(maxNameLength), CONFIDENCE_HEADER, 'File');
-  unusedFragments.forEach((fragment) => {
-    console.log(
-      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${confidenceCell(
-        fragment.confidence,
-      )} ${kleur.magenta(path.basename(fragment.filePath))}`,
-    );
+  printSection('Unused GraphQL Fragments', () => {
+    console.log('Fragment'.padEnd(nameWidth), CONFIDENCE_HEADER, 'File');
+    unusedFragments.forEach((fragment) => {
+      console.log(
+        `${kleur.cyan(fragment.name.padEnd(nameWidth))} ${confidenceCell(
+          fragment.confidence,
+        )} ${kleur.magenta(path.basename(fragment.filePath))}`,
+      );
+    });
   });
-  console.log(kleur.blue('--------------------------------'));
   const count = unusedFragments.length;
   console.log(
     kleur.red(
@@ -396,30 +426,30 @@ function formatFieldLocation(location: {
  * the key shown on its first row only.
  */
 function reportUnusedFieldCandidates(candidates: GradedField[]): void {
-  const maxFieldLength = Math.max(
-    'Field'.length,
-    ...candidates.map((candidate) => candidate.field.length),
+  const fieldWidth = columnWidth(
+    'Field',
+    candidates.map((candidate) => candidate.field),
   );
 
-  console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
-  console.log('Field'.padEnd(maxFieldLength), CONFIDENCE_HEADER, 'Selected in');
-  candidates.forEach((candidate) => {
-    candidate.locations.forEach((location, index) => {
-      const label = index === 0 ? candidate.field : '';
-      // The grade belongs to the key, not to each of its selections, so it sits
-      // on the first row with the key and the rest stay blank.
-      const grade =
-        index === 0
-          ? confidenceCell(candidate.confidence)
-          : ''.padEnd(CONFIDENCE_HEADER.length);
-      console.log(
-        `${kleur.cyan(label.padEnd(maxFieldLength))} ${grade} ${kleur.magenta(
-          formatFieldLocation(location),
-        )}`,
-      );
+  printSection('Unused Field Candidates', () => {
+    console.log('Field'.padEnd(fieldWidth), CONFIDENCE_HEADER, 'Selected in');
+    candidates.forEach((candidate) => {
+      candidate.locations.forEach((location, index) => {
+        const label = index === 0 ? candidate.field : '';
+        // The grade belongs to the key, not to each of its selections, so it
+        // sits on the first row with the key and the rest stay blank.
+        const grade =
+          index === 0
+            ? confidenceCell(candidate.confidence)
+            : ''.padEnd(CONFIDENCE_HEADER.length);
+        console.log(
+          `${kleur.cyan(label.padEnd(fieldWidth))} ${grade} ${kleur.magenta(
+            formatFieldLocation(location),
+          )}`,
+        );
+      });
     });
   });
-  console.log(kleur.blue('-------------------------------'));
   const count = candidates.length;
   console.log(
     kleur.yellow(
@@ -439,16 +469,17 @@ function reportUnusedFieldCandidates(candidates: GradedField[]): void {
     ),
   );
 }
+
 /** Prints the list of orphaned GraphQL files. */
 function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
-  console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
-  console.log(CONFIDENCE_HEADER, 'File');
-  orphanedFiles.forEach((orphan) =>
-    console.log(
-      `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
-    ),
-  );
-  console.log(kleur.blue('------------------------------'));
+  printSection('Orphaned GraphQL Files', () => {
+    console.log(CONFIDENCE_HEADER, 'File');
+    orphanedFiles.forEach((orphan) =>
+      console.log(
+        `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
+      ),
+    );
+  });
   const count = orphanedFiles.length;
   const them = pluralize(count, 'it', 'them');
   console.log(
@@ -462,21 +493,21 @@ function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
 
 /** Prints the deprecated field/enum selections found against the local SDL. */
 function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
-  const maxFileLength = Math.max(
-    'File'.length,
-    ...deprecatedUsages.map((usage) => usage.file.length),
+  const fileWidth = columnWidth(
+    'File',
+    deprecatedUsages.map((usage) => usage.file),
   );
 
-  console.log(kleur.blue('\n--- Deprecated Field Usage ---\n'));
-  console.log('File'.padEnd(maxFileLength), 'Line', 'Message');
-  deprecatedUsages.forEach((usage) => {
-    console.log(
-      `${kleur.magenta(usage.file.padEnd(maxFileLength))} ${kleur.cyan(
-        String(usage.line ?? '-').padEnd(4),
-      )} ${usage.message}`,
-    );
+  printSection('Deprecated Field Usage', () => {
+    console.log('File'.padEnd(fileWidth), 'Line', 'Message');
+    deprecatedUsages.forEach((usage) => {
+      console.log(
+        `${kleur.magenta(usage.file.padEnd(fileWidth))} ${kleur.cyan(
+          String(usage.line ?? '-').padEnd(4),
+        )} ${usage.message}`,
+      );
+    });
   });
-  console.log(kleur.blue('------------------------------'));
   const count = deprecatedUsages.length;
   console.log(
     kleur.yellow(

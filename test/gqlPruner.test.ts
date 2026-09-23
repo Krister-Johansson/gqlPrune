@@ -33,6 +33,8 @@ import {
   resolveScanDirs,
   resolveUsagePatterns,
   scanProject,
+  sectionRule,
+  sectionTitle,
 } from '../src/core/gqlPruner';
 import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
@@ -390,6 +392,29 @@ describe('gqlPruner', () => {
       expect(
         explainOperationUsage([], sources, DEFAULT_USAGE_PATTERNS),
       ).toEqual([]);
+    });
+  });
+
+  describe('sectionTitle and sectionRule', () => {
+    it('frames a section name in dashes', () => {
+      expect(sectionTitle('Unused GraphQL Operations')).toBe(
+        '--- Unused GraphQL Operations ---',
+      );
+    });
+
+    it('closes a section with a rule exactly as wide as its title', () => {
+      // The rules used to be hand-counted per section, so renaming a section
+      // silently broke the alignment. Derived, they cannot drift.
+      for (const name of [
+        'Unused GraphQL Operations',
+        'Unused GraphQL Fragments',
+        'Orphaned GraphQL Files',
+        'Deprecated Field Usage',
+        'Unused Field Candidates',
+      ]) {
+        expect(sectionRule(name)).toBe('-'.repeat(sectionTitle(name).length));
+        expect(sectionRule(name)).toMatch(/^-+$/);
+      }
     });
   });
 
