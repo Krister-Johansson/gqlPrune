@@ -1027,7 +1027,11 @@ export function resolveScanDirs(
   srcDir: string[],
   derived: { graphqlDir?: string; srcDir?: string } = {},
 ): ResolvedScanDirs {
-  const stop = (error: string, warnings: string[] = []): ResolvedScanDirs => ({
+  // A subtree a glob walk could not read is an advisory like any other: it
+  // travels with the derived-directory warnings whatever else happens, since
+  // a run that stops on a missing directory still owes the reason it saw less.
+  const warnings: string[] = [];
+  const stop = (error: string): ResolvedScanDirs => ({
     graphqlDir: [],
     srcDir: [],
     warnings,
@@ -1037,7 +1041,10 @@ export function resolveScanDirs(
   const expanded = [
     { field: 'graphqlDir', configured: graphqlDir, from: derived.graphqlDir },
     { field: 'srcDir', configured: srcDir, from: derived.srcDir },
-  ].map((field) => ({ ...field, ...expandDirPatterns(field.configured) }));
+  ].map((field) => ({
+    ...field,
+    ...expandDirPatterns(field.configured, (message) => warnings.push(message)),
+  }));
 
   // A glob that matches nothing is checked first, before anything touches the
   // filesystem, exactly as it always was.
@@ -1065,7 +1072,6 @@ export function resolveScanDirs(
     );
   }
 
-  const warnings: string[] = [];
   for (const entry of checked) {
     if (entry.from === undefined || entry.dropped.length === 0) continue;
     if (entry.present.length === 0) {
@@ -1074,7 +1080,6 @@ export function resolveScanDirs(
           `${entry.dropped.join(', ')}. Set graphqlDir and srcDir in ` +
           'gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> ' +
           'and --src <dir>.',
-        warnings,
       );
     }
     warnings.push(

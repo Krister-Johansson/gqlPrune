@@ -30,6 +30,7 @@ import {
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
   resolveRunConfig,
+  resolveScanDirs,
   resolveUsagePatterns,
   scanProject,
 } from '../src/core/gqlPruner';
@@ -389,6 +390,59 @@ describe('gqlPruner', () => {
       expect(
         explainOperationUsage([], sources, DEFAULT_USAGE_PATTERNS),
       ).toEqual([]);
+    });
+  });
+
+  describe('resolveScanDirs', () => {
+    // Only the mocks these cases set are reset: a blanket reset would also
+    // wipe the default implementations the module-level mocks were given.
+    afterEach(() => {
+      (fs.readdirSync as jest.Mock).mockReset();
+      (fs.realpathSync as unknown as jest.Mock).mockReset();
+      mockedDirExists.mockReset();
+    });
+
+    it('carries a subtree the glob walk could not read as a warning', () => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/locked') throw new Error('EACCES');
+        const tree: Record<string, string[]> = {
+          packages: ['a', 'locked'],
+          'packages/a': ['graphql'],
+        };
+        return (tree[p] ?? []).map((name) => ({
+          name,
+          isDirectory: () => true,
+          isSymbolicLink: () => false,
+        }));
+      });
+      (fileUtils.directoryExists as jest.Mock).mockReturnValue(true);
+
+      const scanDirs = resolveScanDirs(['packages/*/graphql'], ['./src']);
+
+      expect(scanDirs.error).toBeUndefined();
+      expect(scanDirs.graphqlDir).toEqual(['packages/a/graphql']);
+      expect(scanDirs.warnings).toEqual([
+        'Skipped the directory packages/locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
+      ]);
+    });
+
+    it('keeps the walk warnings when a glob matches nothing', () => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+
+      const scanDirs = resolveScanDirs(['missing/*/graphql'], ['./src']);
+
+      expect(scanDirs.error).toContain('match no directories');
+      expect(scanDirs.warnings).toHaveLength(1);
+      expect(scanDirs.warnings[0]).toContain('Skipped the directory missing');
     });
   });
 

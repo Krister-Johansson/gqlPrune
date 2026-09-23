@@ -100,20 +100,113 @@ export function createExcludeMatcher(patterns: string[]): ExcludeMatcher {
     matchPositive(relativePath) && !matchNegative(relativePath);
 }
 
+/** What the walk tells its visitor about one directory entry. */
+export type WalkEntry = {
+  /** The entry's path, as the walk built it from the starting directory. */
+  path: string;
+  /** The entry's basename. */
+  name: string;
+  /** The entry's path relative to the walk's starting directory, posix style. */
+  relative: string;
+  /** How many directories below the starting directory the entry sits. */
+  depth: number;
+};
+
+/** The decisions a caller makes as {@link walkDirectory} visits a tree. */
+export type DirectoryVisitor = {
+  /**
+   * Whether an entry is looked at at all. Decided from the name and path
+   * alone, before anything is stat'ed, so an excluded broken symlink is
+   * skipped rather than reported.
+   */
+  include: (entry: WalkEntry) => boolean;
+  /** A directory, or a symlink to one. Returns whether to descend into it. */
+  directory: (entry: WalkEntry) => boolean;
+  /** Anything that is not a directory. */
+  file: (entry: WalkEntry) => void;
+  /** Receives the reason for every entry or subtree the walk had to skip. */
+  onReadError: (message: string) => void;
+};
+
 /**
- * Recursively finds all files with the given extensions under `dir`, skipping
- * any directory or file whose project-root-relative path is excluded by
- * `isExcluded`.
+ * Walks a directory tree depth-first and lets `visitor` decide what to do
+ * with each entry. This is the one traversal under both the file search and
+ * the directory-glob expansion, so they follow symlinks, stop cycles and
+ * report unreadable paths the same way.
  *
  * Directory symlinks are followed, but never into a real directory that was
  * already walked (`visited` tracks real paths), so symlink cycles terminate
- * and an aliased directory is scanned only once. Broken symlinks are logged
- * and skipped.
- *
- * A directory or symlink that cannot be read is skipped, and the reason is
- * handed to `onReadError` rather than printed. A subtree dropped from the scan
+ * and an aliased directory is walked only once. A broken symlink, or a
+ * directory that cannot be read, is skipped and the reason handed to
+ * `visitor.onReadError` rather than printed. A subtree dropped from a scan
  * makes every operation referenced only inside it look unused, so the caller
  * has to be able to put that in the report instead of a stray log line.
+ *
+ * @param {string} dir - The directory to start from.
+ * @param {DirectoryVisitor} visitor - The caller's decisions per entry.
+ * @param {Set<string>} visited - Real paths of directories already walked.
+ * @param {string} [relative] - The starting directory's own relative path.
+ * @param {number} [depth] - The starting directory's own depth.
+ */
+export function walkDirectory(
+  dir: string,
+  visitor: DirectoryVisitor,
+  visited: Set<string> = new Set(),
+  relative = '',
+  depth = 0,
+): void {
+  let items: fs.Dirent[];
+  try {
+    const realDir = fs.realpathSync(dir);
+    if (visited.has(realDir)) {
+      return; // already walked (symlink cycle or aliased directory)
+    }
+    visited.add(realDir);
+    items = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    visitor.onReadError(
+      `Skipped the directory ${dir}: could not read it. ${describeError(error)} ` +
+        'Anything it holds is missing from this scan.',
+    );
+    return;
+  }
+
+  for (const item of items) {
+    const entry: WalkEntry = {
+      path: path.join(dir, item.name),
+      name: item.name,
+      relative: relative === '' ? item.name : `${relative}/${item.name}`,
+      depth: depth + 1,
+    };
+    if (!visitor.include(entry)) continue;
+
+    // Dirents answer isDirectory() without a per-entry stat; only a symlink
+    // needs a stat to learn what it points at.
+    let isDirectory = item.isDirectory();
+    if (item.isSymbolicLink()) {
+      try {
+        isDirectory = fs.statSync(entry.path).isDirectory();
+      } catch (error) {
+        visitor.onReadError(
+          `Skipped ${entry.path}: could not read it. ${describeError(error)}`,
+        );
+        continue; // Broken symlink: skip it and continue with the next one
+      }
+    }
+
+    if (!isDirectory) {
+      visitor.file(entry);
+    } else if (visitor.directory(entry)) {
+      walkDirectory(entry.path, visitor, visited, entry.relative, entry.depth);
+    }
+  }
+}
+
+/**
+ * Recursively finds all files with the given extensions under `dir`, skipping
+ * any directory or file whose project-root-relative path is excluded by
+ * `isExcluded`. See {@link walkDirectory} for how symlinks, cycles and
+ * unreadable paths are handled; every skip reason goes to `onReadError`.
  *
  * @param {string} dir - The directory to start searching from.
  * @param {string[]} extensions - The list of file extensions to match.
@@ -129,59 +222,21 @@ export function findFilesWithExtension(
   visited: Set<string> = new Set(),
   onReadError: (message: string) => void = () => {},
 ): string[] {
-  let files: string[] = [];
-
-  try {
-    const realDir = fs.realpathSync(dir);
-    if (visited.has(realDir)) {
-      return files; // already walked (symlink cycle or aliased directory)
-    }
-    visited.add(realDir);
-
-    const items = fs.readdirSync(dir, { withFileTypes: true });
-
-    for (const item of items) {
-      const itemPath = path.join(dir, item.name);
-
-      if (isExcluded(toRelativePosix(itemPath))) {
-        continue; // Skip excluded directories and files
-      }
-
-      // Dirents answer isDirectory() without a per-entry stat; only a symlink
-      // needs a stat to learn what it points at.
-      let isDirectory = item.isDirectory();
-      if (item.isSymbolicLink()) {
-        try {
-          isDirectory = fs.statSync(itemPath).isDirectory();
-        } catch (error) {
-          onReadError(
-            `Skipped ${itemPath}: could not read it. ${describeError(error)}`,
-          );
-          continue; // Broken symlink: skip it and continue with the next one
+  const files: string[] = [];
+  walkDirectory(
+    dir,
+    {
+      include: (entry) => !isExcluded(toRelativePosix(entry.path)),
+      directory: () => true,
+      file: (entry) => {
+        if (extensions.includes(path.extname(entry.name).toLowerCase())) {
+          files.push(entry.path);
         }
-      }
-
-      if (isDirectory) {
-        files = files.concat(
-          findFilesWithExtension(
-            itemPath,
-            extensions,
-            isExcluded,
-            visited,
-            onReadError,
-          ),
-        );
-      } else if (extensions.includes(path.extname(item.name).toLowerCase())) {
-        files.push(itemPath);
-      }
-    }
-  } catch (error) {
-    onReadError(
-      `Skipped the directory ${dir}: could not read it. ${describeError(error)} ` +
-        'Anything it holds is missing from this scan.',
-    );
-  }
-
+      },
+      onReadError,
+    },
+    visited,
+  );
   return files;
 }
 
@@ -198,16 +253,17 @@ export type DirExpansion = {
  * matches `glob`, with `prefix` (a `./`, if the pattern carried one) and `base`
  * put back in front so the result reads like the configured pattern.
  *
- * `node_modules` and `.git` are never entered. Directory symlinks are followed
- * as {@link findFilesWithExtension} follows them, with `visited` tracking real
- * paths so a cycle terminates. A glob without `**` (or a brace, whose segments
- * cannot be counted this way) only needs as many levels as it has segments, so
- * the walk stops there rather than reading the whole tree.
+ * `node_modules` and `.git` are never entered. Symlinks, cycles and unreadable
+ * paths are handled by {@link walkDirectory}, exactly as the file search
+ * handles them. A glob without `**` (or a brace, whose segments cannot be
+ * counted this way) only needs as many levels as it has segments, so the walk
+ * stops there rather than reading the whole tree.
  */
 function findMatchingDirs(
   base: string,
   glob: string,
   prefix: string,
+  onReadError: (message: string) => void,
 ): string[] {
   // A trailing `**` reads as "this directory and everything under it", so the
   // directory the glob points at is a match in its own right. picomatch cannot
@@ -217,48 +273,23 @@ function findMatchingDirs(
   const isMatch = picomatch(globs, { dot: true });
   const depthLimit = /\*\*|\{/.test(glob) ? Infinity : glob.split('/').length;
   const matches: string[] = [];
-  const visited = new Set<string>();
   if (glob === '**' && base !== '') {
     matches.push(`${prefix}${base}`);
   }
 
-  const walk = (dir: string, relative: string, depth: number): void => {
-    let items: fs.Dirent[];
-    try {
-      const realDir = fs.realpathSync(dir);
-      if (visited.has(realDir)) return; // symlink cycle or aliased directory
-      visited.add(realDir);
-      items = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // an unreadable directory simply contributes no matches
-    }
-
-    for (const item of items) {
-      if (DEFAULT_EXCLUDED_FOLDERS.includes(item.name)) continue;
-      const itemPath = path.join(dir, item.name);
-
-      let isDirectory = item.isDirectory();
-      if (!isDirectory && item.isSymbolicLink()) {
-        try {
-          isDirectory = fs.statSync(itemPath).isDirectory();
-        } catch {
-          continue; // broken symlink
-        }
-      }
-      if (!isDirectory) continue;
-
-      const itemRelative =
-        relative === '' ? item.name : `${relative}/${item.name}`;
-      if (isMatch(itemRelative)) {
+  walkDirectory(base === '' ? '.' : base, {
+    include: (entry) => !DEFAULT_EXCLUDED_FOLDERS.includes(entry.name),
+    directory: (entry) => {
+      if (isMatch(entry.relative)) {
         matches.push(
-          `${prefix}${base === '' ? '' : `${base}/`}${itemRelative}`,
+          `${prefix}${base === '' ? '' : `${base}/`}${entry.relative}`,
         );
       }
-      if (depth + 1 < depthLimit) walk(itemPath, itemRelative, depth + 1);
-    }
-  };
-
-  walk(base === '' ? '.' : base, '', 0);
+      return entry.depth < depthLimit;
+    },
+    file: () => {},
+    onReadError,
+  });
   return matches;
 }
 
@@ -275,7 +306,9 @@ function baseEntersExcludedFolder(base: string): boolean {
 
 /**
  * Expands the glob patterns in a `graphqlDir`/`srcDir` list into the directories
- * they match, leaving plain paths alone.
+ * they match, leaving plain paths alone. A subtree the expansion could not read
+ * is handed to `onReadError`, as the file walk does: a monorepo pattern that
+ * quietly skipped an unreadable package would scan less than it was told to.
  *
  * An entry without glob magic passes through untouched whether or not it exists,
  * so the caller's missing-directory check still reports it. An entry with glob
@@ -290,9 +323,13 @@ function baseEntersExcludedFolder(base: string): boolean {
  * segment of a match can be an excluded name.
  *
  * @param {string[]} patterns - The configured directories and glob patterns.
+ * @param {(message: string) => void} [onReadError] - Receives each skip reason.
  * @returns {DirExpansion} - The literal directories plus any empty patterns.
  */
-export function expandDirPatterns(patterns: string[]): DirExpansion {
+export function expandDirPatterns(
+  patterns: string[],
+  onReadError: (message: string) => void = () => {},
+): DirExpansion {
   const dirs: string[] = [];
   const unmatched: string[] = [];
   const seen = new Set<string>();
@@ -315,7 +352,7 @@ export function expandDirPatterns(patterns: string[]): DirExpansion {
       unmatched.push(pattern);
       continue;
     }
-    const matches = findMatchingDirs(base, glob, prefix);
+    const matches = findMatchingDirs(base, glob, prefix, onReadError);
     if (matches.length === 0) {
       unmatched.push(pattern);
       continue;
