@@ -10,6 +10,30 @@ import {
 } from './usagePatterns.js';
 
 /**
+ * Builds the fragment-spread graph of a parsed corpus: each fragment name to
+ * the names it spreads directly. Duplicate names merge their edges rather than
+ * overwriting them, so a second definition cannot drop the spreads of the
+ * first; over-approximating reachability keeps every verdict built on the
+ * graph conservative. Duplicates themselves are reported by
+ * `findDuplicateNameWarnings` at the scan level.
+ *
+ * @param {GraphqlFileEntities[]} parsedFiles - One parsed entry per gql file.
+ * @returns {Map<string, string[]>} - Each fragment's direct spreads.
+ */
+export function buildFragmentSpreadGraph(
+  parsedFiles: GraphqlFileEntities[],
+): Map<string, string[]> {
+  const fragmentSpreads = new Map<string, string[]>();
+  for (const entities of parsedFiles) {
+    for (const { name, spreads } of entities.fragmentSpreads) {
+      const existing = fragmentSpreads.get(name) ?? [];
+      fragmentSpreads.set(name, [...new Set([...existing, ...spreads])]);
+    }
+  }
+  return fragmentSpreads;
+}
+
+/**
  * Computes the set of fragment names reachable from the given roots by walking
  * the fragment-spread graph. Cycle-safe.
  *
@@ -81,20 +105,12 @@ export function findUnusedFragmentsInCorpus(
   extraRoots: Iterable<string> = [],
 ): FragmentInfo[] {
   const allFragments: FragmentInfo[] = [];
-  const fragmentSpreads = new Map<string, string[]>();
+  const fragmentSpreads = buildFragmentSpreadGraph(parsedFiles);
   const roots = new Set<string>(extraRoots);
 
   for (const entities of parsedFiles) {
     entities.operationSpreads.forEach((spread) => roots.add(spread));
-    // Duplicate fragment names are reported by findDuplicateNameWarnings at the
-    // scan level; here they only need conservative graph handling (below).
     allFragments.push(...entities.fragments);
-    for (const { name, spreads } of entities.fragmentSpreads) {
-      // Merge (not overwrite) so a duplicate definition cannot drop spread
-      // edges — over-approximating reachability keeps results conservative.
-      const existing = fragmentSpreads.get(name) ?? [];
-      fragmentSpreads.set(name, [...new Set([...existing, ...spreads])]);
-    }
   }
 
   // (b) A fragment referenced directly in source (fragment masking) is a root.
