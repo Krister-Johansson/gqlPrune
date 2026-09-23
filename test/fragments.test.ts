@@ -3,6 +3,7 @@
 
 import * as fs from 'fs';
 import {
+  buildFragmentSpreadGraph,
   findUnusedFragments,
   findUnusedFragmentsInCorpus,
   reachableFragments,
@@ -90,6 +91,39 @@ describe('fragments', () => {
 
     it('returns none when every fragment is reachable', () => {
       expect(findUnusedFragments(all, ['A', 'Orphan'], graph)).toEqual([]);
+    });
+  });
+
+  describe('buildFragmentSpreadGraph', () => {
+    afterEach(() => jest.resetAllMocks());
+
+    it('maps every fragment to the fragments it spreads directly', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue(
+        'fragment Outer on T { ...Inner ...Other }\nfragment Inner on T { id }',
+      );
+      const graph = buildFragmentSpreadGraph(
+        ['f.gql'].map(extractGraphqlEntities),
+      );
+      expect(graph.get('Outer')).toEqual(['Inner', 'Other']);
+      expect(graph.get('Inner')).toEqual([]);
+    });
+
+    it('merges the edges of duplicate names without repeating one', () => {
+      (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'a.gql') return 'fragment Dupe on T { ...A ...Shared }';
+        return 'fragment Dupe on T { ...B ...Shared }';
+      });
+      const graph = buildFragmentSpreadGraph(
+        ['a.gql', 'b.gql'].map(extractGraphqlEntities),
+      );
+      expect(graph.get('Dupe')).toEqual(['A', 'Shared', 'B']);
+    });
+
+    it('skips a file that failed to parse', () => {
+      (fs.readFileSync as jest.Mock).mockReturnValue('fragment Broken on {');
+      expect(
+        buildFragmentSpreadGraph(['f.gql'].map(extractGraphqlEntities)).size,
+      ).toBe(0);
     });
   });
 

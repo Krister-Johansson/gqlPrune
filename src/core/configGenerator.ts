@@ -20,7 +20,7 @@ import {
   deriveGqlPruneConfig,
   discoverCodegenConfig,
 } from '../utils/codegen.js';
-import { resolveDirs, scanProject } from './gqlPruner.js';
+import { resolveDirs, resolveScanDirs, scanProject } from './gqlPruner.js';
 import { pluralize } from '../utils/stringHelpers.js';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
 
@@ -54,20 +54,45 @@ export function splitFolders(input: string): string[] {
 }
 
 /**
+ * The directories `init`'s answers expand to, ready for a scan, or `undefined`
+ * when there is nothing to scan yet. The answers go through the same
+ * expansion and existence check as a real run, so a monorepo glob such as
+ * `packages/*\/graphql` reaches the same directories here that it will reach
+ * on the first `gqlprune`. Every answer is the user's own, so any failure
+ * (an empty answer, a glob matching nothing, a directory not on disk) means
+ * "nothing to scan" rather than an error to report: `init` still writes the
+ * config, and the first real run reports the problem with exit code 2. What
+ * the expansion could not read goes to `onWarning`: a subtree skipped here
+ * is a generated file `init` never sees, so the user has to hear about it.
+ */
+function scannableDirs(
+  graphqlDir: string | string[],
+  srcDir: string | string[],
+  onWarning: (message: string) => void = () => {},
+): { graphqlDir: string[]; srcDir: string[] } | undefined {
+  const graphqlDirs = resolveDirs(graphqlDir);
+  const srcDirs = resolveDirs(srcDir);
+  if (graphqlDirs.length === 0 || srcDirs.length === 0) return undefined;
+  const scanDirs = resolveScanDirs(graphqlDirs, srcDirs);
+  scanDirs.warnings.forEach(onWarning);
+  return scanDirs.error === undefined
+    ? { graphqlDir: scanDirs.graphqlDir, srcDir: scanDirs.srcDir }
+    : undefined;
+}
+
+/**
  * Detects source files that would mask unused results (a generated file inside
- * `srcDir` referencing most operations — see {@link detectGeneratedFiles}) so
+ * `srcDir` referencing most operations, see {@link detectGeneratedFiles}) so
  * `init` can pre-fill them into `exclude`. Returns their project-root-relative
- * paths, or `[]` when a directory is missing (nothing to scan yet).
+ * paths, or `[]` when there is nothing to scan yet.
  */
 export function detectGeneratedExcludes(
   graphqlDir: string | string[],
   srcDir: string | string[],
 ): string[] {
-  const dirs = [...resolveDirs(graphqlDir), ...resolveDirs(srcDir)];
-  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
-    return [];
-  }
-  return scanProject({ graphqlDir, srcDir }).generatedFiles.map((warning) =>
+  const dirs = scannableDirs(graphqlDir, srcDir, warnOnReadError);
+  if (dirs === undefined) return [];
+  return scanProject(dirs).generatedFiles.map((warning) =>
     warning.file.replace(/\\/g, '/'),
   );
 }
@@ -131,9 +156,13 @@ function formatDir(dir: string): string {
  * Turns a set of detected files into a suggestion plus multi-root candidates.
  * When `.` is itself one of the roots (a file sits directly in the project
  * root) it subsumes the others, so no checklist is offered and the plain `.`
- * suggestion stands.
+ * suggestion stands. Pure: the filesystem walk that finds the files happens
+ * in the callers, so this rule is tested on plain path lists.
+ *
+ * @param {string[]} filePaths - The detected files, relative to the project root.
+ * @returns {DirDetection} - The suggestion and any roots to choose between.
  */
-function detectFrom(filePaths: string[]): DirDetection {
+export function detectFrom(filePaths: string[]): DirDetection {
   const dir = commonParentDir(filePaths);
   if (dir === undefined) return { suggestion: undefined, candidates: [] };
   const roots = dir === '.' ? topLevelRoots(filePaths) : [];
@@ -264,18 +293,20 @@ export function detectSrcDirs(): DirDetection {
   );
 }
 
-/** Prints a one-line preview of what a real run would find, when the dirs exist. */
+/**
+ * Prints a one-line preview of what a real run would find, when it can run.
+ * The directories were already expanded, and any walk warning already
+ * printed, by the generated-file detection a moment earlier, so this
+ * expansion stays quiet rather than repeating them.
+ */
 function printPreview(config: GqlPruneConfig): void {
-  const dirs = [
-    ...resolveDirs(config.graphqlDir),
-    ...resolveDirs(config.srcDir),
-  ];
-  if (dirs.length === 0 || dirs.some((dir) => !directoryExists(dir))) {
+  const dirs = scannableDirs(config.graphqlDir, config.srcDir);
+  if (dirs === undefined) {
     console.log('Run "gqlprune" to scan for unused GraphQL operations.');
     return;
   }
   const { operationCount, gqlFileCount, unusedOperations, unusedFragments } =
-    scanProject(config);
+    scanProject({ ...config, ...dirs });
   const unused = unusedOperations.length + unusedFragments.length;
   console.log(
     `✓ Found ${operationCount} ${pluralize(operationCount, 'operation')} in ` +
@@ -316,7 +347,15 @@ async function askForDir(
   });
 }
 
-export async function generateConfig() {
+/**
+ * Runs `gqlprune init`: asks for the directories (starting from what the
+ * codegen config or the filesystem suggests), pre-fills the exclusions a
+ * generated file would need, writes `gqlPrune.config.yaml`, and prints a
+ * preview of what a real run would find.
+ *
+ * @returns {Promise<void>} - Resolves when the config is written, or kept.
+ */
+export async function generateConfig(): Promise<void> {
   // Never clobber an existing (possibly hand-tuned) config without asking.
   if (fs.existsSync(CONFIG_FILE)) {
     const overwrite = await confirm({
@@ -396,10 +435,8 @@ export async function generateConfig() {
     ...derivedConfigExtras(codegen?.values),
   };
 
-  // Write the answers to a configuration file
   fs.writeFileSync(CONFIG_FILE, yaml.dump(answers));
   console.log('Configuration generated successfully!');
 
-  // Show an instant preview of what a real run would find.
   printPreview(answers);
 }

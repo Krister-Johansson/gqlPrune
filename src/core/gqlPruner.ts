@@ -18,7 +18,6 @@ import {
   DEFAULT_SOURCE_EXTENSIONS,
   DOCUMENT_EXTENSIONS,
   findUsageMatch,
-  isOperationUsedInContents,
   readSourceFiles,
   SourceFile,
 } from '../utils/fileUtils.js';
@@ -89,7 +88,7 @@ export function resolveExcludePatterns(config: GqlPruneConfig): string[] {
 /**
  * Builds the scan's exclude matcher. The always-excluded folders
  * ({@link DEFAULT_EXCLUDED_FOLDERS}) live in their own matcher, OR-ed with one
- * built from the user's `exclude`/`excludedFolders` patterns — so a `!`
+ * built from the user's `exclude`/`excludedFolders` patterns, so a `!`
  * negation applies only within the user's own patterns and can never
  * re-include `node_modules` or `.git`, as the docs have always promised.
  */
@@ -221,21 +220,6 @@ export function resolveInline(config: GqlPruneConfig): boolean {
   return config.inline === true;
 }
 
-/**
- * Returns the operations that are not referenced by any of the file contents,
- * using the given usage patterns.
- */
-export function findUnusedOperations(
-  operations: OperationInfo[],
-  fileContents: string[],
-  usagePatterns: string[],
-): OperationInfo[] {
-  return operations.filter((op) => {
-    const patterns = buildUsagePatterns(op, usagePatterns);
-    return !isOperationUsedInContents(patterns, fileContents);
-  });
-}
-
 /** How a single operation's used/unused verdict was reached. */
 export type OperationUsage = {
   operation: OperationInfo;
@@ -246,10 +230,10 @@ export type OperationUsage = {
 };
 
 /**
- * Determines, for every operation, whether it is referenced in the sources —
+ * Determines, for every operation, whether it is referenced in the sources,
  * and when it is, which expanded pattern matched in which file. The unused set
- * derived from this (`!usage.match`) is identical to `findUnusedOperations`;
- * the extra detail exists so `--verbose` can explain each verdict.
+ * is what has no `match`; the detail is what lets `--verbose` explain each
+ * verdict. This is the one sweep the scan runs over the sources for operations.
  */
 export function explainOperationUsage(
   operations: OperationInfo[],
@@ -322,6 +306,36 @@ export function resolveSourceExtensions(
 /** Header of the confidence column, and the width every such column takes. */
 const CONFIDENCE_HEADER = 'Confidence';
 
+/** The banner that opens a report section. */
+export function sectionTitle(name: string): string {
+  return `--- ${name} ---`;
+}
+
+/**
+ * The dash rule that closes a report section, exactly as wide as its banner.
+ * Derived from the name rather than typed out, so renaming a section cannot
+ * leave the rule a character short with nothing to notice.
+ */
+export function sectionRule(name: string): string {
+  return '-'.repeat(sectionTitle(name).length);
+}
+
+/**
+ * Prints one report section: the banner, whatever `body` prints, then the
+ * closing rule. The count line each section ends with is the caller's, since
+ * its wording and colour differ per section.
+ */
+function printSection(name: string, body: () => void): void {
+  console.log(kleur.blue(`\n${sectionTitle(name)}\n`));
+  body();
+  console.log(kleur.blue(sectionRule(name)));
+}
+
+/** The width a column needs: its header, or its widest value. */
+function columnWidth(header: string, values: string[]): number {
+  return Math.max(header.length, ...values.map((value) => value.length));
+}
+
 /**
  * Colours one grade for the tables: the strongest evidence stands out and the
  * weakest recedes, so a table of nothing but `high` still reads as a plain
@@ -340,30 +354,30 @@ function confidenceCell(level: ConfidenceLevel): string {
 
 /** Prints the aligned table of unused operations. */
 function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
-  const maxTypeLength = Math.max(
-    'Type'.length,
-    ...unusedOperations.map((op) => op.type.length),
+  const typeWidth = columnWidth(
+    'Type',
+    unusedOperations.map((op) => op.type),
   );
-  const maxNameLength = Math.max(
-    'Operation'.length,
-    ...unusedOperations.map((op) => op.name.length),
+  const nameWidth = columnWidth(
+    'Operation',
+    unusedOperations.map((op) => op.name),
   );
 
-  console.log(kleur.blue('\n--- Unused GraphQL Operations ---\n'));
-  console.log(
-    'Type'.padEnd(maxTypeLength),
-    'Operation'.padEnd(maxNameLength),
-    CONFIDENCE_HEADER,
-    'File',
-  );
-  unusedOperations.forEach((op) => {
+  printSection('Unused GraphQL Operations', () => {
     console.log(
-      `${kleur.yellow(op.type.padEnd(maxTypeLength))} ${kleur.cyan(
-        op.name.padEnd(maxNameLength),
-      )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
+      'Type'.padEnd(typeWidth),
+      'Operation'.padEnd(nameWidth),
+      CONFIDENCE_HEADER,
+      'File',
     );
+    unusedOperations.forEach((op) => {
+      console.log(
+        `${kleur.yellow(op.type.padEnd(typeWidth))} ${kleur.cyan(
+          op.name.padEnd(nameWidth),
+        )} ${confidenceCell(op.confidence)} ${kleur.magenta(path.basename(op.filePath))}`,
+      );
+    });
   });
-  console.log(kleur.blue('---------------------------------'));
   const count = unusedOperations.length;
   console.log(
     kleur.red(
@@ -375,21 +389,21 @@ function reportUnusedOperations(unusedOperations: GradedOperation[]): void {
 
 /** Prints the aligned table of unused fragments. */
 function reportUnusedFragments(unusedFragments: GradedFragment[]): void {
-  const maxNameLength = Math.max(
-    'Fragment'.length,
-    ...unusedFragments.map((fragment) => fragment.name.length),
+  const nameWidth = columnWidth(
+    'Fragment',
+    unusedFragments.map((fragment) => fragment.name),
   );
 
-  console.log(kleur.blue('\n--- Unused GraphQL Fragments ---\n'));
-  console.log('Fragment'.padEnd(maxNameLength), CONFIDENCE_HEADER, 'File');
-  unusedFragments.forEach((fragment) => {
-    console.log(
-      `${kleur.cyan(fragment.name.padEnd(maxNameLength))} ${confidenceCell(
-        fragment.confidence,
-      )} ${kleur.magenta(path.basename(fragment.filePath))}`,
-    );
+  printSection('Unused GraphQL Fragments', () => {
+    console.log('Fragment'.padEnd(nameWidth), CONFIDENCE_HEADER, 'File');
+    unusedFragments.forEach((fragment) => {
+      console.log(
+        `${kleur.cyan(fragment.name.padEnd(nameWidth))} ${confidenceCell(
+          fragment.confidence,
+        )} ${kleur.magenta(path.basename(fragment.filePath))}`,
+      );
+    });
   });
-  console.log(kleur.blue('--------------------------------'));
   const count = unusedFragments.length;
   console.log(
     kleur.red(
@@ -412,30 +426,30 @@ function formatFieldLocation(location: {
  * the key shown on its first row only.
  */
 function reportUnusedFieldCandidates(candidates: GradedField[]): void {
-  const maxFieldLength = Math.max(
-    'Field'.length,
-    ...candidates.map((candidate) => candidate.field.length),
+  const fieldWidth = columnWidth(
+    'Field',
+    candidates.map((candidate) => candidate.field),
   );
 
-  console.log(kleur.blue('\n--- Unused Field Candidates ---\n'));
-  console.log('Field'.padEnd(maxFieldLength), CONFIDENCE_HEADER, 'Selected in');
-  candidates.forEach((candidate) => {
-    candidate.locations.forEach((location, index) => {
-      const label = index === 0 ? candidate.field : '';
-      // The grade belongs to the key, not to each of its selections, so it sits
-      // on the first row with the key and the rest stay blank.
-      const grade =
-        index === 0
-          ? confidenceCell(candidate.confidence)
-          : ''.padEnd(CONFIDENCE_HEADER.length);
-      console.log(
-        `${kleur.cyan(label.padEnd(maxFieldLength))} ${grade} ${kleur.magenta(
-          formatFieldLocation(location),
-        )}`,
-      );
+  printSection('Unused Field Candidates', () => {
+    console.log('Field'.padEnd(fieldWidth), CONFIDENCE_HEADER, 'Selected in');
+    candidates.forEach((candidate) => {
+      candidate.locations.forEach((location, index) => {
+        const label = index === 0 ? candidate.field : '';
+        // The grade belongs to the key, not to each of its selections, so it
+        // sits on the first row with the key and the rest stay blank.
+        const grade =
+          index === 0
+            ? confidenceCell(candidate.confidence)
+            : ''.padEnd(CONFIDENCE_HEADER.length);
+        console.log(
+          `${kleur.cyan(label.padEnd(fieldWidth))} ${grade} ${kleur.magenta(
+            formatFieldLocation(location),
+          )}`,
+        );
+      });
     });
   });
-  console.log(kleur.blue('-------------------------------'));
   const count = candidates.length;
   console.log(
     kleur.yellow(
@@ -455,16 +469,17 @@ function reportUnusedFieldCandidates(candidates: GradedField[]): void {
     ),
   );
 }
+
 /** Prints the list of orphaned GraphQL files. */
 function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
-  console.log(kleur.blue('\n--- Orphaned GraphQL Files ---\n'));
-  console.log(CONFIDENCE_HEADER, 'File');
-  orphanedFiles.forEach((orphan) =>
-    console.log(
-      `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
-    ),
-  );
-  console.log(kleur.blue('------------------------------'));
+  printSection('Orphaned GraphQL Files', () => {
+    console.log(CONFIDENCE_HEADER, 'File');
+    orphanedFiles.forEach((orphan) =>
+      console.log(
+        `${confidenceCell(orphan.confidence)} ${kleur.magenta(orphan.file)}`,
+      ),
+    );
+  });
   const count = orphanedFiles.length;
   const them = pluralize(count, 'it', 'them');
   console.log(
@@ -478,21 +493,21 @@ function reportOrphanedFiles(orphanedFiles: OrphanedFile[]): void {
 
 /** Prints the deprecated field/enum selections found against the local SDL. */
 function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
-  const maxFileLength = Math.max(
-    'File'.length,
-    ...deprecatedUsages.map((usage) => usage.file.length),
+  const fileWidth = columnWidth(
+    'File',
+    deprecatedUsages.map((usage) => usage.file),
   );
 
-  console.log(kleur.blue('\n--- Deprecated Field Usage ---\n'));
-  console.log('File'.padEnd(maxFileLength), 'Line', 'Message');
-  deprecatedUsages.forEach((usage) => {
-    console.log(
-      `${kleur.magenta(usage.file.padEnd(maxFileLength))} ${kleur.cyan(
-        String(usage.line ?? '-').padEnd(4),
-      )} ${usage.message}`,
-    );
+  printSection('Deprecated Field Usage', () => {
+    console.log('File'.padEnd(fileWidth), 'Line', 'Message');
+    deprecatedUsages.forEach((usage) => {
+      console.log(
+        `${kleur.magenta(usage.file.padEnd(fileWidth))} ${kleur.cyan(
+          String(usage.line ?? '-').padEnd(4),
+        )} ${usage.message}`,
+      );
+    });
   });
-  console.log(kleur.blue('------------------------------'));
   const count = deprecatedUsages.length;
   console.log(
     kleur.yellow(
@@ -710,7 +725,7 @@ export const GENERATED_COVERAGE_THRESHOLD = 0.7;
 
 /**
  * Minimum number of operations before the coverage heuristic applies. Below
- * this, "one file references most operations" is uninformative — a small project
+ * this, "one file references most operations" is uninformative: a small project
  * legitimately references everything from just a few places.
  */
 export const GENERATED_MIN_OPERATIONS = 5;
@@ -777,15 +792,15 @@ function looksGeneratedHeader(content: string): boolean {
 
 /**
  * Detects source files that likely mask unused results because a single file
- * references most operations — the classic failure mode where GraphQL Code
+ * references most operations, the classic failure mode where GraphQL Code
  * Generator output lives inside `srcDir` un-excluded, so every operation looks
  * "used" and nothing is ever reported unused.
  *
  * The trigger is coverage: a file referencing at least
  * {@link GENERATED_COVERAGE_THRESHOLD} of all operations, and only when there
  * are at least {@link GENERATED_MIN_OPERATIONS}. A generated-looking filename or
- * header never triggers on its own — a generated file that references no
- * operations is harmless — but is reported as a corroborating reason.
+ * header never triggers on its own (a generated file that references no
+ * operations is harmless) but is reported as a corroborating reason.
  */
 export function detectGeneratedFiles(
   sources: SourceFile[],
@@ -844,7 +859,7 @@ export function formatGeneratedFileWarnings(
 /**
  * Advisory warnings for operation/fragment names defined more than once across
  * the parsed corpus. Detection is name-keyed, so duplicate definitions are
- * conflated — every definition shares one used/unused verdict. Returned as
+ * conflated: every definition shares one used/unused verdict. Returned as
  * data so the caller can route them per the I/O rules (stderr + the JSON
  * `warnings` array), like the generated-file warnings.
  */
@@ -892,7 +907,7 @@ function readFileConfig(): Partial<GqlPruneConfig> {
     raw = fs.readFileSync('./gqlPrune.config.yaml', 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error; // permissions or similar — surface it rather than hide it
+      throw error; // permissions or similar: surface it rather than hide it
     }
     // No config file: rely entirely on CLI flags.
   }
@@ -1043,7 +1058,11 @@ export function resolveScanDirs(
   srcDir: string[],
   derived: { graphqlDir?: string; srcDir?: string } = {},
 ): ResolvedScanDirs {
-  const stop = (error: string, warnings: string[] = []): ResolvedScanDirs => ({
+  // A subtree a glob walk could not read is an advisory like any other: it
+  // travels with the derived-directory warnings whatever else happens, since
+  // a run that stops on a missing directory still owes the reason it saw less.
+  const warnings: string[] = [];
+  const stop = (error: string): ResolvedScanDirs => ({
     graphqlDir: [],
     srcDir: [],
     warnings,
@@ -1053,7 +1072,10 @@ export function resolveScanDirs(
   const expanded = [
     { field: 'graphqlDir', configured: graphqlDir, from: derived.graphqlDir },
     { field: 'srcDir', configured: srcDir, from: derived.srcDir },
-  ].map((field) => ({ ...field, ...expandDirPatterns(field.configured) }));
+  ].map((field) => ({
+    ...field,
+    ...expandDirPatterns(field.configured, (message) => warnings.push(message)),
+  }));
 
   // A glob that matches nothing is checked first, before anything touches the
   // filesystem, exactly as it always was.
@@ -1081,7 +1103,6 @@ export function resolveScanDirs(
     );
   }
 
-  const warnings: string[] = [];
   for (const entry of checked) {
     if (entry.from === undefined || entry.dropped.length === 0) continue;
     if (entry.present.length === 0) {
@@ -1090,7 +1111,6 @@ export function resolveScanDirs(
           `${entry.dropped.join(', ')}. Set graphqlDir and srcDir in ` +
           'gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> ' +
           'and --src <dir>.',
-        warnings,
       );
     }
     warnings.push(
@@ -1227,7 +1247,7 @@ export function formatExpandedDirLines(
 
 /**
  * Renders the scan's findings as `--verbose` lines: the files scanned, then one
- * verdict per operation — with the matching pattern and file for used ones, and
+ * verdict per operation, with the matching pattern and file for used ones, and
  * the searched-but-unmatched patterns for unused ones.
  */
 export function formatVerboseScanLines(result: ScanResult): string[] {
@@ -1428,11 +1448,7 @@ export function scanProject(
       gradedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
-    unusedFieldCandidates: gradeFieldCandidates(
-      unusedFieldCandidates,
-      sources,
-      generatedPaths,
-    ),
+    unusedFieldCandidates: gradeFieldCandidates(unusedFieldCandidates),
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     readWarnings,
@@ -1440,6 +1456,17 @@ export function scanProject(
   };
 }
 
+/**
+ * Runs a scan end to end: resolves the configuration, expands and checks the
+ * directories, loads the optional schema, scans, and reports. Everything it
+ * decides is delegated to the pure helpers above; this function only wires
+ * them to the filesystem, the console and the exit code. A run that cannot
+ * start ends with exit code 2 here; findings set `process.exitCode` to 1 so
+ * buffered output still flushes.
+ *
+ * @param {object} [options] - The CLI flags and the parsed CLI configuration.
+ * @returns {void}
+ */
 export function mainFunction(
   options: {
     json?: boolean;
@@ -1447,7 +1474,7 @@ export function mainFunction(
     verbose?: boolean;
     config?: CliConfig;
   } = {},
-) {
+): void {
   const json = options.json ?? false;
   const annotate = options.annotate ?? false;
   const verbose = options.verbose ?? false;
@@ -1456,6 +1483,15 @@ export function mainFunction(
     for (const line of lines) {
       console.error(kleur.dim(`[verbose] ${line}`));
     }
+  };
+  // One advisory line on stderr: in CI an (escaped) ::warning workflow
+  // command like the other annotations, otherwise a coloured line for humans.
+  const printAdvisory = (line: string): void => {
+    console.error(
+      annotate
+        ? `::warning::${escapeAnnotationMessage(line)}`
+        : kleur.yellow(`⚠ ${line}`),
+    );
   };
 
   let run: ResolvedRunConfig;
@@ -1505,6 +1541,9 @@ export function mainFunction(
     srcDir: codegenSource(run, 'srcDir'),
   });
   if (scanDirs.error !== undefined) {
+    // What the glob walk could not read explains why it matched less, so it
+    // comes out before the error that ends the run.
+    scanDirs.warnings.forEach(printAdvisory);
     console.error(kleur.red(scanDirs.error));
     process.exit(2);
   }
@@ -1702,15 +1741,7 @@ export function mainFunction(
   // output): it would silently make every operation look "used" and report
   // nothing unused. Emit to stderr so it surfaces in --json mode too without
   // corrupting the JSON on stdout.
-  for (const line of advisoryWarnings) {
-    // In CI, surface it as an (escaped) ::warning workflow command like the other
-    // annotations; otherwise a coloured stderr line for humans.
-    console.error(
-      annotate
-        ? `::warning::${escapeAnnotationMessage(line)}`
-        : kleur.yellow(`⚠ ${line}`),
-    );
-  }
+  advisoryWarnings.forEach(printAdvisory);
 
   // GitHub Actions annotations go to stderr, keeping stdout clean for --json.
   if (annotate) {
