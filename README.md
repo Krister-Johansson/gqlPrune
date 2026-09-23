@@ -546,6 +546,25 @@ npx gqlprune --annotate
 
 Annotations go to stderr, so they don't interfere with `--json` output on stdout (the two can be combined).
 
+A complete workflow that runs on every pull request and fails the job on high-confidence findings:
+
+```yaml
+name: gqlprune
+on: [pull_request]
+jobs:
+  gqlprune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx gqlprune --min-confidence high
+```
+
+Drop `--min-confidence high` to fail on every finding. The annotations need no extra step: `GITHUB_ACTIONS` is set in every job, so they are on.
+
 ### Update notifications
 
 gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to stderr when a newer version is available. It stays silent in CI and when stdout isn't a TTY, never writes to stdout (so `--json` stays clean), and never affects the exit code. Opt out with `NO_UPDATE_NOTIFIER=1`; the check is also skipped whenever `CI` is set.
