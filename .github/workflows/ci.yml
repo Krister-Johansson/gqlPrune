@@ -78,12 +78,15 @@ jobs:
 
   # Every PR must track a GitHub issue (issue-first workflow). Machine PRs
   # (dependabot, release-please) are exempt. Skipped jobs count as passing
-  # for the ruleset, so this is safe to require.
+  # for the ruleset, so this is safe to require. The exemption tests the PR
+  # author rather than github.actor: the actor is whoever triggered the latest
+  # event, so a maintainer pressing "Update branch" on a dependabot PR would
+  # otherwise turn the check on for a body that never names an issue.
   require-issue-link:
     name: ci / linked issue
     if: >
       github.event_name == 'pull_request' &&
-      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       !startsWith(github.event.pull_request.title, 'chore(main): release')
     runs-on: ubuntu-latest
     steps:
