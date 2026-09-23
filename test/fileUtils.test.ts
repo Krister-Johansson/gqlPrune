@@ -423,7 +423,9 @@ describe('fileUtils', () => {
       // The "matches nothing" report already says everything a missing base
       // can say; a walk warning on top would repeat it.
       (fs.statSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT');
+        throw Object.assign(new Error('ENOENT: no such file'), {
+          code: 'ENOENT',
+        });
       });
       const messages: string[] = [];
       expect(
@@ -432,6 +434,37 @@ describe('fileUtils', () => {
       ).toEqual(['missing/*/graphql']);
       expect(messages).toEqual([]);
       expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('does not return a missing base as the match of a trailing **', () => {
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(new Error('ENOENT: no such file'), {
+          code: 'ENOENT',
+        });
+      });
+      expect(expandDirPatterns(['missing/**'])).toEqual({
+        dirs: [],
+        unmatched: ['missing/**'],
+      });
+    });
+
+    it('reports a glob base it is not allowed to look at', () => {
+      // Only an absent base is silent. A permission problem on the base is
+      // exactly the kind of reason the user has to hear.
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(new Error('EACCES: permission denied'), {
+          code: 'EACCES',
+        });
+      });
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['locked/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['locked/*/graphql']);
+      expect(messages).toEqual([
+        'Skipped the directory locked: could not read it. ' +
+          'EACCES: permission denied Anything it holds is missing from this scan.',
+      ]);
     });
 
     it('reports a glob whose static base exists but cannot be read', () => {

@@ -273,16 +273,11 @@ function findMatchingDirs(
   const isMatch = picomatch(globs, { dot: true });
   const depthLimit = /\*\*|\{/.test(glob) ? Infinity : glob.split('/').length;
   const matches: string[] = [];
+  const start = base === '' ? '.' : base;
+  if (!isWalkableBase(start, onReadError)) return matches;
   if (glob === '**' && base !== '') {
     matches.push(`${prefix}${base}`);
   }
-
-  // A base that is not on disk matches nothing, and the caller reports that
-  // as the configuration mistake it is; a walk warning on top would only
-  // repeat it. A base that exists but cannot be read is a different story,
-  // and the walk reports the reason.
-  const start = base === '' ? '.' : base;
-  if (!directoryExists(start)) return matches;
 
   walkDirectory(start, {
     include: (entry) => !DEFAULT_EXCLUDED_FOLDERS.includes(entry.name),
@@ -298,6 +293,33 @@ function findMatchingDirs(
     onReadError,
   });
   return matches;
+}
+
+/**
+ * Whether a glob's static base is a directory the walk can start from.
+ *
+ * A base that is not on disk matches nothing, and the caller reports that as
+ * the configuration mistake it is; a walk warning on top would only repeat
+ * it. Any other failure to look at the base (a permission problem, say) is a
+ * reason the user has to hear, so it goes to `onReadError` like an unreadable
+ * subtree does.
+ */
+function isWalkableBase(
+  start: string,
+  onReadError: (message: string) => void,
+): boolean {
+  try {
+    return fs.statSync(start).isDirectory();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      onReadError(
+        `Skipped the directory ${start}: could not read it. ${describeError(error)} ` +
+          'Anything it holds is missing from this scan.',
+      );
+    }
+    return false;
+  }
 }
 
 /**
