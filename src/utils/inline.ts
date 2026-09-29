@@ -2,27 +2,14 @@
 // Copyright (c) 2023 Krister Johansson
 
 import { DocumentNode, parse, Source } from 'graphql';
-import { SourceFile } from './fileUtils.js';
-import {
-  findGroupEnd,
-  isQuote,
-  Range,
-  scanLiteral,
-  skipBlockComment,
-  skipLineComment,
-  skipLiteral,
-} from './jsLexer.js';
-import { wholeWordPattern } from './stringHelpers.js';
 import { buildGraphqlEntities, GraphqlFileEntities } from './operations.js';
+import type { ReferenceIndex } from './referenceIndex.js';
+import { modulePathOf, SourceModule } from './sourceModule.js';
 
-/** One recognized inline GraphQL document, before it is parsed. */
-export type InlineSite = {
-  /** The document text, with every `${...}` interpolation blanked out. */
-  body: string;
-  /** The 1-based line the body starts on within the source file. */
-  line: number;
-  /** The 1-based column the body starts on. */
-  column: number;
+/** One inline GraphQL document that parsed successfully. */
+export type InlineDocument = {
+  /** The source file the document was found in. */
+  filePath: string;
   /** The constant the document is assigned to, when the statement declares one. */
   identifier?: string;
   /**
@@ -31,22 +18,6 @@ export type InlineSite = {
    * statement that defines it is the statement that uses it. False for one
    * standing alone as its own statement, which nothing has to consume.
    */
-  consumed: boolean;
-  /**
-   * The parts of the file to blank when building the usage corpus: the whole
-   * defining statement, minus the interpolations (whose names are real
-   * references to other documents and must stay searchable).
-   */
-  blankRanges: Range[];
-};
-
-/** One inline GraphQL document that parsed successfully. */
-export type InlineDocument = {
-  /** The source file the document was found in. */
-  filePath: string;
-  /** The constant the document is assigned to, when the statement declares one. */
-  identifier?: string;
-  /** See {@link InlineSite.consumed}. */
   consumed: boolean;
   /** The parsed document, located against the source file's real lines. */
   document: DocumentNode;
@@ -58,15 +29,21 @@ export type InlineExtraction = {
   documents: InlineDocument[];
   /** Recognized bodies that failed to parse and were skipped. */
   skipped: number;
-  /** The file text with every recognized document blanked out. */
-  blankedContent: string;
+  /**
+   * Offsets of every parsed document body, so a pass that still reads the
+   * file as text (the field check) can blank the definitions out of it.
+   */
+  bodyRanges: { start: number; end: number }[];
 };
 
 /** An inline document kept alive by a reference to the constant it is assigned to. */
 export type InlineIdentifierUsage = {
   identifier: string;
-  /** The first source file that references the constant. */
+  /** The source file that references the constant. */
   file: string;
+  /** Where in that file, when a reference was found (absent for a consumed document). */
+  line?: number;
+  column?: number;
   /** Names of the operations the document defines. */
   operations: string[];
   /** Names of the fragments the document defines. */
@@ -74,277 +51,27 @@ export type InlineIdentifierUsage = {
 };
 
 /**
- * Start of an inline document: an optional `const|let|var IDENT =` (an `export`
- * in front and a type annotation after the name are both fine, including one
- * broken over several lines inside its type arguments, which is what a printer
- * does to a long `TypedDocumentNode<...>`), then the `gql`
- * or `graphql` tag, possibly reached through a member expression, and then
- * either a backtick (tagged template) or a parenthesis and the opening quote of
- * a single string argument. The lookarounds keep `mygql` and `graphqlDir` out.
+ * Parses the inline documents the module model found in one source file.
  *
- * The annotation may only cross a line break inside `<...>`. Letting it cross
- * one anywhere made it run past the end of its own statement: `let cache:
- * Map<string, unknown>` followed by `const doc = graphql(...)` matched as one
- * declaration and captured `cache`, so the real constant was never tracked and
- * the document it names came back unused.
- *
- * Sticky, because the scanner only ever tries it at an offset it has already
- * decided is code rather than a comment or a string.
- */
-const DOCUMENT_START =
-  /(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;<\n]*(?:<[^=;]*>[^=;\n]*)?)?=\s*)?(?<![\w$])(?:[A-Za-z_$][\w$]*\.)?(?:gql|graphql)(?![\w$])\s*(\()?\s*(['"`])/y;
-
-/** First character of a JavaScript identifier, where a tag can begin. */
-const IDENTIFIER_START = /[A-Za-z_$]/;
-
-/** Any character that can continue a JavaScript identifier. */
-const IDENTIFIER_PART = /[\w$]/;
-
-/** Replaces every character of a range with a space, keeping newlines in place. */
-function blankRange(text: string): string {
-  return text.replace(/[^\n]/g, ' ');
-}
-
-/**
- * Returns the offset just past the `)` that closes a call whose argument list is
- * already open at `start`, so a helper call carrying options after the document
- * is blanked whole. Returns `null` when the call never closes.
- */
-function findCallEnd(content: string, start: number): number | null {
-  return findGroupEnd(content, start, '(', ')');
-}
-
-/** Tracks line/column while walking a file's offsets in ascending order. */
-function locationTracker(content: string): (index: number) => {
-  line: number;
-  column: number;
-} {
-  let cursor = 0;
-  let line = 1;
-  let lastNewline = -1;
-  return (index) => {
-    for (; cursor < index; cursor++) {
-      if (content[cursor] === '\n') {
-        line += 1;
-        lastNewline = cursor;
-      }
-    }
-    return { line, column: index - lastNewline };
-  };
-}
-
-/**
- * Finds every inline GraphQL document in a source file's text: `gql`/`graphql`
- * tagged templates and `gql(...)`/`graphql(...)` calls taking a single string
- * argument. Purely textual, so it needs no TypeScript program and no schema.
- *
- * Interpolations are blanked out of the returned body (with the same number of
- * characters, so every location still lines up with the file) because
- * graphql-tag and friends append the interpolated documents after the body
- * rather than substituting inside it.
- *
- * A single pass walks the file and keeps track of whether it is in code, a
- * comment, or a string, and only looks for a tag while it is in code. A tag
- * written inside a comment or a quoted string is therefore skipped instead of
- * becoming a phantom document, which matters most for commented-out code. The
- * pass does not parse JavaScript: a regular-expression literal holding a quote
- * or a comment marker, such as `/["']/`, can still throw it off for the rest of
- * the line.
- *
- * @param {string} content - The raw source file text.
- * @returns {InlineSite[]} - The recognized documents, in file order.
- */
-export function findInlineDocumentSites(content: string): InlineSite[] {
-  const sites: InlineSite[] = [];
-  const locate = locationTracker(content);
-  // The last character of real code seen before the current offset, comments
-  // and whitespace skipped. It is what tells a document being passed to
-  // something (`useQuery(` ends in an open paren) from one standing alone as
-  // its own statement (the previous statement ended in `;` or a brace).
-  let lastCodeChar = '';
-  // Whether a line break separates `lastCodeChar` from the current offset.
-  // JavaScript ends a statement at a line break unless the line cannot end
-  // there, so a document after one is standalone however the line before it
-  // ended. Without this, a project written without semicolons would have every
-  // standalone document counted as used.
-  let newlineSince = false;
-  let i = 0;
-  while (i < content.length) {
-    const char = content[i];
-    if (char === '/' && content[i + 1] === '/') {
-      i = skipLineComment(content, i);
-      continue;
-    }
-    if (char === '/' && content[i + 1] === '*') {
-      i = skipBlockComment(content, i);
-      continue;
-    }
-    if (!IDENTIFIER_START.test(char)) {
-      // Any other literal belongs to the surrounding code, not to a document.
-      if (isQuote(char)) {
-        i = skipLiteral(content, i);
-        lastCodeChar = 'x'; // a literal is a value, like an identifier
-        newlineSince = false;
-        continue;
-      }
-      if (/\s/.test(char)) {
-        if (char === '\n' || char === '\r') newlineSince = true;
-      } else {
-        lastCodeChar = char;
-        newlineSince = false;
-      }
-      i += 1;
-      continue;
-    }
-
-    DOCUMENT_START.lastIndex = i;
-    const match = DOCUMENT_START.exec(content);
-    const end =
-      match === null
-        ? null
-        : readDocument(
-            content,
-            match,
-            sites,
-            locate,
-            newlineSince && !CONTINUES_EXPRESSION.has(lastCodeChar)
-              ? ''
-              : lastCodeChar,
-          );
-    if (end !== null) {
-      i = end;
-      lastCodeChar = content[end - 1] ?? '';
-      newlineSince = false;
-      continue;
-    }
-    // Not a document after all: step over the whole identifier so the text it
-    // introduces (a plain string, say) is read in its own right.
-    i += 1;
-    while (i < content.length && IDENTIFIER_PART.test(content[i])) i += 1;
-    lastCodeChar = content[i - 1] ?? '';
-    newlineSince = false;
-  }
-  return sites;
-}
-
-/**
- * Characters that end a statement. A document whose defining expression follows
- * one of these, or which opens the file, is not being passed to anything.
- */
-const STATEMENT_BOUNDARY = new Set(['', ';', '{', '}']);
-
-/**
- * Characters a statement cannot end on, so a line break after one of them
- * continues the expression rather than closing it. Everything else means
- * JavaScript inserts a semicolon at the break, which makes a document on the
- * next line a statement of its own however the previous line ended.
- */
-const CONTINUES_EXPRESSION = new Set([
-  '(',
-  ',',
-  '[',
-  '=',
-  ':',
-  '?',
-  '+',
-  '-',
-  '*',
-  '/',
-  '%',
-  '&',
-  '|',
-  '^',
-  '!',
-  '~',
-  '<',
-  '>',
-  '.',
-]);
-
-/**
- * Turns one `DOCUMENT_START` match into a site and appends it, returning the
- * offset just past the defining statement. Returns `null` when the match is not
- * a document after all, either because the tag takes a plain quoted string
- * (`gql'...'` is not a tagged template, and `from 'graphql'` is an import) or
- * because the literal never closes.
- */
-function readDocument(
-  content: string,
-  match: RegExpExecArray,
-  sites: InlineSite[],
-  locate: (index: number) => { line: number; column: number },
-  lastCodeChar: string,
-): number | null {
-  const [matched, identifier, paren, quote] = match;
-  if (paren === undefined && quote !== '`') return null;
-
-  const bodyStart = match.index + matched.length;
-  const literal = scanLiteral(content, bodyStart, quote);
-  if (literal === null) return null;
-  const { bodyEnd, interpolations } = literal;
-
-  // The statement ends at the closing quote, plus the rest of the call's
-  // argument list when it has one, so that nothing of the definition site is
-  // left in the corpus.
-  const closing =
-    paren === undefined ? null : findCallEnd(content, bodyEnd + 1);
-  const end = closing ?? bodyEnd + 1;
-
-  // Everything from the statement's first character to its end is blanked,
-  // except the interpolations.
-  const blankRanges: Range[] = [];
-  let cursor = match.index;
-  for (const interpolation of interpolations) {
-    blankRanges.push({ start: cursor, end: interpolation.start });
-    cursor = interpolation.end;
-  }
-  blankRanges.push({ start: cursor, end });
-
-  const body = interpolations.reduce(
-    (text, interpolation) =>
-      text.slice(0, interpolation.start - bodyStart) +
-      blankRange(content.slice(interpolation.start, interpolation.end)) +
-      text.slice(interpolation.end - bodyStart),
-    content.slice(bodyStart, bodyEnd),
-  );
-
-  sites.push({
-    body,
-    ...locate(bodyStart),
-    ...(identifier === undefined ? {} : { identifier }),
-    consumed: identifier === undefined && !STATEMENT_BOUNDARY.has(lastCodeChar),
-    blankRanges,
-  });
-  return end;
-}
-
-/**
- * Parses the inline documents of one source file and returns the file text with
- * their defining statements blanked out.
- *
- * The blanked text is what the scan searches for usage. Without it a document
- * would count as its own usage: its GraphQL text and the constant it is
- * assigned to both sit in the very file being searched, which a `.gql` corpus
- * never does. Interpolated names survive the blanking, since `${UserFragmentDoc}`
- * is a genuine reference to another document.
+ * The sites come from the syntax tree, so a tag inside a comment or a string
+ * never becomes a document, and a document never sees its own text: its body
+ * is a literal, which the reference walk records as words rather than as
+ * identifiers, and the constant it is assigned to is a declaration, which is
+ * never a reference. Those two facts are what used to take blanking the
+ * defining statement out of a text corpus.
  *
  * A body that does not parse is counted and skipped: a half-written template is
  * a normal state for a file being edited and must never abort the scan.
  *
- * @param {string} filePath - The source file the text came from.
- * @param {string} content - The raw source file text.
- * @returns {InlineExtraction} - Parsed documents, skip count, blanked text.
+ * @param {SourceModule} module - The parsed source file.
+ * @returns {InlineExtraction} - Parsed documents, skip count, body offsets.
  */
-export function extractInlineDocuments(
-  filePath: string,
-  content: string,
-): InlineExtraction {
-  const sites = findInlineDocumentSites(content);
+export function extractInlineDocuments(module: SourceModule): InlineExtraction {
   const documents: InlineDocument[] = [];
-  const parsed: InlineSite[] = [];
+  const bodyRanges: { start: number; end: number }[] = [];
   let skipped = 0;
 
-  for (const site of sites) {
+  for (const site of module.inlineSites) {
     // graphql-js does not apply a Source's locationOffset to token locations,
     // so the body is padded with the newlines and columns that precede it in
     // the file instead. Every reported line then points at the .ts file itself.
@@ -352,32 +79,20 @@ export function extractInlineDocuments(
       '\n'.repeat(site.line - 1) + ' '.repeat(site.column - 1) + site.body;
     try {
       documents.push({
-        filePath,
+        filePath: module.file,
         ...(site.identifier === undefined
           ? {}
           : { identifier: site.identifier }),
         consumed: site.consumed,
-        document: parse(new Source(padded, filePath)),
+        document: parse(new Source(padded, module.file)),
       });
-      parsed.push(site);
+      bodyRanges.push(site.textRange);
     } catch {
       skipped += 1;
     }
   }
 
-  // Only what parsed is blanked. Blanking a half-written template would erase
-  // the fragment names it spreads along with it, and those names are the only
-  // evidence that the fragments they refer to are alive.
-  const ranges = parsed.flatMap((site) => site.blankRanges);
-  let blankedContent = content;
-  for (const range of ranges) {
-    blankedContent =
-      blankedContent.slice(0, range.start) +
-      blankRange(blankedContent.slice(range.start, range.end)) +
-      blankedContent.slice(range.end);
-  }
-
-  return { file: filePath, documents, skipped, blankedContent };
+  return { file: module.file, documents, skipped, bodyRanges };
 }
 
 /**
@@ -402,37 +117,25 @@ export function toInlineEntities(
 }
 
 /**
- * Finds the inline documents whose constant is referenced somewhere in the
- * corpus. This is the signal that makes the client-preset convention work:
- * `const q = graphql(...)` followed by `useQuery(q)` names no operation
- * anywhere, so no usage pattern can ever match it.
+ * Finds the inline documents whose constant is referenced somewhere. This is
+ * the signal that makes the client-preset convention work: `const q =
+ * graphql(...)` followed by `useQuery(q)` names no operation anywhere, so no
+ * usage pattern can ever match it.
  *
- * The corpus passed in has the defining statements blanked out (see
- * {@link extractInlineDocuments}), so a constant only appears here when other
- * code reads it. The match is whole-word, which keeps a one-letter constant
- * from matching the middle of an unrelated word, though a constant named after
- * a common word can still match something unrelated and mask a real finding.
+ * The lookup is by binding identity: a reference counts only when it resolves
+ * to the declaration in the defining file, through whatever imports and
+ * re-exports lead there. Two files using the same obvious name (`query`,
+ * `doc`) is the norm under the client preset, and a name match would let one
+ * file's use of its own document vouch for another file's dead one.
  *
  * @param {GraphqlFileEntities[]} inlineFiles - Entities of the inline documents.
- * @param {SourceFile[]} sources - The blanked source corpus.
+ * @param {ReferenceIndex} index - The resolved references of the scanned sources.
  * @returns {InlineIdentifierUsage[]} - One entry per referenced document.
  */
 export function findInlineIdentifierUsage(
   inlineFiles: GraphqlFileEntities[],
-  sources: SourceFile[],
+  index: ReferenceIndex,
 ): InlineIdentifierUsage[] {
-  // Which files define an inline document under a given constant name. Two
-  // files using the same obvious name (`query`, `doc`) is the norm under the
-  // client preset, and without this one file's use of its own document would
-  // vouch for another file's dead one.
-  const definedIn = new Map<string, Set<string>>();
-  for (const entities of inlineFiles) {
-    if (entities.identifier === undefined) continue;
-    const files = definedIn.get(entities.identifier) ?? new Set<string>();
-    files.add(entities.filePath);
-    definedIn.set(entities.identifier, files);
-  }
-
   const usages: InlineIdentifierUsage[] = [];
   for (const entities of inlineFiles) {
     const names = {
@@ -442,8 +145,7 @@ export function findInlineIdentifierUsage(
     const { identifier } = entities;
 
     // A document written straight into a call is used by the statement that
-    // defines it. Nothing else can vouch for it, because that statement is
-    // exactly what gets blanked out of the corpus.
+    // defines it. Nothing else can vouch for it: it has no name to refer to.
     if (identifier === undefined) {
       if (entities.consumed === true) {
         usages.push({
@@ -455,15 +157,18 @@ export function findInlineIdentifierUsage(
       continue;
     }
 
-    const shadows = definedIn.get(identifier) ?? new Set<string>();
-    const pattern = wholeWordPattern(identifier);
-    const reference = sources.find(
-      (source) =>
-        (source.file === entities.filePath || !shadows.has(source.file)) &&
-        pattern.test(source.content),
+    const [reference] = index.referencesTo(
+      modulePathOf(entities.filePath),
+      identifier,
     );
     if (reference === undefined) continue;
-    usages.push({ identifier, file: reference.file, ...names });
+    usages.push({
+      identifier,
+      file: reference.file,
+      line: reference.line,
+      column: reference.column,
+      ...names,
+    });
   }
   return usages;
 }

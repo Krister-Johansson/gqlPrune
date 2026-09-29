@@ -1,4 +1,4 @@
-// Fixture source file; string-searched only, never compiled.
+// Fixture source file; parsed by gqlPrune, never compiled.
 import { useGetPingQuery } from './hooks';
 
 export function usePing() {

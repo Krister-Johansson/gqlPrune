@@ -17,7 +17,6 @@ import {
   findFilesWithExtension,
   DEFAULT_SOURCE_EXTENSIONS,
   DOCUMENT_EXTENSIONS,
-  findUsageMatch,
   readSourceFiles,
   SourceFile,
 } from '../utils/fileUtils.js';
@@ -25,6 +24,7 @@ import {
   buildUsagePatterns,
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
   DEFAULT_USAGE_PATTERNS,
+  expandPattern,
 } from '../utils/usagePatterns.js';
 import {
   extractGraphqlEntities,
@@ -45,7 +45,18 @@ import {
   loadCodegenConfig,
 } from '../utils/codegen.js';
 import { findUnusedFragmentsInCorpus } from '../utils/fragments.js';
-import { pluralize } from '../utils/stringHelpers.js';
+import { blankRanges, pluralize } from '../utils/stringHelpers.js';
+import { buildSourceModule, modulePathOf } from '../utils/sourceModule.js';
+import {
+  buildReferenceIndex,
+  describeResolution,
+  ReferenceIndex,
+} from '../utils/referenceIndex.js';
+import {
+  createCorpusResolver,
+  ModuleResolver,
+} from '../utils/moduleResolver.js';
+import { loadCompilerOptions } from '../utils/tsconfig.js';
 import { findUnusedFieldCandidates } from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
@@ -187,8 +198,32 @@ export function resolvePatternList(
         `${list.map((pattern) => JSON.stringify(pattern)).join(', ')}.`,
     );
   }
+  // Usage is decided by identifier references, so a pattern that expands to
+  // anything but an identifier can never match and would only produce a
+  // silent all-clear.
+  for (const pattern of patterns) {
+    const expanded = expandPattern(pattern, SAMPLE_OPERATION);
+    if (!IDENTIFIER.test(expanded)) {
+      throw new ConfigError(
+        `Every entry in "${setting}" must expand to an identifier: ` +
+          `"${pattern}" expands to "${expanded}" for an operation named ` +
+          `${SAMPLE_OPERATION.name}. Usage is decided by references to ` +
+          'identifiers, so a pattern with other characters can never match.',
+      );
+    }
+  }
   return patterns;
 }
+
+/** An operation to expand a pattern with, purely to check its shape. */
+const SAMPLE_OPERATION: OperationInfo = {
+  name: 'Sample',
+  type: 'query',
+  filePath: '',
+};
+
+/** A whole JavaScript identifier. */
+const IDENTIFIER = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200C\u200D]*$/u;
 
 /**
  * Returns the configured fragment usage patterns. Falls back to the defaults
@@ -220,32 +255,54 @@ export function resolveInline(config: GqlPruneConfig): boolean {
   return config.inline === true;
 }
 
+/** Where and how a reference that decided a verdict was found. */
+export type UsageMatch = {
+  /** The identifier the reference resolved to, one of the expanded patterns. */
+  pattern: string;
+  file: string;
+  /** Absent for a document used where it stands, which has no reference site. */
+  line?: number;
+  column?: number;
+  /** The import and re-export hops between the reference and the name, for `--verbose`. */
+  via: string[];
+};
+
 /** How a single operation's used/unused verdict was reached. */
 export type OperationUsage = {
   operation: OperationInfo;
-  /** The concrete search strings expanded from the usage patterns. */
+  /** The concrete identifiers expanded from the usage patterns. */
   patterns: string[];
-  /** The first pattern/file hit; absent when the operation is unused. */
-  match?: { pattern: string; file: string };
+  /** The first reference that resolves to a pattern; absent when the operation is unused. */
+  match?: UsageMatch;
 };
 
 /**
- * Determines, for every operation, whether it is referenced in the sources,
- * and when it is, which expanded pattern matched in which file. The unused set
- * is what has no `match`; the detail is what lets `--verbose` explain each
- * verdict. This is the one sweep the scan runs over the sources for operations.
+ * Determines, for every operation, whether something in the sources
+ * references a binding that resolves to one of its expanded patterns, and
+ * when it does, where. The unused set is what has no `match`; the detail is
+ * what lets `--verbose` explain each verdict.
  */
 export function explainOperationUsage(
   operations: OperationInfo[],
-  sources: SourceFile[],
+  index: ReferenceIndex,
   usagePatterns: string[],
 ): OperationUsage[] {
   return operations.map((operation) => {
     const patterns = buildUsagePatterns(operation, usagePatterns);
-    const match = findUsageMatch(patterns, sources);
-    return match === undefined
+    const reference = index.firstReference(patterns);
+    return reference === undefined
       ? { operation, patterns }
-      : { operation, patterns, match };
+      : {
+          operation,
+          patterns,
+          match: {
+            pattern: reference.canonical.name,
+            file: reference.file,
+            line: reference.line,
+            column: reference.column,
+            via: describeResolution(reference.canonical),
+          },
+        };
   });
 }
 
@@ -270,10 +327,15 @@ export function applyInlineIdentifierUsage(
   if (inlineUsage.length === 0) {
     return usages;
   }
-  const matchByName = new Map<string, { pattern: string; file: string }>();
-  for (const { identifier, file, operations } of inlineUsage) {
+  const matchByName = new Map<string, UsageMatch>();
+  for (const { identifier, file, line, column, operations } of inlineUsage) {
     for (const name of operations) {
-      matchByName.set(name, { pattern: identifier, file });
+      matchByName.set(name, {
+        pattern: identifier,
+        file,
+        ...(line === undefined ? {} : { line, column }),
+        via: [],
+      });
     }
   }
   return usages.map((usage) => {
@@ -519,12 +581,13 @@ function reportDeprecatedUsages(deprecatedUsages: DeprecatedUsage[]): void {
 }
 
 /**
- * Closing line of the human-readable report. Usage is detected by string search,
- * so a finding is a candidate rather than proof: names built dynamically, or
- * referenced outside `srcDir` or from another repository, look unused here.
+ * Closing line of the human-readable report. Usage is read from the source
+ * without running it, so a finding is a candidate rather than proof: names
+ * built at runtime, or referenced outside `srcDir` or from another repository,
+ * look unused here.
  */
 export const CANDIDATE_REMINDER =
-  'These are candidates from a string search. Verify each one before deleting.';
+  'These are candidates from a static scan. Verify each one before deleting.';
 
 /** The machine-readable report emitted by `--json`. */
 export type JsonReport = {
@@ -803,6 +866,7 @@ function looksGeneratedHeader(content: string): boolean {
  * operations is harmless) but is reported as a corroborating reason.
  */
 export function detectGeneratedFiles(
+  index: ReferenceIndex,
   sources: SourceFile[],
   operations: OperationInfo[],
   usagePatterns: string[],
@@ -816,8 +880,11 @@ export function detectGeneratedFiles(
 
   const warnings: GeneratedFileWarning[] = [];
   for (const { file, content } of sources) {
-    const matchedOperations = operationPatterns.filter(
-      (patterns) => findUsageMatch(patterns, [{ file, content }]) !== undefined,
+    // Declared or referenced: codegen output declares every hook and references
+    // every document constant from inside it, and either alone masks a scan.
+    const names = index.identifiersByFile.get(modulePathOf(file));
+    const matchedOperations = operationPatterns.filter((patterns) =>
+      patterns.some((pattern) => names?.has(pattern) ?? false),
     ).length;
     const coverage = matchedOperations / operations.length;
     if (coverage < GENERATED_COVERAGE_THRESHOLD) continue;
@@ -1261,14 +1328,36 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
       : []),
   ];
   for (const { operation, patterns, match } of result.operationUsages) {
+    if (match === undefined) {
+      lines.push(
+        `unused: ${operation.name} (${operation.type}) — no reference to ${patterns.join(', ')}`,
+      );
+      continue;
+    }
+    const where =
+      match.line === undefined
+        ? match.file
+        : `${match.file}:${match.line}:${match.column}`;
     lines.push(
-      match
-        ? `used:   ${operation.name} (${operation.type}) — "${match.pattern}" found in ${match.file}`
-        : `unused: ${operation.name} (${operation.type}) — no match for ${patterns.join(', ')}`,
+      `used:   ${operation.name} (${operation.type}) — "${match.pattern}" referenced in ${where}`,
     );
+    for (const hop of match.via) lines.push(`        via ${hop}`);
   }
   return lines;
 }
+
+/**
+ * What a scan needs from outside the sources it reads. Defaults to the real
+ * project: the module resolver built over the read files with the compiler
+ * options of the nearest tsconfig. Tests inject a map-backed resolver.
+ */
+export type ScanDeps = {
+  /** Builds the resolver for the module paths the scan read. */
+  resolver?: (
+    paths: string[],
+    onWarning: (message: string) => void,
+  ) => ModuleResolver;
+};
 
 /**
  * Runs one full scan for the given config and returns the results without
@@ -1284,6 +1373,7 @@ export function formatVerboseScanLines(result: ScanResult): string[] {
 export function scanProject(
   config: GqlPruneConfig,
   schema?: GraphQLSchema,
+  deps: ScanDeps = {},
 ): ScanResult {
   const isExcluded = createConfigExcludeMatcher(config);
   const usagePatterns = resolveUsagePatterns(config);
@@ -1346,41 +1436,58 @@ export function scanProject(
       ),
     ),
   ];
-  // Read every source file once (paired with its path), then test all operations
-  // against the cache instead of re-reading each file for every operation.
+  // Read every source file once (paired with its path) and parse each into
+  // its module model: what it imports, exports, references and defines inline.
   const rawSources = readSourceFiles(tsFiles, collect);
+  const modules = rawSources.map((source) =>
+    buildSourceModule(source.file, source.content),
+  );
+  for (const module of modules) {
+    if (module.syntaxErrors > 0) {
+      readWarnings.push(
+        `Could not fully parse ${module.file} (${pluralize(module.syntaxErrors, 'syntax error')}). ` +
+          'Usage was read from what did parse, so something it references may look unused.',
+      );
+    }
+  }
 
-  // Opt-in: with the pass off, nothing is extracted and the corpus stays the
-  // raw source text. With it on, source files are definition sources too, and
-  // the corpus is searched with every inline document blanked out, so a
-  // document can never count as its own usage.
+  // Opt-in: with the pass off, nothing is extracted. With it on, source files
+  // are definition sources too. A document never counts as its own usage: its
+  // body is a literal, and the constant it is assigned to is a declaration,
+  // neither of which is a reference.
   const inline = resolveInline(config);
-  const extractions = inline
-    ? rawSources.map((source) =>
-        extractInlineDocuments(source.file, source.content),
-      )
-    : [];
+  const extractions = inline ? modules.map(extractInlineDocuments) : [];
   const inlineEntities = extractions.flatMap((extraction) =>
     toInlineEntities(extraction.documents),
   );
-  const sources = inline
-    ? extractions.map(({ file, blankedContent }) => ({
-        file,
-        content: blankedContent,
-      }))
-    : rawSources;
-  const fileContents = sources.map((source) => source.content);
+
+  // Every reference in every file, resolved through imports and re-exports.
+  const buildResolver =
+    deps.resolver ??
+    ((paths: string[], onWarning: (message: string) => void) =>
+      createCorpusResolver(
+        paths,
+        loadCompilerOptions(process.cwd(), onWarning),
+      ));
+  const index = buildReferenceIndex(
+    modules,
+    buildResolver(
+      modules.map((module) => module.path),
+      collect,
+    ),
+    { inline },
+  );
 
   const parsedFiles = [...gqlEntities, ...inlineEntities];
   const operations: OperationInfo[] = parsedFiles.flatMap(
     (file) => file.operations,
   );
-  const inlineUsage = findInlineIdentifierUsage(inlineEntities, sources);
+  const inlineUsage = findInlineIdentifierUsage(inlineEntities, index);
 
-  // One sweep yields both the unused set and the per-operation explanations
-  // that `--verbose` reports.
+  // One pass over the index yields both the unused set and the per-operation
+  // explanations that `--verbose` reports.
   const operationUsages = applyInlineIdentifierUsage(
-    explainOperationUsage(operations, sources, usagePatterns),
+    explainOperationUsage(operations, index, usagePatterns),
     inlineUsage,
   );
   const unusedOperations = operationUsages
@@ -1388,37 +1495,46 @@ export function scanProject(
     .map((usage) => usage.operation);
   const unusedFragments = findUnusedFragmentsInCorpus(
     parsedFiles,
-    fileContents,
+    index,
     fragmentUsagePatterns,
     inlineUsage.flatMap((usage) => usage.fragments),
   );
   const generatedFiles = detectGeneratedFiles(
-    sources,
+    index,
+    rawSources,
     operations,
     usagePatterns,
   );
-  // Opt-in: skip the whole pass (and its per-key source sweep) when it is off.
+  // Opt-in: skip the whole pass (and its per-key text sweep) when it is off.
+  // The field check still reads the files as text; with inline documents on,
+  // their bodies are blanked so a document's own selections never vouch for
+  // themselves.
   const unusedFieldCandidates = resolveCheckFields(config)
     ? findUnusedFieldCandidates(
         parsedFiles,
         unusedOperations,
         unusedFragments,
-        sources,
+        inline
+          ? rawSources.map((source, i) => ({
+              file: source.file,
+              content: blankRanges(source.content, extractions[i].bodyRanges),
+            }))
+          : rawSources,
       )
     : [];
 
-  // Grade what the scan found. The bare-name search is the extra evidence the
-  // usage sweep above never gathers, and it only runs over the findings, which
-  // are few by construction.
+  // Grade what the scan found. The bare-name evidence is what the usage pass
+  // above never gathers, and it only runs over the findings, which are few by
+  // construction.
   const generatedPaths = new Set(generatedFiles.map((warning) => warning.file));
   const gradedOperations = gradeOperations(
     unusedOperations,
-    sources,
+    index,
     generatedPaths,
   );
   const gradedFragments = gradeFragments(
     unusedFragments,
-    sources,
+    index,
     generatedPaths,
   );
 

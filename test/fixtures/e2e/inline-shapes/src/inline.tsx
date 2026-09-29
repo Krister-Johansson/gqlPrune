@@ -1,7 +1,7 @@
-// FIXTURE source file; string-searched and text-scanned only, never compiled.
-// Each document below is a shape that used to be graded wrongly. Keep the
-// operation names out of the comments: the suite checks which ones are
-// reported, and a name in a comment is a usage signal of its own.
+// FIXTURE source file; parsed by gqlPrune, never compiled. Each document below
+// is a shape that used to be graded wrongly. Keep the operation names out of
+// strings and identifiers outside the documents: the suite checks which ones
+// are reported and with which grade.
 import { gql, graphql, useQuery } from './stub';
 
 // Consumed where it is written: the statement that defines it is the statement

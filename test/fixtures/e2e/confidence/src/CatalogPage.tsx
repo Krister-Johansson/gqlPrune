@@ -1,8 +1,8 @@
-// FIXTURE source file; string-searched only, never compiled. Ordinary source,
+// FIXTURE source file; parsed by gqlPrune, never compiled. Ordinary source,
 // not generated: nothing about its name, folder or header says otherwise.
 //
 // It names one dead operation in a telemetry string and in no other form. That
-// single mention in ordinary source is what grades that operation "low".
+// single string mention in ordinary source is what grades that operation "low".
 import { useGetCatalogListQuery } from './generated/graphql';
 
 export function CatalogPage() {

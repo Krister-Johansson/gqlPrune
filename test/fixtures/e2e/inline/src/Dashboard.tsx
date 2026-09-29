@@ -1,4 +1,4 @@
-// FIXTURE source file; string-searched and text-scanned only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 //
 // The client-preset path: the document is assigned to a constant and the
 // constant is what the component uses. No usage pattern can match that, so the

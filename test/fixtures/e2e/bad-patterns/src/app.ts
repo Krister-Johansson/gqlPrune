@@ -1,2 +1,2 @@
-// FIXTURE source file; string-searched only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 export const x = 1;

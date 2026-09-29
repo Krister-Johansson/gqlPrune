@@ -1,4 +1,4 @@
-// Fixture source file; string-searched only, never compiled. It references one
+// Fixture source file; parsed by gqlPrune, never compiled. It references one
 // of the six operations, well under the coverage threshold, so the masking
 // warning names only pretend-codegen/graphql.ts.
 import { useGetCatalogListQuery } from './pretend-codegen/graphql';

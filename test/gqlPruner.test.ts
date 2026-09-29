@@ -42,6 +42,7 @@ import {
 } from '../src/utils/usagePatterns';
 import { OperationInfo } from '../src/types/OperationInfo';
 import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
+import { indexOf } from './support';
 
 jest.mock('fs');
 // Partial mock: keep the pure helpers (findUsageMatch) real, stub the
@@ -65,6 +66,15 @@ jest.mock('../src/utils/fragments', () => ({
   ...jest.requireActual('../src/utils/fragments'),
   findUnusedFragmentsInCorpus: jest.fn(() => []),
 }));
+// The tsconfig lookup goes through the compiler's own file-system host, which
+// the fs mock cannot serve; the scan resolves modules with the defaults here.
+jest.mock('../src/utils/tsconfig', () => {
+  const actual = jest.requireActual('../src/utils/tsconfig');
+  return {
+    ...actual,
+    loadCompilerOptions: jest.fn(() => actual.DEFAULT_COMPILER_OPTIONS),
+  };
+});
 // Real extraction, wrapped so a test can assert the opt-in pass never runs.
 jest.mock('../src/utils/inline', () => {
   const actual = jest.requireActual('../src/utils/inline');
@@ -108,9 +118,11 @@ const mockedUnusedFragments =
 // Every candidate finding carries a grade; spread this into a fixture that
 // only cares about the rest of the shape.
 const HIGH = { confidence: 'high' as const, reason: 'name-absent' as const };
+// A name written inside a string (`registry["Unused"]`) grades low: it is not
+// a reference, but a lookup built at runtime is plausible.
 const LOW = {
   confidence: 'low' as const,
-  reason: 'source-mention' as const,
+  reason: 'string-mention' as const,
 };
 
 /**
@@ -355,12 +367,12 @@ describe('gqlPruner', () => {
       { name: 'GetUser', type: 'query', filePath: 'a.gql' },
       { name: 'Unused', type: 'query', filePath: 'a.gql' },
     ];
-    const sources = [
-      { file: 'src/App.tsx', content: 'const r = useGetUserQuery()' },
-      { file: 'src/Other.tsx', content: 'nothing here' },
-    ];
+    const sources = indexOf({
+      'src/App.tsx': 'const r = useGetUserQuery()',
+      'src/Other.tsx': 'nothing(here)',
+    });
 
-    it('records the matching pattern and file for a used operation', () => {
+    it('records the pattern, the file and the position for a used operation', () => {
       const [usage] = explainOperationUsage(
         [ops[0]],
         sources,
@@ -370,7 +382,30 @@ describe('gqlPruner', () => {
       expect(usage.match).toEqual({
         pattern: 'useGetUserQuery',
         file: 'src/App.tsx',
+        line: 1,
+        column: 11,
+        via: [],
       });
+    });
+
+    it('records the import chain the reference went through', () => {
+      const index = indexOf({
+        'src/api/index.ts': "export * from './hooks';",
+        'src/api/hooks.ts':
+          "export { useGetUserQuery } from '../generated/graphql';",
+        'src/App.tsx':
+          "import { useGetUserQuery } from './api';\nuseGetUserQuery();",
+      });
+
+      const [usage] = explainOperationUsage(
+        [ops[0]],
+        index,
+        DEFAULT_USAGE_PATTERNS,
+      );
+
+      expect(usage.match?.file).toBe('src/App.tsx');
+      expect(usage.match?.via).toHaveLength(3);
+      expect(usage.match?.via[0]).toContain("imported from './api'");
     });
 
     it('leaves match absent for an unused operation, keeping the searched patterns', () => {
@@ -631,7 +666,13 @@ describe('gqlPruner', () => {
           {
             operation: { name: 'GetUser', type: 'query', filePath: 'a.gql' },
             patterns: ['useGetUserQuery'],
-            match: { pattern: 'useGetUserQuery', file: 'src/App.tsx' },
+            match: {
+              pattern: 'useGetUserQuery',
+              file: 'src/App.tsx',
+              line: 4,
+              column: 17,
+              via: ["imported from './api' in src/App.tsx"],
+            },
           },
           {
             operation: { name: 'Dead', type: 'mutation', filePath: 'a.gql' },
@@ -643,7 +684,10 @@ describe('gqlPruner', () => {
       expect(text).toContain('GraphQL files (1): graphql/user.gql');
       expect(text).toContain('Source files scanned: 3');
       expect(text).toContain('GetUser');
-      expect(text).toContain('"useGetUserQuery" found in src/App.tsx');
+      expect(text).toContain(
+        '"useGetUserQuery" referenced in src/App.tsx:4:17',
+      );
+      expect(text).toContain("via imported from './api' in src/App.tsx");
       expect(text).toContain('Dead');
       expect(text).toContain('useDeadMutation, DeadDocument');
     });
@@ -696,8 +740,8 @@ describe('gqlPruner', () => {
       });
       expect(lines).toEqual([
         'confidence: operation "Dead" is high (name-absent: the name appears in no scanned source file)',
-        'confidence: fragment "DeadFields" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
-        'confidence: orphaned file "a.gql" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+        'confidence: fragment "DeadFields" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)',
+        'confidence: orphaned file "a.gql" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)',
         'confidence: field "avatarUrl" is medium (heuristic-cap: the field check cannot see a read through a rename, a spread, or a computed key)',
       ]);
     });
@@ -809,7 +853,7 @@ describe('gqlPruner', () => {
             file: 'b.gql',
             line: 7,
             confidence: 'low',
-            reason: 'source-mention',
+            reason: 'string-mention',
           },
         ],
         orphanedFiles: [],
@@ -1103,13 +1147,32 @@ describe('gqlPruner', () => {
   describe('detectGeneratedFiles', () => {
     const makeOps = (names: string[]): OperationInfo[] =>
       names.map((name) => ({ name, type: 'query', filePath: 'ops.gql' }));
-    // A codegen-style file that "references" each operation via its document const.
+    // A codegen-style file: it declares each hook and references each document
+    // constant from inside it, the way real output does. Either alone counts
+    // for coverage, since a declaration is what a generated file is made of.
     const docs = (ops: OperationInfo[]): string =>
-      ops.map((op) => `export const ${op.name}Document = {};`).join('\n');
+      ops
+        .map(
+          (op) =>
+            `export const ${op.name}Document = {};\nexport const use${op.name}Query = () => useQuery(${op.name}Document);`,
+        )
+        .join('\n');
+    /** Runs the detection over in-memory sources, indexed the way the scan does. */
+    const detect = (
+      sources: { file: string; content: string }[],
+      ops: OperationInfo[],
+      patterns: string[],
+    ) =>
+      detectGeneratedFiles(
+        indexOf(Object.fromEntries(sources.map((s) => [s.file, s.content]))),
+        sources,
+        ops,
+        patterns,
+      );
 
     it('flags a single file that references >= 70% of all operations', () => {
       const ops = makeOps(['GetUser', 'GetPost', 'GetTag', 'GetFoo', 'GetBar']);
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [
           { file: 'src/gql/graphql.ts', content: docs(ops) }, // all 5
           { file: 'src/App.tsx', content: 'const r = useGetUserQuery();' }, // 1
@@ -1128,7 +1191,7 @@ describe('gqlPruner', () => {
 
     it('does not flag when no single file reaches the threshold', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E']);
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [
           { file: 'a.ts', content: docs(makeOps(['A', 'B'])) }, // 40%
           { file: 'b.ts', content: docs(makeOps(['C', 'D'])) }, // 40%
@@ -1142,7 +1205,7 @@ describe('gqlPruner', () => {
 
     it('does not flag a generated-looking file with no operation coverage (coverage-gated)', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E']);
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [
           {
             // Generated filename AND header, but references zero operations.
@@ -1160,7 +1223,7 @@ describe('gqlPruner', () => {
 
     it('does not flag below the minimum operation count, even at 100% coverage', () => {
       const ops = makeOps(['A', 'B', 'C']); // 3 < floor
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [{ file: 'src/gql/graphql.ts', content: docs(ops) }],
         ops,
         DEFAULT_USAGE_PATTERNS,
@@ -1170,7 +1233,7 @@ describe('gqlPruner', () => {
 
     it('flags on coverage alone (no generated name or header) at the 70% boundary', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [{ file: 'src/big-barrel.ts', content: docs(ops.slice(0, 7)) }], // 7/10
         ops,
         DEFAULT_USAGE_PATTERNS,
@@ -1182,7 +1245,7 @@ describe('gqlPruner', () => {
 
     it('adds a "header" reason for a generated header without a generated filename', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E']);
-      const warnings = detectGeneratedFiles(
+      const warnings = detect(
         [
           {
             file: 'src/api/all-operations.ts',
@@ -1201,7 +1264,7 @@ describe('gqlPruner', () => {
 
     it('recognizes files under a __generated__ folder', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E']);
-      const [warning] = detectGeneratedFiles(
+      const [warning] = detect(
         [{ file: 'src/api/__generated__/types.ts', content: docs(ops) }],
         ops,
         DEFAULT_USAGE_PATTERNS,
@@ -1211,7 +1274,7 @@ describe('gqlPruner', () => {
 
     it('recognizes a gql/index.ts barrel file', () => {
       const ops = makeOps(['A', 'B', 'C', 'D', 'E']);
-      const [warning] = detectGeneratedFiles(
+      const [warning] = detect(
         [{ file: 'src/gql/index.ts', content: docs(ops) }],
         ops,
         DEFAULT_USAGE_PATTERNS,
@@ -1482,7 +1545,7 @@ describe('gqlPruner', () => {
       expect(mockedExtract).toHaveBeenCalledTimes(2);
       expect(mockedUnusedFragments).toHaveBeenCalledWith(
         [entitiesOf([]), entitiesOf([])],
-        [''],
+        expect.objectContaining({ byName: expect.any(Map) }), // the reference index
         DEFAULT_FRAGMENT_USAGE_PATTERNS,
         [], // no inline roots: the opt-in inline pass is off
       );
@@ -1509,6 +1572,9 @@ describe('gqlPruner', () => {
       expect(result.operationUsages[0].match).toEqual({
         pattern: 'useGetUserQuery',
         file: 'App.tsx',
+        line: 1,
+        column: 1,
+        via: [],
       });
       expect(result.operationUsages[1].match).toBeUndefined();
     });
@@ -1835,7 +1901,13 @@ describe('gqlPruner', () => {
             content:
               "export const userQuery = graphql('query GetUser { id }');",
           },
-          { file: 'src/App.tsx', content: 'useQuery(userQuery);' },
+          // The reference has to resolve to the defining constant, so the
+          // consumer imports it; a bare same-named identifier would not do.
+          {
+            file: 'src/App.tsx',
+            content:
+              "import { userQuery } from './queries';\nuseQuery(userQuery);",
+          },
         ],
         { inline: true },
       );
@@ -1844,6 +1916,9 @@ describe('gqlPruner', () => {
       expect(result.operationUsages[0].match).toEqual({
         pattern: 'userQuery',
         file: 'src/App.tsx',
+        line: 2,
+        column: 10,
+        via: [],
       });
     });
 
@@ -1919,9 +1994,12 @@ describe('gqlPruner', () => {
         [
           {
             file: 'src/queries.ts',
-            content: 'const q = gql`\n  query GetUser { avatarUrl }\n`;',
+            content: 'export const q = gql`\n  query GetUser { avatarUrl }\n`;',
           },
-          { file: 'src/App.tsx', content: 'useQuery(q);' },
+          {
+            file: 'src/App.tsx',
+            content: "import { q } from './queries';\nuseQuery(q);",
+          },
         ],
         { inline: true, checkFields: true },
       );
@@ -1935,6 +2013,236 @@ describe('gqlPruner', () => {
           reason: 'heuristic-cap',
         },
       ]);
+    });
+  });
+
+  describe('usage resolved through modules', () => {
+    beforeEach(() => jest.clearAllMocks());
+    // A scan that throws before discovering files leaves the queued directory
+    // listings behind; clearing them keeps the next test's mocks honest.
+    afterEach(() => mockedFind.mockReset());
+
+    const GET_USER: OperationInfo = {
+      name: 'GetUser',
+      type: 'query',
+      filePath: 'a.gql',
+      line: 1,
+    };
+
+    /** Scans one operation against in-memory sources; imports between them resolve. */
+    const scan = (
+      files: Record<string, string>,
+      config: Partial<GqlPruneConfig> = {},
+    ) => {
+      const sources = Object.entries(files).map(([file, content]) => ({
+        file,
+        content,
+      }));
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(sources.map((source) => source.file));
+      mockedExtract.mockReturnValue(entitiesOf([GET_USER]));
+      mockedReadSources.mockReturnValue(sources);
+      return scanProject({ graphqlDir: './g', srcDir: './s', ...config });
+    };
+    const unused = (result: ReturnType<typeof scanProject>) =>
+      result.unusedOperations.map((op) => [op.name, op.confidence, op.reason]);
+
+    it('treats an operation used only through a re-export as used', () => {
+      const result = scan({
+        'src/api/docs.ts': "export { GetUserDocument } from '../generated';",
+        'src/App.tsx':
+          "import { GetUserDocument } from './api/docs';\nuseQuery(GetUserDocument);",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.operationUsages[0].match).toMatchObject({
+        pattern: 'GetUserDocument',
+        file: 'src/App.tsx',
+        line: 2,
+        column: 10,
+      });
+    });
+
+    it('follows a barrel index.ts', () => {
+      const result = scan({
+        'src/api/index.ts': "export * from './hooks';",
+        'src/api/hooks.ts': "export { useGetUserQuery } from '../generated';",
+        'src/App.tsx':
+          "import { useGetUserQuery } from './api';\nuseGetUserQuery();",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.operationUsages[0].match?.via).toHaveLength(3);
+    });
+
+    it('follows a renamed import', () => {
+      const result = scan({
+        'src/App.tsx':
+          "import { GetUserDocument as Doc } from './generated';\nuseQuery(Doc);",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.operationUsages[0].match?.pattern).toBe('GetUserDocument');
+    });
+
+    it('follows a default export', () => {
+      const result = scan({
+        'src/api/userDoc.ts':
+          "import { GetUserDocument } from '../generated';\nexport default GetUserDocument;",
+        'src/App.tsx':
+          "import userDoc from './api/userDoc';\nuseQuery(userDoc);",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('follows a namespace import member and an export * chain', () => {
+      const result = scan({
+        'src/a.ts': "export * from './b';",
+        'src/b.ts': "export * from './c';",
+        'src/c.ts': "export { GetUserDocument } from '../generated';",
+        'src/App.tsx':
+          "import * as docs from './a';\nuseQuery(docs.GetUserDocument);",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('terminates on a re-export cycle', () => {
+      const result = scan({
+        'src/a.ts':
+          "export * from './b';\nexport { useGetUserQuery } from '../generated';",
+        'src/b.ts': "export * from './a';",
+        'src/App.tsx':
+          "import { useGetUserQuery } from './b';\nuseGetUserQuery();",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('keeps the imported name when the specifier cannot be resolved', () => {
+      const result = scan({
+        'src/App.tsx':
+          "import { useGetUserQuery } from '@acme/graphql';\nuseGetUserQuery();",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('counts a type-position reference', () => {
+      const result = scan(
+        {
+          'src/thing.service.ts':
+            "import { GetUserGQL } from './generated';\nexport class S { constructor(private readonly g: GetUserGQL) {} }",
+        },
+        { usagePatterns: ['{Name}GQL'] },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('counts a property access name', () => {
+      const result = scan({
+        'src/App.tsx':
+          "import { api } from './client';\napi.useGetUserQuery();",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('leaves a same-named identifier that is not a reference unused', () => {
+      const result = scan({
+        'src/App.tsx':
+          'const GetUserDocument = 1;\nconst o = { useGetUserQuery: 1 };',
+      });
+
+      expect(unused(result)).toEqual([['GetUser', 'high', 'name-absent']]);
+    });
+
+    it('does not count an import that is never read', () => {
+      const result = scan({
+        'src/App.tsx':
+          "import { useGetUserQuery } from './generated';\nexport const x = 1;",
+      });
+
+      expect(unused(result)).toEqual([['GetUser', 'high', 'name-absent']]);
+    });
+
+    it('does not count a comment', () => {
+      const result = scan({
+        'src/App.tsx':
+          '// useGetUserQuery()\n/* GetUserDocument */\nexport {};',
+      });
+
+      expect(unused(result)).toEqual([['GetUser', 'high', 'name-absent']]);
+    });
+
+    it('does not count a string literal holding the pattern', () => {
+      const result = scan({
+        'src/App.tsx':
+          'export const names = [\'useGetUserQuery\', "GetUserDocument"];',
+      });
+
+      expect(unused(result)).toEqual([['GetUser', 'high', 'name-absent']]);
+    });
+
+    it('grades an exact string literal of the bare name low', () => {
+      const result = scan({
+        'src/App.tsx': "export const e = { event: 'GetUser' };",
+      });
+
+      expect(unused(result)).toEqual([['GetUser', 'low', 'string-mention']]);
+    });
+
+    it('grades a bare-name identifier reference low', () => {
+      const result = scan({ 'src/App.tsx': 'track(GetUser);' });
+
+      expect(unused(result)).toEqual([['GetUser', 'low', 'name-referenced']]);
+    });
+
+    it('keeps scanning a file that does not parse and warns', () => {
+      const result = scan({
+        'src/Broken.ts': 'export const n = ;\nuseGetUserQuery();',
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.readWarnings).toHaveLength(1);
+      expect(result.readWarnings[0]).toContain('Broken.ts');
+      expect(result.readWarnings[0]).toContain('syntax error');
+    });
+
+    it('does not let a local const in another file shadow an import', () => {
+      const result = scan({
+        'src/other.ts': 'const GetUserDocument = 1;\nexport {};',
+        'src/App.tsx':
+          "import { GetUserDocument } from './generated';\nuseQuery(GetUserDocument);",
+      });
+
+      expect(result.unusedOperations).toEqual([]);
+    });
+
+    it('rejects a usage pattern that does not expand to an identifier', () => {
+      expect(() =>
+        scan({ 'src/App.tsx': '' }, { usagePatterns: ['{Name}.graphql'] }),
+      ).toThrow(/expand to an identifier/);
+    });
+
+    it('scans a file the parser cannot take by its tokens', () => {
+      const result = scan(
+        {
+          'src/App.vue':
+            '<script setup lang="ts">\nconst { data } = useGetUserQuery();\n</script>\n<template>{{ data }}</template>',
+        },
+        { sourceExtensions: ['.vue'] },
+      );
+
+      expect(result.unusedOperations).toEqual([]);
+      expect(result.readWarnings).toEqual([]);
+      expect(result.operationUsages[0].match).toMatchObject({
+        file: 'src/App.vue',
+        line: 2,
+      });
     });
   });
 
@@ -2233,7 +2541,7 @@ describe('gqlPruner', () => {
       );
     });
 
-    it('passes gqlFiles, source contents, and fragment patterns to the corpus scan', () => {
+    it('passes gqlFiles, the reference index, and fragment patterns to the corpus scan', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'graphqlDir: ./g\nsrcDir: ./s\nfragmentUsagePatterns:\n  - "{Name}FragmentDoc"\n',
       );
@@ -2249,7 +2557,7 @@ describe('gqlPruner', () => {
       expect(() => mainFunction()).not.toThrow();
       expect(mockedUnusedFragments).toHaveBeenCalledWith(
         [entitiesOf([])],
-        ['source'],
+        expect.objectContaining({ byName: expect.any(Map) }),
         ['{Name}FragmentDoc'],
         [],
       );
@@ -2452,10 +2760,10 @@ describe('gqlPruner', () => {
       expect(errs).toContain('graphqlDir: ./g');
       expect(errs).toContain('srcDir: ./s');
       expect(errs).toContain('GraphQL files (1): a.gql');
-      expect(errs).toContain('"useGetUserQuery" found in App.tsx');
+      expect(errs).toContain('"useGetUserQuery" referenced in App.tsx');
       expect(errs).toContain('Dead');
       // Verbose lines must never leak to stdout.
-      expect(logged()).not.toContain('found in App.tsx');
+      expect(logged()).not.toContain('referenced in App.tsx');
     });
 
     it('keeps stdout pure JSON when --verbose and --json are combined', () => {
@@ -2488,7 +2796,7 @@ describe('gqlPruner', () => {
       });
       // …and the verbose detail went to stderr.
       const errs = errorSpy.mock.calls.flat().join('\n');
-      expect(errs).toContain('"useGetUserQuery" found in App.tsx');
+      expect(errs).toContain('"useGetUserQuery" referenced in App.tsx');
     });
 
     it('emits no verbose lines by default', () => {
@@ -2509,7 +2817,7 @@ describe('gqlPruner', () => {
       mainFunction();
 
       expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(
-        'found in App.tsx',
+        'referenced in App.tsx',
       );
     });
 
@@ -3341,7 +3649,7 @@ describe('gqlPruner', () => {
             entitiesOf([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]),
           );
           mockedReadSources.mockReturnValue([
-            { file: 'App.tsx', content: 'nothing here' },
+            { file: 'App.tsx', content: 'nothing(here)' },
           ]);
         };
 
@@ -3540,8 +3848,16 @@ describe('gqlPruner', () => {
         mockedReadSources.mockReturnValue([
           {
             file: 'src/gql/graphql.ts',
-            content:
-              'ADocument BDocument CDocument DDocument\nconst d = gql`query Unused { id }`;',
+            // Four hooks referencing their document constants the way codegen
+            // output does (80% coverage, so the file is flagged), and the dead
+            // name inside a template body, which counts as a string mention.
+            content: [
+              ...['A', 'B', 'C', 'D'].map(
+                (name) =>
+                  `export const ${name}Document = {};\nexport const use${name}Query = () => useQuery(${name}Document);`,
+              ),
+              'const d = gql`query Unused { id }`;',
+            ].join('\n'),
           },
         ]);
 
@@ -3594,7 +3910,7 @@ describe('gqlPruner', () => {
         mainFunction({ verbose: true });
 
         expect(errorSpy.mock.calls.flat().join('\n')).toContain(
-          'confidence: operation "Unused" is low (source-mention: the name appears in ordinary source, but never through a usage pattern)',
+          'confidence: operation "Unused" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)',
         );
       });
 

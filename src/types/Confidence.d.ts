@@ -11,15 +11,23 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
 /**
  * The evidence behind a grade.
  *
- * - `name-absent`: the bare name appears in no scanned source file.
+ * - `name-absent`: the bare name appears in no scanned source file, neither
+ *   as an identifier nor inside a string.
  * - `generated-only`: it appears only in files that look generated.
- * - `source-mention`: it appears in ordinary source, but never in a form a
- *   usage pattern recognizes.
+ * - `name-referenced`: an identifier with exactly this name appears in
+ *   ordinary source, but nothing that resolves to a usage pattern; an unknown
+ *   convention or a dynamic lookup is plausible.
+ * - `string-mention`: the name appears inside a string in ordinary source,
+ *   which may be a reference built at runtime.
  * - `heuristic-cap`: the detection itself is too weak for the grade the
  *   evidence would otherwise give (see the field candidates).
  */
 export type ConfidenceReason =
-  'name-absent' | 'generated-only' | 'source-mention' | 'heuristic-cap';
+  | 'name-absent'
+  | 'generated-only'
+  | 'name-referenced'
+  | 'string-mention'
+  | 'heuristic-cap';
 
 /** The grade carried by every finding gqlPrune reports as a candidate. */
 export interface ConfidenceGrade {

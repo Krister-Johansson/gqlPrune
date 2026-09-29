@@ -10,8 +10,7 @@ import {
 import { FragmentInfo } from '../types/FragmentInfo.js';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
-import { SourceFile } from './fileUtils.js';
-import { wholeWordPattern } from './stringHelpers.js';
+import type { ReferenceIndex } from './referenceIndex.js';
 
 /** Every grade, strongest first. Also the accepted `minConfidence` values. */
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;
@@ -23,8 +22,10 @@ const RANK: Record<ConfidenceLevel, number> = { high: 3, medium: 2, low: 1 };
 const REASON_TEXT: Record<ConfidenceReason, string> = {
   'name-absent': 'the name appears in no scanned source file',
   'generated-only': 'the name appears only in files that look generated',
-  'source-mention':
-    'the name appears in ordinary source, but never through a usage pattern',
+  'name-referenced':
+    'an identifier with this exact name appears in ordinary source, but nothing that resolves to a usage pattern',
+  'string-mention':
+    'the name appears inside a string in ordinary source, which may be a reference built at runtime',
   'heuristic-cap':
     'the field check cannot see a read through a rename, a spread, or a computed key',
 };
@@ -48,29 +49,41 @@ export function isConfidenceLevel(value: unknown): value is ConfidenceLevel {
 
 /**
  * Grades a definition name by how much corroborating evidence there is that
- * something references it anyway. The scan itself only searches the
- * pattern-expanded strings (`useGetUserQuery`, `GetUserDocument`); this searches
- * the bare name as a whole word, which is what separates "nothing in the source
+ * something references it anyway. The usage verdict only looks for bindings
+ * that resolve to a usage pattern (`useGetUserQuery`, `GetUserDocument`); this
+ * looks for the bare name, which is what separates "nothing in the source
  * knows this name" from "something mentions it, just not the way we expect".
+ * The engine tells an identifier from a string, so the two kinds of mention
+ * get their own reasons: a dynamic lookup by string and an unknown naming
+ * convention call for different checks.
  *
- * @param {string} name - The definition name, searched as a whole word.
- * @param {SourceFile[]} sources - The already-read source files.
+ * @param {string} name - The definition name.
+ * @param {ReferenceIndex} index - The resolved references of the scanned sources.
  * @param {ReadonlySet<string>} generatedFiles - Paths of suspected generated files.
  * @returns {ConfidenceGrade} - The grade and the evidence behind it.
  */
 export function gradeName(
   name: string,
-  sources: SourceFile[],
+  index: ReferenceIndex,
   generatedFiles: ReadonlySet<string>,
 ): ConfidenceGrade {
-  const pattern = wholeWordPattern(name);
-  const mentions = sources.filter((source) => pattern.test(source.content));
-  if (mentions.length === 0) {
-    return { confidence: 'high', reason: 'name-absent' };
+  let mentioned = false;
+  let ordinaryIdentifier = false;
+  let ordinaryString = false;
+  for (const path of index.files) {
+    const asIdentifier = index.identifiersByFile.get(path)?.has(name) ?? false;
+    const asString = index.stringWordsByFile.get(path)?.has(name) ?? false;
+    if (!asIdentifier && !asString) continue;
+    mentioned = true;
+    if (generatedFiles.has(index.displayName(path))) continue;
+    if (asIdentifier) ordinaryIdentifier = true;
+    if (asString) ordinaryString = true;
   }
-  return mentions.every((source) => generatedFiles.has(source.file))
-    ? { confidence: 'medium', reason: 'generated-only' }
-    : { confidence: 'low', reason: 'source-mention' };
+  if (!mentioned) return { confidence: 'high', reason: 'name-absent' };
+  if (ordinaryIdentifier)
+    return { confidence: 'low', reason: 'name-referenced' };
+  if (ordinaryString) return { confidence: 'low', reason: 'string-mention' };
+  return { confidence: 'medium', reason: 'generated-only' };
 }
 
 /**
@@ -124,24 +137,24 @@ export function describeConfidence(grade: ConfidenceGrade): string {
 /** Grades every unused operation by its bare name. */
 export function gradeOperations(
   operations: OperationInfo[],
-  sources: SourceFile[],
+  index: ReferenceIndex,
   generatedFiles: ReadonlySet<string>,
 ): GradedOperation[] {
   return operations.map((operation) => ({
     ...operation,
-    ...gradeName(operation.name, sources, generatedFiles),
+    ...gradeName(operation.name, index, generatedFiles),
   }));
 }
 
 /** Grades every unused fragment by its bare name. */
 export function gradeFragments(
   fragments: FragmentInfo[],
-  sources: SourceFile[],
+  index: ReferenceIndex,
   generatedFiles: ReadonlySet<string>,
 ): GradedFragment[] {
   return fragments.map((fragment) => ({
     ...fragment,
-    ...gradeName(fragment.name, sources, generatedFiles),
+    ...gradeName(fragment.name, index, generatedFiles),
   }));
 }
 

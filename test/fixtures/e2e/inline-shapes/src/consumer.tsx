@@ -1,4 +1,4 @@
-// FIXTURE source file; string-searched and text-scanned only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 import { ShapesAnnotatedDoc } from './inline';
 import { useQuery } from './stub';
 

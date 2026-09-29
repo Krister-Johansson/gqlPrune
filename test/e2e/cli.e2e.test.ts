@@ -90,7 +90,7 @@ describe('a project with findings', () => {
       '--- Orphaned GraphQL Files ---',
       '--- Deprecated Field Usage ---',
       '--- Unused Field Candidates ---',
-      'These are candidates from a string search.',
+      'These are candidates from a static scan.',
     ]);
   });
 

@@ -92,3 +92,25 @@ const IDENTIFIER_WORD = new RegExp(`${IDENTIFIER_CLASS}+`, 'gu');
 export function identifierWords(text: string): Set<string> {
   return new Set(text.match(IDENTIFIER_WORD) ?? []);
 }
+
+/**
+ * Replaces the given offset ranges of a text with spaces, keeping every
+ * newline in place so line numbers still line up with the original.
+ *
+ * @param {string} text - The text to blank parts of.
+ * @param {{ start: number; end: number }[]} ranges - Offsets to blank, end exclusive.
+ * @returns {string} - The text with those ranges blanked, same length.
+ */
+export function blankRanges(
+  text: string,
+  ranges: { start: number; end: number }[],
+): string {
+  let result = text;
+  for (const { start, end } of ranges) {
+    result =
+      result.slice(0, start) +
+      result.slice(start, end).replace(/[^\n]/g, ' ') +
+      result.slice(end);
+  }
+  return result;
+}

@@ -17,8 +17,8 @@ query GetConfidenceMedium {
   }
 }
 
-# low: this name appears in ordinary source (src/CatalogPage.tsx), just never
-# through a usage pattern.
+# low: this name appears inside a string in ordinary source
+# (src/CatalogPage.tsx), never as a reference through a usage pattern.
 query GetConfidenceLow {
   catalogItem(id: "3") {
     id

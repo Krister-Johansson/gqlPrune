@@ -1,4 +1,4 @@
-// FIXTURE source file; string-searched and text-scanned only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 import { useQuery } from '@apollo/client';
 import { useGetReportQuery } from './hooks';
 import { metaDocument } from './badges';
