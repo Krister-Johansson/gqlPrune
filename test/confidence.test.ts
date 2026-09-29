@@ -2,7 +2,6 @@
 // Copyright (c) 2023 Krister Johansson
 
 import {
-  capConfidence,
   countByConfidence,
   CONFIDENCE_LEVELS,
   describeConfidence,
@@ -100,26 +99,6 @@ describe('gradeName', () => {
       confidence: 'high',
       reason: 'name-absent',
     });
-  });
-});
-
-describe('capConfidence', () => {
-  it('leaves a grade already at or below the cap alone', () => {
-    expect(
-      capConfidence({ confidence: 'low', reason: 'source-mention' }, 'medium'),
-    ).toEqual({ confidence: 'low', reason: 'source-mention' });
-    expect(
-      capConfidence(
-        { confidence: 'medium', reason: 'generated-only' },
-        'medium',
-      ),
-    ).toEqual({ confidence: 'medium', reason: 'generated-only' });
-  });
-
-  it('lowers a stronger grade to the cap and says why', () => {
-    expect(
-      capConfidence({ confidence: 'high', reason: 'name-absent' }, 'medium'),
-    ).toEqual({ confidence: 'medium', reason: 'heuristic-cap' });
   });
 });
 
@@ -290,29 +269,32 @@ describe('gradeFragments', () => {
 describe('gradeFieldCandidates', () => {
   const candidates = [
     { field: 'avatarUrl', locations: [{ file: 'g/a.gql', line: 4 }] },
+    { field: 'bio', locations: [{ file: 'g/b.gql', line: 2 }] },
   ];
 
-  it('never grades a field candidate above medium', () => {
-    // The name is absent everywhere, which would be `high` for an operation.
-    const [graded] = gradeFieldCandidates(candidates, [source('')], new Set());
-    expect(graded.confidence).toBe('medium');
-    expect(graded.reason).toBe('heuristic-cap');
-    expect(graded.field).toBe('avatarUrl');
-    expect(graded.locations).toEqual([{ file: 'g/a.gql', line: 4 }]);
+  it('grades every candidate medium with the heuristic cap as the reason', () => {
+    // A candidate only exists because its name appears nowhere in the source,
+    // which would be `high` for an operation. The heuristic cannot see a read
+    // through a rename, a spread or a computed key, so medium is the ceiling
+    // and there is nothing left for a second name search to find.
+    expect(gradeFieldCandidates(candidates)).toEqual([
+      {
+        field: 'avatarUrl',
+        locations: [{ file: 'g/a.gql', line: 4 }],
+        confidence: 'medium',
+        reason: 'heuristic-cap',
+      },
+      {
+        field: 'bio',
+        locations: [{ file: 'g/b.gql', line: 2 }],
+        confidence: 'medium',
+        reason: 'heuristic-cap',
+      },
+    ]);
   });
 
-  it('keeps a weaker grade as it is', () => {
-    const [graded] = gradeFieldCandidates(
-      candidates,
-      [source('const key = "avatarUrl"')],
-      new Set(),
-    );
-    expect(graded.confidence).toBe('low');
-    expect(graded.reason).toBe('source-mention');
-  });
-
-  it('does not throw without candidates or sources', () => {
-    expect(gradeFieldCandidates([], [], new Set())).toEqual([]);
+  it('returns [] without candidates', () => {
+    expect(gradeFieldCandidates([])).toEqual([]);
   });
 });
 

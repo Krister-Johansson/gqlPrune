@@ -98,12 +98,12 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   // Inquirer rejects with an ExitPromptError when the user aborts a prompt
-  // (Ctrl+C) — a deliberate exit, not a crash worth a stack trace.
+  // (Ctrl+C): a deliberate exit, not a crash worth a stack trace.
   if (error instanceof Error && error.name === 'ExitPromptError') {
     console.error('Aborted.');
   } else {
     console.error(error);
   }
-  // 2, like other non-finding failures — 1 means "unused operations found".
+  // 2, like other non-finding failures. 1 means "unused operations found".
   process.exitCode = 2;
 });

@@ -32,7 +32,7 @@ export interface GqlPruneConfig {
   /**
    * @deprecated Use `exclude` instead. Folder names (e.g. `__generated__`) or
    * paths relative to the project root (e.g. `src/generated`) to exclude. Still
-   * honored — merged into the same matcher as `exclude`.
+   * honored, merged into the same matcher as `exclude`.
    */
   excludedFolders?: string[] | string;
   /**
@@ -91,7 +91,7 @@ export interface GqlPruneConfig {
 /**
  * Configuration that can be supplied as CLI flags instead of (or on top of)
  * `gqlPrune.config.yaml`. The list fields come from repeatable flags and
- * replace — rather than merge with — their YAML counterparts.
+ * replace, rather than merge with, their YAML counterparts.
  */
 export type CliConfig = Partial<
   Pick<

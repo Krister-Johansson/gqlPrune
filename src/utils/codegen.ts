@@ -5,6 +5,13 @@ import fs from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import { GqlPruneConfig } from '../types/GqlPruneConfig.js';
+import {
+  findGroupEnd,
+  isQuote,
+  readString,
+  skipLiteral,
+  skipTrivia,
+} from './jsLexer.js';
 
 /**
  * The GraphQL Code Generator config filenames gqlPrune looks for, in order.
@@ -250,102 +257,11 @@ type ObjectEntry = { key: string; valueStart: number };
 
 const IDENTIFIER_KEY = /[A-Za-z_$][\w$]*/y;
 
-/** Skips whitespace and both comment forms, returning the next code offset. */
-function skipTrivia(text: string, index: number): number {
-  let i = index;
-  while (i < text.length) {
-    const char = text[i];
-    if (char === '/' && text[i + 1] === '/') {
-      const newline = text.indexOf('\n', i + 2);
-      i = newline === -1 ? text.length : newline + 1;
-      continue;
-    }
-    if (char === '/' && text[i + 1] === '*') {
-      const end = text.indexOf('*/', i + 2);
-      i = end === -1 ? text.length : end + 2;
-      continue;
-    }
-    if (!/\s/.test(char)) return i;
-    i += 1;
-  }
-  return i;
-}
-
-function isQuote(char: string | undefined): boolean {
-  return char === "'" || char === '"' || char === '`';
-}
-
-/** Returns the offset just past the string or template literal at `index`. */
-function skipLiteral(text: string, index: number): number {
-  const quote = text[index];
-  let i = index + 1;
-  while (i < text.length) {
-    const char = text[i];
-    if (char === '\\') {
-      i += 2;
-      continue;
-    }
-    if (char === quote) return i + 1;
-    if (char === '\n' && quote !== '`') return i;
-    i += 1;
-  }
-  return text.length;
-}
-
-/**
- * Reads the string literal at `index`. Returns `null` when there is none, when
- * it never closes, or when it interpolates: `` `${root}/src/**` `` has no value
- * that can be known without running the file, so it is simply not extracted.
- */
-function readString(
-  text: string,
-  index: number,
-): { value: string; end: number } | null {
-  const quote = text[index];
-  if (!isQuote(quote)) return null;
-  let value = '';
-  let i = index + 1;
-  while (i < text.length) {
-    const char = text[i];
-    if (char === '\\') {
-      value += text[i + 1] ?? '';
-      i += 2;
-      continue;
-    }
-    if (char === quote) return { value, end: i + 1 };
-    if (char === '\n' && quote !== '`') return null;
-    if (quote === '`' && char === '$' && text[i + 1] === '{') return null;
-    value += char;
-    i += 1;
-  }
-  return null;
-}
-
 /** Returns the offset just past the bracketed group opening at `index`. */
 function skipBalanced(text: string, index: number): number {
   const open = text[index];
   const close = open === '{' ? '}' : open === '[' ? ']' : ')';
-  let depth = 0;
-  let i = index;
-  while (i < text.length) {
-    const char = text[i];
-    if (char === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) {
-      const next = skipTrivia(text, i);
-      i = next > i ? next : i + 1;
-      continue;
-    }
-    if (isQuote(char)) {
-      i = skipLiteral(text, i);
-      continue;
-    }
-    if (char === open) depth += 1;
-    else if (char === close) {
-      depth -= 1;
-      if (depth === 0) return i + 1;
-    }
-    i += 1;
-  }
-  return text.length;
+  return findGroupEnd(text, index + 1, open, close) ?? text.length;
 }
 
 /**

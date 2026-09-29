@@ -3,11 +3,17 @@
 
 import { DocumentNode, parse, Source } from 'graphql';
 import { SourceFile } from './fileUtils.js';
+import {
+  findGroupEnd,
+  isQuote,
+  Range,
+  scanLiteral,
+  skipBlockComment,
+  skipLineComment,
+  skipLiteral,
+} from './jsLexer.js';
 import { wholeWordPattern } from './stringHelpers.js';
 import { buildGraphqlEntities, GraphqlFileEntities } from './operations.js';
-
-/** A half-open `[start, end)` range of offsets within a source file. */
-type Range = { start: number; end: number };
 
 /** One recognized inline GraphQL document, before it is parsed. */
 export type InlineSite = {
@@ -100,135 +106,12 @@ function blankRange(text: string): string {
 }
 
 /**
- * Finds the end of a `${...}` interpolation that starts at `start`, by counting
- * braces. Returns the offset just past the closing brace, or `null` when it
- * never closes.
- */
-function findInterpolationEnd(content: string, start: number): number | null {
-  let depth = 1;
-  for (let i = start + 2; i < content.length; i++) {
-    if (content[i] === '{') depth += 1;
-    else if (content[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return i + 1;
-    }
-  }
-  return null;
-}
-
-/**
- * Scans a string or template literal from its first body character to its
- * closing quote, collecting the interpolations on the way. Returns `null` when
- * the literal never closes (a quoted argument may not cross a line), so a
- * half-written template is skipped instead of swallowing the rest of the file.
- */
-function scanLiteral(
-  content: string,
-  bodyStart: number,
-  quote: string,
-): { bodyEnd: number; interpolations: Range[] } | null {
-  const interpolations: Range[] = [];
-  let i = bodyStart;
-  while (i < content.length) {
-    const char = content[i];
-    if (char === '\\') {
-      i += 2;
-      continue;
-    }
-    if (char === quote) {
-      return { bodyEnd: i, interpolations };
-    }
-    if (char === '\n' && quote !== '`') {
-      return null;
-    }
-    if (quote === '`' && char === '$' && content[i + 1] === '{') {
-      const end = findInterpolationEnd(content, i);
-      if (end === null) return null;
-      interpolations.push({ start: i, end });
-      i = end;
-      continue;
-    }
-    i += 1;
-  }
-  return null;
-}
-
-/** Returns the offset of the newline that ends a `//` comment, or the file end. */
-function skipLineComment(content: string, start: number): number {
-  const newline = content.indexOf('\n', start + 2);
-  return newline === -1 ? content.length : newline;
-}
-
-/**
- * Returns the offset just past the end of a block comment. An unterminated
- * comment runs to the end of the file, which is what a compiler
- * sees too, so nothing after it is read as code.
- */
-function skipBlockComment(content: string, start: number): number {
-  const end = content.indexOf('*/', start + 2);
-  return end === -1 ? content.length : end + 2;
-}
-
-/**
- * Returns the offset just past an ordinary string or template literal, so its
- * contents are never read as code. A `'` or `"` literal cannot cross a line, so
- * a newline ends it and scanning resumes there; a template literal runs to its
- * closing backtick, with `${...}` skipped as a unit by brace counting so a
- * brace-heavy interpolation cannot end it early.
- */
-function skipLiteral(content: string, start: number): number {
-  const quote = content[start];
-  let i = start + 1;
-  while (i < content.length) {
-    const char = content[i];
-    if (char === '\\') {
-      i += 2;
-      continue;
-    }
-    if (char === quote) return i + 1;
-    if (char === '\n' && quote !== '`') return i;
-    if (quote === '`' && char === '$' && content[i + 1] === '{') {
-      const end = findInterpolationEnd(content, i);
-      if (end === null) return content.length;
-      i = end;
-      continue;
-    }
-    i += 1;
-  }
-  return content.length;
-}
-
-/**
  * Returns the offset just past the `)` that closes a call whose argument list is
  * already open at `start`, so a helper call carrying options after the document
- * is blanked whole. Nested parentheses, strings and comments inside the
- * arguments are skipped. Returns `null` when the call never closes.
+ * is blanked whole. Returns `null` when the call never closes.
  */
 function findCallEnd(content: string, start: number): number | null {
-  let depth = 1;
-  let i = start;
-  while (i < content.length) {
-    const char = content[i];
-    if (char === '/' && content[i + 1] === '/') {
-      i = skipLineComment(content, i);
-      continue;
-    }
-    if (char === '/' && content[i + 1] === '*') {
-      i = skipBlockComment(content, i);
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      i = skipLiteral(content, i);
-      continue;
-    }
-    if (char === '(') depth += 1;
-    else if (char === ')') {
-      depth -= 1;
-      if (depth === 0) return i + 1;
-    }
-    i += 1;
-  }
-  return null;
+  return findGroupEnd(content, start, '(', ')');
 }
 
 /** Tracks line/column while walking a file's offsets in ascending order. */
@@ -298,7 +181,7 @@ export function findInlineDocumentSites(content: string): InlineSite[] {
     }
     if (!IDENTIFIER_START.test(char)) {
       // Any other literal belongs to the surrounding code, not to a document.
-      if (char === "'" || char === '"' || char === '`') {
+      if (isQuote(char)) {
         i = skipLiteral(content, i);
         lastCodeChar = 'x'; // a literal is a value, like an identifier
         newlineSince = false;
@@ -440,7 +323,7 @@ function readDocument(
  * their defining statements blanked out.
  *
  * The blanked text is what the scan searches for usage. Without it a document
- * would count as its own usage — its GraphQL text and the constant it is
+ * would count as its own usage: its GraphQL text and the constant it is
  * assigned to both sit in the very file being searched, which a `.gql` corpus
  * never does. Interpolated names survive the blanking, since `${UserFragmentDoc}`
  * is a genuine reference to another document.
@@ -527,7 +410,7 @@ export function toInlineEntities(
  * The corpus passed in has the defining statements blanked out (see
  * {@link extractInlineDocuments}), so a constant only appears here when other
  * code reads it. The match is whole-word, which keeps a one-letter constant
- * from matching the middle of an unrelated word — though a constant named after
+ * from matching the middle of an unrelated word, though a constant named after
  * a common word can still match something unrelated and mask a real finding.
  *
  * @param {GraphqlFileEntities[]} inlineFiles - Entities of the inline documents.

@@ -17,7 +17,6 @@ import {
   detectGeneratedFiles,
   explainOperationUsage,
   findDuplicateNameWarnings,
-  findUnusedOperations,
   formatAnnotations,
   formatExpandedDirLines,
   formatGeneratedFileWarnings,
@@ -31,8 +30,11 @@ import {
   resolveExcludePatterns,
   resolveFragmentUsagePatterns,
   resolveRunConfig,
+  resolveScanDirs,
   resolveUsagePatterns,
   scanProject,
+  sectionRule,
+  sectionTitle,
 } from '../src/core/gqlPruner';
 import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
@@ -42,7 +44,7 @@ import { OperationInfo } from '../src/types/OperationInfo';
 import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
 
 jest.mock('fs');
-// Partial mock: keep the pure helpers (isOperationUsedInContents) real, stub the
+// Partial mock: keep the pure helpers (findUsageMatch) real, stub the
 // filesystem-backed ones so mainFunction's orchestration can be driven directly.
 jest.mock('../src/utils/fileUtils', () => {
   const actual = jest.requireActual('../src/utils/fileUtils');
@@ -348,39 +350,6 @@ describe('gqlPruner', () => {
     });
   });
 
-  describe('findUnusedOperations', () => {
-    const ops: OperationInfo[] = [
-      { name: 'GetUser', type: 'query', filePath: 'a.gql' },
-      { name: 'Unused', type: 'query', filePath: 'a.gql' },
-    ];
-
-    it('returns only operations not referenced in any content', () => {
-      expect(
-        findUnusedOperations(
-          ops,
-          ['const r = useGetUserQuery()'],
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      ).toEqual([{ name: 'Unused', type: 'query', filePath: 'a.gql' }]);
-    });
-
-    it('returns all when nothing references them', () => {
-      expect(
-        findUnusedOperations(ops, ['nothing here'], DEFAULT_USAGE_PATTERNS),
-      ).toEqual(ops);
-    });
-
-    it('returns none when all are used', () => {
-      expect(
-        findUnusedOperations(
-          ops,
-          ['useGetUserQuery() UnusedDocument'],
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      ).toEqual([]);
-    });
-  });
-
   describe('explainOperationUsage', () => {
     const ops: OperationInfo[] = [
       { name: 'GetUser', type: 'query', filePath: 'a.gql' },
@@ -419,28 +388,89 @@ describe('gqlPruner', () => {
       ]);
     });
 
-    it('agrees with findUnusedOperations on the unused set', () => {
-      const usages = explainOperationUsage(
-        ops,
-        sources,
-        DEFAULT_USAGE_PATTERNS,
-      );
-      const unusedViaExplain = usages
-        .filter((usage) => !usage.match)
-        .map((usage) => usage.operation);
-      expect(unusedViaExplain).toEqual(
-        findUnusedOperations(
-          ops,
-          sources.map((source) => source.content),
-          DEFAULT_USAGE_PATTERNS,
-        ),
-      );
-    });
-
     it('returns [] for no operations', () => {
       expect(
         explainOperationUsage([], sources, DEFAULT_USAGE_PATTERNS),
       ).toEqual([]);
+    });
+  });
+
+  describe('sectionTitle and sectionRule', () => {
+    it('frames a section name in dashes', () => {
+      expect(sectionTitle('Unused GraphQL Operations')).toBe(
+        '--- Unused GraphQL Operations ---',
+      );
+    });
+
+    it('closes a section with a rule exactly as wide as its title', () => {
+      // The rules used to be hand-counted per section, so renaming a section
+      // silently broke the alignment. Derived, they cannot drift.
+      for (const name of [
+        'Unused GraphQL Operations',
+        'Unused GraphQL Fragments',
+        'Orphaned GraphQL Files',
+        'Deprecated Field Usage',
+        'Unused Field Candidates',
+      ]) {
+        expect(sectionRule(name)).toBe('-'.repeat(sectionTitle(name).length));
+        expect(sectionRule(name)).toMatch(/^-+$/);
+      }
+    });
+  });
+
+  describe('resolveScanDirs', () => {
+    // Only the mocks these cases set are reset: a blanket reset would also
+    // wipe the default implementations the module-level mocks were given.
+    afterEach(() => {
+      (fs.readdirSync as jest.Mock).mockReset();
+      (fs.realpathSync as unknown as jest.Mock).mockReset();
+      (fs.statSync as jest.Mock).mockReset();
+      mockedDirExists.mockReset();
+    });
+
+    it('carries a subtree the glob walk could not read as a warning', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/locked') throw new Error('EACCES');
+        const tree: Record<string, string[]> = {
+          packages: ['a', 'locked'],
+          'packages/a': ['graphql'],
+        };
+        return (tree[p] ?? []).map((name) => ({
+          name,
+          isDirectory: () => true,
+          isSymbolicLink: () => false,
+        }));
+      });
+      (fileUtils.directoryExists as jest.Mock).mockReturnValue(true);
+
+      const scanDirs = resolveScanDirs(['packages/*/graphql'], ['./src']);
+
+      expect(scanDirs.error).toBeUndefined();
+      expect(scanDirs.graphqlDir).toEqual(['packages/a/graphql']);
+      expect(scanDirs.warnings).toEqual([
+        'Skipped the directory packages/locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
+      ]);
+    });
+
+    it('keeps the walk warnings when a glob matches nothing', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation(() => {
+        throw new Error('EACCES');
+      });
+
+      const scanDirs = resolveScanDirs(['locked/*/graphql'], ['./src']);
+
+      expect(scanDirs.error).toContain('match no directories');
+      expect(scanDirs.warnings).toHaveLength(1);
+      expect(scanDirs.warnings[0]).toContain('Skipped the directory locked');
     });
   });
 
@@ -2850,6 +2880,8 @@ describe('gqlPruner', () => {
     // A directory tree for the glob expansion below: each key is a directory,
     // each value the names of its (directory) children.
     const mockDirTree = (tree: Record<string, string[]>) => {
+      // Every directory in the tree is on disk; the glob walk checks its base.
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
@@ -3392,6 +3424,32 @@ describe('gqlPruner', () => {
           expect(errs).toContain('graphqlDir');
           expect(errs).not.toContain(
             'These configured directories do not exist',
+          );
+        });
+
+        it('prints the walk warnings before a directory error ends the run', () => {
+          // A glob base that exists but cannot be read matches nothing. The
+          // run stops, and the reason it saw less is the EACCES, which has to
+          // reach the user along with the error.
+          (fs.readFileSync as jest.Mock).mockReturnValue(
+            'graphqlDir: locked/*/graphql\nsrcDir: ./s\n',
+          );
+          (fs.statSync as jest.Mock).mockReturnValue({
+            isDirectory: () => true,
+          });
+          (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+            (p: string) => p,
+          );
+          (fs.readdirSync as jest.Mock).mockImplementation(() => {
+            throw new Error('EACCES');
+          });
+
+          expect(() => mainFunction()).toThrow('process.exit:2');
+          const errs = errorSpy.mock.calls.flat().join('\n');
+          expect(errs).toContain('Skipped the directory locked');
+          expect(errs).toContain('EACCES');
+          expect(errs.indexOf('Skipped the directory locked')).toBeLessThan(
+            errs.indexOf('match no directories'),
           );
         });
 

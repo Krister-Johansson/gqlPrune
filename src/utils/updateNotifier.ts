@@ -87,7 +87,7 @@ async function getLatestVersion(name: string): Promise<string | undefined> {
 /**
  * Checks npm (cached ~daily) and prints a one-line notice to **stderr** when a
  * newer version is available. Stays silent in CI, in `--json` mode, when
- * `NO_UPDATE_NOTIFIER` is set, and when stdout isn't a TTY — so machine-readable
+ * `NO_UPDATE_NOTIFIER` is set, and when stdout isn't a TTY, so machine-readable
  * output and CI gating stay clean. Network/cache errors are swallowed, and it
  * never touches stdout or the process exit code.
  */

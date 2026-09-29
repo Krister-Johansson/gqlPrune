@@ -6,7 +6,7 @@ import { FragmentInfo } from '../types/FragmentInfo.js';
 import { OperationInfo } from '../types/OperationInfo.js';
 import { FieldLocation, UnusedFieldInfo } from '../types/UnusedFieldInfo.js';
 import { SourceFile } from './fileUtils.js';
-import { reachableFragments } from './fragments.js';
+import { buildFragmentSpreadGraph, reachableFragments } from './fragments.js';
 import { getFragmentSpreads, GraphqlFileEntities } from './operations.js';
 import { wholeWordPattern } from './stringHelpers.js';
 
@@ -83,15 +83,7 @@ export function findUnusedFieldCandidates(
     unusedFragments.map((fragment) => fragment.name),
   );
 
-  // Merge (not overwrite) duplicate names' edges, exactly as the fragment scan
-  // does, so reachability stays conservative.
-  const fragmentSpreads = new Map<string, string[]>();
-  for (const entities of parsedFiles) {
-    for (const { name, spreads } of entities.fragmentSpreads) {
-      const existing = fragmentSpreads.get(name) ?? [];
-      fragmentSpreads.set(name, [...new Set([...existing, ...spreads])]);
-    }
-  }
+  const fragmentSpreads = buildFragmentSpreadGraph(parsedFiles);
 
   const roots = new Set<string>();
   const keys = new Map<string, FieldLocation[]>();

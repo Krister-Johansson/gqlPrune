@@ -77,6 +77,25 @@ describe('fileUtils', () => {
       expect(files).toEqual([]); // Expect an empty array since the directory read failed
     });
 
+    it('hands the reason a directory was skipped to onReadError', () => {
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === './') return [dirent('locked', { dir: true })];
+        throw new Error('EACCES');
+      });
+      const messages: string[] = [];
+      findFilesWithExtension(
+        './',
+        ['.ts'],
+        () => false,
+        new Set(),
+        (m) => messages.push(m),
+      );
+      expect(messages).toEqual([
+        'Skipped the directory locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
+      ]);
+    });
+
     it('follows a symlink to a directory outside the walked tree', () => {
       (fs.readdirSync as jest.Mock).mockImplementation(
         (p: string) =>
@@ -219,6 +238,7 @@ describe('fileUtils', () => {
     // names of its children. A name carrying a file extension (`graphql.ts`) is
     // a file; everything else, dotfolders included, is a directory.
     const mockTree = (tree: Record<string, string[]>) => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
@@ -399,15 +419,118 @@ describe('fileUtils', () => {
       });
     });
 
-    it('reports a glob whose static base cannot be read', () => {
+    it('reports a glob whose static base does not exist, without a warning', () => {
+      // The "matches nothing" report already says everything a missing base
+      // can say; a walk warning on top would repeat it.
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(new Error('ENOENT: no such file'), {
+          code: 'ENOENT',
+        });
+      });
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['missing/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['missing/*/graphql']);
+      expect(messages).toEqual([]);
+      expect(fs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('does not return a missing base as the match of a trailing **', () => {
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(new Error('ENOENT: no such file'), {
+          code: 'ENOENT',
+        });
+      });
+      expect(expandDirPatterns(['missing/**'])).toEqual({
+        dirs: [],
+        unmatched: ['missing/**'],
+      });
+    });
+
+    it('reports a glob base it is not allowed to look at', () => {
+      // Only an absent base is silent. A permission problem on the base is
+      // exactly the kind of reason the user has to hear.
+      (fs.statSync as jest.Mock).mockImplementation(() => {
+        throw Object.assign(new Error('EACCES: permission denied'), {
+          code: 'EACCES',
+        });
+      });
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['locked/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['locked/*/graphql']);
+      expect(messages).toEqual([
+        'Skipped the directory locked: could not read it. ' +
+          'EACCES: permission denied Anything it holds is missing from this scan.',
+      ]);
+    });
+
+    it('reports a glob whose static base exists but cannot be read', () => {
+      (fs.statSync as jest.Mock).mockReturnValue({ isDirectory: () => true });
       (fs.realpathSync as unknown as jest.Mock).mockImplementation(
         (p: string) => p,
       );
       (fs.readdirSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT');
+        throw new Error('EACCES');
       });
-      expect(expandDirPatterns(['missing/*/graphql']).unmatched).toEqual([
-        'missing/*/graphql',
+      const messages: string[] = [];
+      expect(
+        expandDirPatterns(['locked/*/graphql'], (m) => messages.push(m))
+          .unmatched,
+      ).toEqual(['locked/*/graphql']);
+      expect(messages).toEqual([
+        'Skipped the directory locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
+      ]);
+    });
+
+    it('hands an unreadable subtree to onReadError, like the file walk does', () => {
+      // The glob walk used to swallow this, so a permission problem under a
+      // monorepo pattern silently scanned fewer packages than configured.
+      mockTree({ packages: ['a', 'locked'], 'packages/a': ['graphql'] });
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/locked') throw new Error('EACCES');
+        const tree: Record<string, string[]> = {
+          packages: ['a', 'locked'],
+          'packages/a': ['graphql'],
+        };
+        return (tree[p] ?? []).map((name) => dirent(name, { dir: true }));
+      });
+      const messages: string[] = [];
+      const { dirs } = expandDirPatterns(['packages/*/graphql'], (m) =>
+        messages.push(m),
+      );
+      expect(dirs).toEqual(['packages/a/graphql']);
+      expect(messages).toEqual([
+        'Skipped the directory packages/locked: could not read it. EACCES ' +
+          'Anything it holds is missing from this scan.',
+      ]);
+    });
+
+    it('hands a broken symlink to onReadError and keeps walking', () => {
+      (fs.realpathSync as unknown as jest.Mock).mockImplementation(
+        (p: string) => p,
+      );
+      (fs.readdirSync as jest.Mock).mockImplementation((p: string) =>
+        p === 'packages'
+          ? [dirent('dangling', { link: true }), dirent('a', { dir: true })]
+          : p === 'packages/a'
+            ? [dirent('graphql', { dir: true })]
+            : [],
+      );
+      (fs.statSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/dangling') throw new Error('ENOENT');
+        return { isDirectory: () => true };
+      });
+      const messages: string[] = [];
+      const { dirs } = expandDirPatterns(['packages/*/graphql'], (m) =>
+        messages.push(m),
+      );
+      expect(dirs).toEqual(['packages/a/graphql']);
+      expect(messages).toEqual([
+        'Skipped packages/dangling: could not read it. ENOENT',
       ]);
     });
 
@@ -452,8 +575,9 @@ describe('fileUtils', () => {
           ? [dirent('broken', { link: true }), dirent('web', { dir: true })]
           : [dirent('graphql', { dir: true })],
       );
-      (fs.statSync as jest.Mock).mockImplementation(() => {
-        throw new Error('ENOENT: dangling link');
+      (fs.statSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === 'packages/broken') throw new Error('ENOENT: dangling link');
+        return { isDirectory: () => true };
       });
 
       expect(expandDirPatterns(['packages/*/graphql']).dirs).toEqual([

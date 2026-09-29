@@ -25,6 +25,7 @@ src/
     fileUtils.ts          Directory walking, file reading, exclusion matching
     operations.ts         Extracts operations from GraphQL documents
     fragments.ts          Cross-file fragment spread graph
+    jsLexer.ts            The one comment/string lexer the textual scanners share
     usagePatterns.ts      Default patterns and pattern expansion
     updateNotifier.ts     Once-a-day version check against the npm registry
     stringHelpers.ts      Small string utilities
