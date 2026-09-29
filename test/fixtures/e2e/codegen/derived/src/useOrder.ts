@@ -1,4 +1,4 @@
-// FIXTURE source file; string-searched only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 import { useGetOrderQuery } from './generated/graphql';
 
 export function useOrder(id: string) {

@@ -64,7 +64,7 @@ describe('a project producing all three grades at once', () => {
     });
     expect(byName.GetConfidenceLow).toMatchObject({
       confidence: 'low',
-      reason: 'source-mention',
+      reason: 'string-mention',
     });
   });
 
@@ -96,7 +96,7 @@ describe('a project producing all three grades at once', () => {
       'confidence: operation "GetConfidenceMedium" is medium (generated-only:',
     );
     expect(human.stderr).toContain(
-      'confidence: operation "GetConfidenceLow" is low (source-mention:',
+      'confidence: operation "GetConfidenceLow" is low (string-mention:',
     );
   });
 
@@ -109,7 +109,7 @@ describe('a project producing all three grades at once', () => {
       {
         file: expect.stringContaining('dead.gql'),
         confidence: 'low',
-        reason: 'source-mention',
+        reason: 'string-mention',
       },
     ]);
   });
@@ -143,10 +143,11 @@ describe('--min-confidence', () => {
     // code: a CI job can fail on high-confidence findings alone.
     expect(ungated.code).toBe(1);
     expect(parseReport(ungated).orphanedFiles).toEqual([
+      // The other low reason: the name is read as an identifier, not a string.
       {
         file: expect.stringContaining('archived.gql'),
         confidence: 'low',
-        reason: 'source-mention',
+        reason: 'name-referenced',
       },
     ]);
     expect(gated.code).toBe(0);

@@ -3,7 +3,7 @@
 
 import { FragmentInfo } from '../types/FragmentInfo.js';
 import { GraphqlFileEntities } from './operations.js';
-import { isOperationUsedInContents } from './fileUtils.js';
+import type { ReferenceIndex } from './referenceIndex.js';
 import {
   buildFragmentPatterns,
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
@@ -82,8 +82,9 @@ export function findUnusedFragments(
  * neither (a) reachable via fragment spreads from any operation, nor (b)
  * referenced in the application source (e.g. a `<Name>FragmentDoc` constant
  * under fragment masking). Operates on pre-parsed entities (see
- * `extractGraphqlEntities`) so each file is parsed once per scan; this function
- * never touches the filesystem. Schema-free.
+ * `extractGraphqlEntities`) and the resolved reference index, so each file is
+ * parsed once per scan; this function never touches the filesystem.
+ * Schema-free.
  *
  * Note: a fragment is considered used as soon as any operation spreads it, even
  * if that operation is itself unused: that operation is reported separately, so
@@ -91,7 +92,7 @@ export function findUnusedFragments(
  * is deleted (caught on the next run).
  *
  * @param {GraphqlFileEntities[]} parsedFiles - One parsed entry per gql file.
- * @param {string[]} fileContents - The already-read source file contents.
+ * @param {ReferenceIndex} index - The resolved references of the scanned sources.
  * @param {string[]} fragmentUsagePatterns - Templates for source references.
  * @param {Iterable<string>} extraRoots - Fragment names the caller already knows
  *   are used, e.g. an inline document reached through the constant it is
@@ -100,7 +101,7 @@ export function findUnusedFragments(
  */
 export function findUnusedFragmentsInCorpus(
   parsedFiles: GraphqlFileEntities[],
-  fileContents: string[],
+  index: ReferenceIndex,
   fragmentUsagePatterns: string[] = DEFAULT_FRAGMENT_USAGE_PATTERNS,
   extraRoots: Iterable<string> = [],
 ): FragmentInfo[] {
@@ -119,7 +120,7 @@ export function findUnusedFragmentsInCorpus(
       fragment.name,
       fragmentUsagePatterns,
     );
-    if (isOperationUsedInContents(patterns, fileContents)) {
+    if (index.firstReference(patterns) !== undefined) {
       roots.add(fragment.name);
     }
   }

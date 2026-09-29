@@ -1,12 +1,13 @@
-// FIXTURE source file; gqlPrune only string-searches and text-scans it. It is
-// never compiled, typechecked or linted, and the imports resolve to nothing.
+// FIXTURE source file; gqlPrune parses it. It is never compiled, typechecked
+// or linted, and the imports resolve to nothing.
 //
-// Two rules hold for every comment in this file: never write an operation name
-// outside a document body, and never write a usage-pattern identifier such as
-// useSomethingQuery outside one either. The suite asserts that the dead
-// documents below grade "high" precisely because their names appear nowhere in
-// the scanned corpus, and a stray mention in a comment would quietly turn that
-// into "low".
+// Two rules hold for this file: never write an operation name in a string
+// outside a document body, and never reference a usage-pattern identifier
+// such as useSomethingQuery outside one either. The suite asserts that the
+// dead documents below grade "high" precisely because their names appear
+// nowhere in the scanned source, neither as an identifier nor in a string.
+// Comments are not read, but the rule is kept for them too so the file reads
+// the same way throughout.
 //
 // The suite also asserts the reported line of each document. It locates the
 // expected line by searching this file for the `query <Name> {` line, so keep

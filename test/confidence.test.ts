@@ -15,13 +15,12 @@ import {
   lowestConfidence,
   meetsMinConfidence,
 } from '../src/utils/confidence';
-import { SourceFile } from '../src/utils/fileUtils';
 import { OperationInfo } from '../src/types/OperationInfo';
+import { indexOf } from './support';
 
-const source = (content: string, file = 'src/App.tsx'): SourceFile => ({
-  file,
-  content,
-});
+/** The index the grader reads: one file unless a second is given. */
+const source = (content: string, file = 'src/App.tsx') =>
+  indexOf({ [file]: content });
 
 describe('CONFIDENCE_LEVELS', () => {
   it('lists the levels from strongest to weakest', () => {
@@ -46,56 +45,83 @@ describe('isConfidenceLevel', () => {
 });
 
 describe('gradeName', () => {
+  // Grades come from the reference index now: an identifier and a string
+  // holding the name are told apart, and a comment is nothing at all.
   it('grades a name that appears nowhere as high', () => {
     expect(
-      gradeName('GetUser', [source('useSomethingElse()')], new Set()),
+      gradeName('GetUser', source('useSomethingElse()'), new Set()),
     ).toEqual({ confidence: 'high', reason: 'name-absent' });
   });
 
   it('grades a name that appears only in a generated file as medium', () => {
-    const sources = [
-      source(
+    const index = indexOf({
+      'src/gql/graphql.ts':
         'export const GetUserDocument = gql`query GetUser { id }`;',
-        'src/gql/graphql.ts',
-      ),
-      source('const x = 1', 'src/App.tsx'),
-    ];
+      'src/App.tsx': 'const x = 1',
+    });
     expect(
-      gradeName('GetUser', sources, new Set(['src/gql/graphql.ts'])),
+      gradeName('GetUser', index, new Set(['src/gql/graphql.ts'])),
     ).toEqual({ confidence: 'medium', reason: 'generated-only' });
   });
 
-  it('grades a name that appears in ordinary source as low', () => {
-    const sources = [
-      source(
-        'export const GetUserDocument = gql`query GetUser { id }`;',
-        'src/gql/graphql.ts',
-      ),
-      source('registry["GetUser"]()', 'src/App.tsx'),
-    ];
+  it('grades a name mentioned as a string only in a generated file as medium', () => {
+    const index = indexOf({
+      'src/gql/graphql.ts': "export const RETIRED = ['GetUser'];",
+    });
     expect(
-      gradeName('GetUser', sources, new Set(['src/gql/graphql.ts'])),
-    ).toEqual({ confidence: 'low', reason: 'source-mention' });
+      gradeName('GetUser', index, new Set(['src/gql/graphql.ts'])),
+    ).toEqual({ confidence: 'medium', reason: 'generated-only' });
   });
 
-  it('matches whole words only', () => {
+  it('grades a name whose only mention is a string in ordinary source as low', () => {
+    const index = indexOf({
+      'src/gql/graphql.ts':
+        'export const GetUserDocument = gql`query GetUser { id }`;',
+      'src/App.tsx': 'registry["GetUser"]()',
+    });
     expect(
-      gradeName('User', [source('const p = UserProfile')], new Set()),
+      gradeName('GetUser', index, new Set(['src/gql/graphql.ts'])),
+    ).toEqual({ confidence: 'low', reason: 'string-mention' });
+  });
+
+  it('grades a name read as an identifier in ordinary source as low', () => {
+    expect(gradeName('GetUser', source('track(GetUser);'), new Set())).toEqual({
+      confidence: 'low',
+      reason: 'name-referenced',
+    });
+  });
+
+  it('prefers the identifier reason when both kinds of mention exist', () => {
+    expect(
+      gradeName('GetUser', source("track(GetUser, 'GetUser');"), new Set()),
+    ).toEqual({ confidence: 'low', reason: 'name-referenced' });
+  });
+
+  it('does not count the name inside a longer identifier', () => {
+    expect(
+      gradeName('User', source('const p = UserProfile'), new Set()),
     ).toEqual({ confidence: 'high', reason: 'name-absent' });
+    expect(gradeName('User', source('const p = { User }'), new Set())).toEqual({
+      confidence: 'low',
+      reason: 'name-referenced',
+    });
+  });
+
+  it('does not count the name in a comment', () => {
     expect(
-      gradeName('User', [source('const p = { User }')], new Set()),
-    ).toEqual({ confidence: 'low', reason: 'source-mention' });
+      gradeName('GetUser', source('// GetUser\n/* GetUser */'), new Set()),
+    ).toEqual({ confidence: 'high', reason: 'name-absent' });
   });
 
   it('is case-sensitive', () => {
-    expect(gradeName('GetUser', [source('getuser()')], new Set())).toEqual({
+    expect(gradeName('GetUser', source('getuser()'), new Set())).toEqual({
       confidence: 'high',
       reason: 'name-absent',
     });
   });
 
   it('treats an empty corpus as no trace of the name', () => {
-    expect(gradeName('GetUser', [], new Set())).toEqual({
+    expect(gradeName('GetUser', indexOf({}), new Set())).toEqual({
       confidence: 'high',
       reason: 'name-absent',
     });
@@ -107,10 +133,10 @@ describe('lowestConfidence', () => {
     expect(
       lowestConfidence([
         { confidence: 'high', reason: 'name-absent' },
-        { confidence: 'low', reason: 'source-mention' },
+        { confidence: 'low', reason: 'string-mention' },
         { confidence: 'medium', reason: 'generated-only' },
       ]),
-    ).toEqual({ confidence: 'low', reason: 'source-mention' });
+    ).toEqual({ confidence: 'low', reason: 'string-mention' });
   });
 
   it('keeps the single grade when there is only one', () => {
@@ -158,7 +184,7 @@ describe('filterByConfidence', () => {
     {
       name: 'C',
       confidence: 'low' as const,
-      reason: 'source-mention' as const,
+      reason: 'string-mention' as const,
     },
   ];
 
@@ -187,7 +213,7 @@ describe('countByConfidence', () => {
       countByConfidence([
         { confidence: 'high', reason: 'name-absent' },
         { confidence: 'high', reason: 'name-absent' },
-        { confidence: 'low', reason: 'source-mention' },
+        { confidence: 'low', reason: 'string-mention' },
       ]),
     ).toEqual({ high: 2, medium: 0, low: 1 });
   });
@@ -208,7 +234,8 @@ describe('describeConfidence', () => {
     for (const reason of [
       'name-absent',
       'generated-only',
-      'source-mention',
+      'name-referenced',
+      'string-mention',
       'heuristic-cap',
     ] as const) {
       expect(describeConfidence({ confidence: 'low', reason })).toContain(
@@ -226,19 +253,15 @@ describe('gradeOperations', () => {
 
   it('grades each operation by the bare-name search', () => {
     expect(
-      gradeOperations(
-        operations,
-        [source('doSomething(Mentioned)')],
-        new Set(),
-      ),
+      gradeOperations(operations, source('doSomething(Mentioned)'), new Set()),
     ).toEqual([
       { ...operations[0], confidence: 'high', reason: 'name-absent' },
-      { ...operations[1], confidence: 'low', reason: 'source-mention' },
+      { ...operations[1], confidence: 'low', reason: 'name-referenced' },
     ]);
   });
 
   it('does not throw without operations or sources', () => {
-    expect(gradeOperations([], [], new Set())).toEqual([]);
+    expect(gradeOperations([], indexOf({}), new Set())).toEqual([]);
   });
 });
 
@@ -247,7 +270,7 @@ describe('gradeFragments', () => {
     expect(
       gradeFragments(
         [{ name: 'UserFields', filePath: 'g/a.gql', line: 4 }],
-        [source('const UserFields = 1', 'src/gql/graphql.ts')],
+        source('const UserFields = 1', 'src/gql/graphql.ts'),
         new Set(['src/gql/graphql.ts']),
       ),
     ).toEqual([
@@ -262,7 +285,7 @@ describe('gradeFragments', () => {
   });
 
   it('does not throw without fragments or sources', () => {
-    expect(gradeFragments([], [], new Set())).toEqual([]);
+    expect(gradeFragments([], indexOf({}), new Set())).toEqual([]);
   });
 });
 
@@ -317,12 +340,12 @@ describe('gradeOrphanedFiles', () => {
             name: 'AlsoGone',
             filePath: 'g/dead.gql',
             confidence: 'low',
-            reason: 'source-mention',
+            reason: 'string-mention',
           },
         ],
       ),
     ).toEqual([
-      { file: 'g/dead.gql', confidence: 'low', reason: 'source-mention' },
+      { file: 'g/dead.gql', confidence: 'low', reason: 'string-mention' },
     ]);
   });
 
@@ -336,7 +359,7 @@ describe('gradeOrphanedFiles', () => {
             name: 'Elsewhere',
             filePath: 'g/other.gql',
             confidence: 'low',
-            reason: 'source-mention',
+            reason: 'string-mention',
           },
         ],
       ),

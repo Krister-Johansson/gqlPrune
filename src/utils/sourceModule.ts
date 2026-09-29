@@ -115,10 +115,15 @@ interface ParsedSourceFile extends ts.SourceFile {
   parseDiagnostics?: readonly ts.Diagnostic[];
 }
 
+/** The key a discovered file has in every cross-file structure: resolved, posix. */
+export function modulePathOf(file: string): string {
+  return path.resolve(file).split(path.sep).join('/');
+}
+
 function emptyModule(file: string, mode: 'module' | 'tokens'): SourceModule {
   return {
     file,
-    path: path.resolve(file).split(path.sep).join('/'),
+    path: modulePathOf(file),
     imports: new Map(),
     exports: new Map(),
     starExports: [],

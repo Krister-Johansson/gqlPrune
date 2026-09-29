@@ -1,4 +1,4 @@
-// Fixture source file; string-searched only, never compiled.
+// Fixture source file; parsed by gqlPrune, never compiled.
 import { useGetOrderListQuery } from './hooks';
 
 export function OrderList() {

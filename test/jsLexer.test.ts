@@ -6,7 +6,6 @@ import {
   findInterpolationEnd,
   isQuote,
   readString,
-  scanLiteral,
   skipBlockComment,
   skipLineComment,
   skipLiteral,
@@ -114,28 +113,6 @@ describe('jsLexer', () => {
 
     it('returns null when the interpolation never closes', () => {
       expect(findInterpolationEnd('${a', 0)).toBeNull();
-    });
-  });
-
-  describe('scanLiteral', () => {
-    it('finds the closing quote and collects the interpolations', () => {
-      const text = 'query ${A} and ${B}` tail';
-      expect(scanLiteral(text, 0, '`')).toEqual({
-        bodyEnd: 19,
-        interpolations: [
-          { start: 6, end: 10 },
-          { start: 15, end: 19 },
-        ],
-      });
-    });
-
-    it('returns null for a quoted argument that crosses a line', () => {
-      expect(scanLiteral('a\nb"', 0, '"')).toBeNull();
-    });
-
-    it('returns null when the literal or an interpolation never closes', () => {
-      expect(scanLiteral('open', 0, '`')).toBeNull();
-      expect(scanLiteral('${open`', 0, '`')).toBeNull();
     });
   });
 
