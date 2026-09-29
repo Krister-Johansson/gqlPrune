@@ -176,6 +176,59 @@ describe('buildReferenceIndex', () => {
       ]);
     });
 
+    it('terminates on a cycle of re-exported imports', () => {
+      // Each file imports X from the other and re-exports it; nothing declares
+      // it. The chain is cut and reported, never followed forever.
+      const index = indexOf({
+        '/p/a.ts': "import { X } from './b';\nexport { X };",
+        '/p/b.ts': "import { X } from './a';\nexport { X };",
+        '/p/App.tsx': "import { X } from './a';\nuse(X);",
+      });
+
+      expect(canonicalOf(index, 'X')).toEqual([
+        { file: '/p/App.tsx', origin: 'outside' },
+      ]);
+      const [ref] = index.byName.get('X') ?? [];
+      const chain = describeResolution(ref.canonical);
+      expect(chain[0]).toContain("imported from './a'");
+      expect(chain[chain.length - 1]).toContain('no export named X');
+    });
+
+    it('gives each importer of an anonymous default its own name', () => {
+      const index = indexOf({
+        '/p/doc.ts': 'export default gql`query A { a }`;',
+        '/p/A.tsx':
+          "import GetUserDocument from './doc';\nuseQuery(GetUserDocument);",
+        '/p/B.tsx':
+          "import GetOtherDocument from './doc';\nuseQuery(GetOtherDocument);",
+      });
+
+      expect(canonicalOf(index, 'GetUserDocument')).toEqual([
+        { file: '/p/A.tsx', origin: '/p/doc.ts' },
+      ]);
+      expect(canonicalOf(index, 'GetOtherDocument')).toEqual([
+        { file: '/p/B.tsx', origin: '/p/doc.ts' },
+      ]);
+    });
+
+    it('does not let a cycle cut poison the memo for a later importer', () => {
+      // Resolving Y from a first meets b, whose star export points back at a
+      // (cut), then finds Y in c. A later import of Y from b must find c too.
+      const index = indexOf({
+        '/p/a.ts': "export * from './b';\nexport * from './c';",
+        '/p/b.ts': "export * from './a';",
+        '/p/c.ts': 'export const Y = 1;',
+        '/p/First.ts': "import { Y } from './a';\nuse(Y);",
+        '/p/Second.ts': "import { Y } from './b';\nuse(Y);",
+      });
+
+      expect(canonicalOf(index, 'Y')).toEqual([
+        { file: '/p/First.ts', origin: '/p/c.ts' },
+        { file: '/p/Second.ts', origin: '/p/c.ts' },
+      ]);
+      expect(index.referencesTo('/p/c.ts', 'Y')).toHaveLength(2);
+    });
+
     it('treats a name behind an export * that leaves the corpus as outside', () => {
       const index = indexOf({
         '/p/a.ts': "export * from '../generated/graphql';",
