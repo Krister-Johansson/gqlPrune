@@ -1,0 +1,10 @@
+# Eight operations, each kept alive through one kind of indirection in src/.
+# The consumer files are named after the shape they exercise.
+query GetViaReexport { item(id: 1) { id } }
+query GetViaBarrel { item(id: 2) { id } }
+query GetViaRename { item(id: 3) { id } }
+query GetViaDefault { item(id: 4) { id } }
+query GetViaNamespace { item(id: 5) { id } }
+query GetViaCycle { item(id: 6) { id } }
+query GetViaProperty { item(id: 7) { id } }
+query GetViaBroken { item(id: 8) { id } }
