@@ -74,7 +74,10 @@ Two I/O rules matter throughout:
 
 ## Dependencies
 
-Six runtime dependencies, chosen to stay small: `graphql` (parsing),
-`js-yaml` (config), `picomatch` (exclude globs), `kleur` (terminal color), and
-`@inquirer/confirm` plus `@inquirer/input` (the two prompts `init` uses). The
-update check uses Node's built-in `fetch` rather than a dependency.
+Eight runtime dependencies, chosen to stay small: `graphql` (parsing
+documents), `typescript` (parsing source files; only `createSourceFile` and the
+module resolver are used, never a program or a type checker), `js-yaml`
+(config), `picomatch` (exclude globs), `kleur` (terminal color), and
+`@inquirer/checkbox`, `@inquirer/confirm` and `@inquirer/input` (the prompts
+`init` uses). The update check uses Node's built-in `fetch` rather than a
+dependency.

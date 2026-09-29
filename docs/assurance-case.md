@@ -64,9 +64,12 @@ and a hung scan is an annoyance, not a breach.
 
 ### 3. The dependency surface is small and watched
 
-- There are six runtime dependencies, pinned through `package-lock.json`.
-  The interactive prompts deliberately use the two scoped `@inquirer` packages
-  instead of the full inquirer distribution to keep the transitive tree small.
+- There are eight runtime dependencies, pinned through `package-lock.json`.
+  The interactive prompts deliberately use the three scoped `@inquirer`
+  packages instead of the full inquirer distribution to keep the transitive
+  tree small. `typescript` is the largest of them; gqlPrune uses only its
+  parser and module resolver, never a program or a type checker, and reads no
+  code paths from it at install time.
 - Dependabot, CodeQL, OpenSSF Scorecard, and Socket all run against the
   repository, and dependency updates land through the same reviewed-PR process
   as code.
