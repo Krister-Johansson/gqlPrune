@@ -9,8 +9,10 @@ see the [README](../README.md).
 gqlPrune is a Node.js command-line tool, written in TypeScript and compiled to
 `dist/` for publishing. It has one job: find GraphQL operations and fragments
 that are defined in `.gql`/`.graphql` files but never referenced in a source
-tree. It does this with static text analysis. It never executes the project it
-scans, and it needs no schema and no running server.
+tree. It does this by parsing the source with the TypeScript compiler API and
+resolving imports between the files it read. It never executes the project it
+scans, never creates a type checker, and it needs no schema and no running
+server.
 
 ## Layout
 
@@ -25,7 +27,20 @@ src/
     fileUtils.ts          Directory walking, file reading, exclusion matching
     operations.ts         Extracts operations from GraphQL documents
     fragments.ts          Cross-file fragment spread graph
-    jsLexer.ts            The one comment/string lexer the textual scanners share
+    orphans.ts            Whole-file dead documents
+    sourceModule.ts       One source file parsed into imports, exports, references
+                          and inline document sites; a token fallback for the rest
+    referenceIndex.ts     Every reference resolved through imports, re-exports and
+                          barrels to a canonical name
+    moduleResolver.ts     ts.resolveModuleName over the files the scan read
+    tsconfig.ts           baseUrl and paths from the nearest tsconfig
+    inline.ts             Inline gql/graphql documents (opt-in --inline)
+    confidence.ts         Grades findings by the evidence in the index
+    fields.ts             Field candidates (opt-in --fields), still a text search
+    deprecated.ts         Deprecated selections against a local SDL (opt-in)
+    codegen.ts            Reads a GraphQL Code Generator config for defaults
+    jsLexer.ts            The comment/string lexer codegen.ts reads a config with
+    completions.ts        Shell completion scripts
     usagePatterns.ts      Default patterns and pattern expansion
     updateNotifier.ts     Once-a-day version check against the npm registry
     stringHelpers.ts      Small string utilities
@@ -47,12 +62,30 @@ test/                     Jest specs, one per source module
 3. **Extraction.** Each `.gql`/`.graphql` file is parsed with the `graphql`
    package. Operations and fragments come out with their name, type, file, and
    line number.
-4. **Detection.** For every operation, the usage patterns (by default the
-   GraphQL Code Generator conventions) expand into concrete search strings, and
-   the source files are searched for them as plain text. Fragments count as used
-   when an operation spreads them, directly or through other fragments, or when
-   a fragment pattern matches in source.
-5. **Reporting.** Findings go to stdout as tables, or as a single JSON document
+4. **Parsing.** Each source file is parsed once with `ts.createSourceFile`
+   into a module model: its import bindings, exports, every identifier in a
+   reference position with its line and column, its inline `gql`/`graphql`
+   document sites, and the words inside its strings. Declaration names, import
+   and export specifiers, object keys, comments and string text are never
+   references. A file the parser cannot take (a `.vue` named in
+   `sourceExtensions`) is reduced to its identifier tokens instead.
+5. **Resolution.** Every reference is resolved through named, default and
+   namespace imports, `export { a as b } from`, `export *` and barrel files to
+   a canonical name: the declaration it reaches, or the last known name when
+   the chain leaves the scanned files or meets a specifier nothing resolves.
+   Module resolution is the compiler's own, over an in-memory host that can
+   only land on a file the scan read, with `baseUrl` and `paths` from the
+   nearest tsconfig.
+6. **Detection.** For every operation, the usage patterns (by default the
+   GraphQL Code Generator conventions) expand into identifiers, and the
+   operation is used when some reference resolves to one of them. Fragments
+   count as used when an operation spreads them, directly or through other
+   fragments, or when a reference resolves to a fragment pattern. Inline
+   documents are used when the constant they are assigned to is referenced, by
+   binding identity. The generated-file heuristic and the confidence grades
+   read the same index; the opt-in field check is the one pass that still
+   reads the files as text.
+7. **Reporting.** Findings go to stdout as tables, or as a single JSON document
    with `--json`. Diagnostics, warnings, and GitHub Actions annotations go to
    stderr, so JSON output stays parseable. Exit code 0 means clean, 1 means
    findings, 2 means the run itself failed.

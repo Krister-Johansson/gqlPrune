@@ -5,14 +5,16 @@ Guidance for Claude Code (and humans) working in this repository.
 ## What gqlPrune is
 
 A schema-free CLI that finds **unused GraphQL operations and fragments**. It
-scans `.gql`/`.graphql` files for definitions, then string-searches the source
-tree to see whether each is referenced. No running server, schema, or
+scans `.gql`/`.graphql` files for definitions, then parses the source tree
+with the TypeScript compiler API and follows imports, re-exports and barrels
+to see whether each is referenced. No running server, schema, or
 introspection required — that schema-free angle is the project's main
 differentiator.
 
-The output is a list of **candidates, not proof**: a string match can produce
-false positives (dynamically built names, references in another repo, codegen
-output). Keep that framing in user-facing text.
+The output is a list of **candidates, not proof**: a static read of the source
+can produce false positives (names built at runtime, references in another
+repo or in a file type the parser does not take, codegen output). Keep that
+framing in user-facing text.
 
 ## Architecture
 
@@ -31,10 +33,14 @@ src/
     orphans.ts            findOrphanedFiles (whole-file dead documents)
     deprecated.ts         findDeprecatedUsages (opt-in, needs a local SDL)
     fields.ts             findUnusedFieldCandidates (opt-in `--fields`, advisory)
-    inline.ts             extractInlineDocuments (opt-in `--inline`, gql`...` in src)
+    inline.ts             extractInlineDocuments (opt-in `--inline`, sites from sourceModule)
+    sourceModule.ts       parseSourceModule: one file → imports, exports, references, sites
+    referenceIndex.ts     buildReferenceIndex: references resolved to canonical names
+    moduleResolver.ts     createCorpusResolver: ts.resolveModuleName over the read files
+    tsconfig.ts           loadCompilerOptions: baseUrl/paths from the nearest tsconfig
     codegen.ts            reads a GraphQL Code Generator config → derived defaults
-    jsLexer.ts            comment/string/bracket skipping shared by inline + codegen
-    confidence.ts         grade* helpers: bare-name search → high/medium/low
+    jsLexer.ts            comment/string/bracket skipping used by codegen
+    confidence.ts         grade* helpers over the index → high/medium/low
     usagePatterns.ts      DEFAULT_*_PATTERNS, buildUsagePatterns, expandPattern
     stringHelpers.ts      small string utilities
   types/                  *.d.ts interfaces (GqlPruneConfig, OperationInfo, ...)
@@ -45,6 +51,7 @@ test/                     Jest specs, one per source module
     codegen.e2e.test.ts   Derivation, precedence, degradation, init
     confidence.e2e.test.ts  Grades, reasons, --min-confidence
     interactions.e2e.test.ts  Every option at once, on one project
+    resolution.e2e.test.ts  Usage through re-exports, barrels, renames, defaults
     contract.e2e.test.ts  The JSON shape and the exit-code matrix, pinned
     completion.e2e.test.ts  The shell completion scripts
     packaging.e2e.test.ts   Pack, install, run the installed binary
