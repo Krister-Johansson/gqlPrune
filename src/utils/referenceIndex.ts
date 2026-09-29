@@ -77,23 +77,49 @@ class Resolver {
   private readonly locals = new Map<string, Canonical>();
   private readonly exportsMemo = new Map<string, Canonical | undefined>();
   private readonly targets = new Map<string, string | undefined>();
+  /**
+   * How many times a chain has been cut for running into itself. A result
+   * settled while a cut happened below it skipped a path an ancestor still
+   * explores, so it is not memoised; only complete answers are.
+   */
+  private cuts = 0;
 
   constructor(
     private readonly modules: Map<string, SourceModule>,
     private readonly resolver: ModuleResolver,
   ) {}
 
-  /** What a local name in a file stands for. */
-  local(path: string, local: string): Canonical {
-    const key = `${path}\0${local}`;
+  /**
+   * What a local name in a file stands for. `active` holds every local and
+   * export the current chain is still resolving, so a chain that comes back
+   * to one of them (two files importing a name from each other and
+   * re-exporting it) is cut instead of followed forever.
+   */
+  local(
+    path: string,
+    local: string,
+    active: Set<string> = new Set(),
+  ): Canonical {
+    const key = `local\0${path}\0${local}`;
     const memo = this.locals.get(key);
     if (memo !== undefined) return memo;
-    const result = this.resolveLocal(path, local);
-    this.locals.set(key, result);
+    if (active.has(key)) {
+      this.cuts += 1;
+      return outside(local, [{ file: path, name: local, note: 'cycle' }]);
+    }
+    active.add(key);
+    const cutsBefore = this.cuts;
+    const result = this.resolveLocal(path, local, active);
+    active.delete(key);
+    if (this.cuts === cutsBefore) this.locals.set(key, result);
     return result;
   }
 
-  private resolveLocal(path: string, local: string): Canonical {
+  private resolveLocal(
+    path: string,
+    local: string,
+    active: Set<string>,
+  ): Canonical {
     const module = this.modules.get(path);
     const binding = module?.imports.get(local);
     if (module === undefined || binding === undefined) {
@@ -122,27 +148,36 @@ class Resolver {
       binding.kind === 'default' ? 'default' : (binding.imported ?? local);
     return prepend(
       step,
-      this.export(target, exported, local) ??
+      this.export(target, exported, local, active) ??
         outside(missingName(exported, local), [
           { file: target, name: exported, note: 'missing' },
         ]),
     );
   }
 
-  /** What an exported name of a file stands for, or undefined when it has no such export. */
+  /**
+   * What an exported name of a file stands for, or undefined when it has no
+   * such export. An anonymous default export is known by the importer's name
+   * for it, so the memo is keyed by that name too for `default`.
+   */
   export(
     path: string,
     exported: string,
     fallback: string,
     active: Set<string> = new Set(),
   ): Canonical | undefined {
-    const key = `${path}\0${exported}`;
-    if (this.exportsMemo.has(key)) return this.exportsMemo.get(key);
-    if (active.has(key)) return undefined;
+    const key = `export\0${path}\0${exported}`;
+    const memoKey = exported === 'default' ? `${key}\0${fallback}` : key;
+    if (this.exportsMemo.has(memoKey)) return this.exportsMemo.get(memoKey);
+    if (active.has(key)) {
+      this.cuts += 1;
+      return undefined;
+    }
     active.add(key);
+    const cutsBefore = this.cuts;
     const result = this.resolveExport(path, exported, fallback, active);
     active.delete(key);
-    this.exportsMemo.set(key, result);
+    if (this.cuts === cutsBefore) this.exportsMemo.set(memoKey, result);
     return result;
   }
 
@@ -161,7 +196,8 @@ class Resolver {
     if (entry.kind === 'local') {
       if (entry.local === undefined)
         return { name: fallback, origin: path, steps: [] };
-      if (module.imports.has(entry.local)) return this.local(path, entry.local);
+      if (module.imports.has(entry.local))
+        return this.local(path, entry.local, active);
       return { name: entry.local, origin: path, steps: [] };
     }
     const step: ResolutionStep = {

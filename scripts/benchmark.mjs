@@ -15,7 +15,7 @@
 // Options: --cli <path> (required), --files N (default 2000), --operations M
 // (default 1000), --runs R (default 3, after one warm-up), --out <dir>.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -35,8 +35,14 @@ const out = path.resolve(
 );
 const cli = path.resolve(args.cli);
 
-if (!existsSync(path.join(out, 'graphql'))) {
+// A tree is reused only when a finished generation of the same size left its
+// stamp behind; an interrupted or differently sized one is regenerated.
+const stamp = path.join(out, 'benchmark.json');
+const wanted = JSON.stringify({ files, operations });
+if (readStamp(stamp) !== wanted) {
+  rmSync(out, { recursive: true, force: true });
   generateTree(out, files, operations);
+  writeFileSync(stamp, wanted);
 }
 
 const times = [];
@@ -73,6 +79,14 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function readStamp(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
 function scan(cliPath, cwd) {
   try {
     const stdout = execFileSync(
@@ -88,8 +102,9 @@ function scan(cliPath, cwd) {
     );
     return JSON.parse(stdout);
   } catch (error) {
-    // Exit code 1 means findings, which the dead half guarantees.
-    if (error.stdout) return JSON.parse(error.stdout);
+    // Exit code 1 means findings, which the dead half guarantees. Anything
+    // else is a failed scan, whatever it left on stdout.
+    if (error.status === 1 && error.stdout) return JSON.parse(error.stdout);
     throw error;
   }
 }
