@@ -2,9 +2,10 @@
 # Takes effect once the Socket GitHub App is installed on this repo.
 #
 # Context: the published surface is `dist/` + `CHANGELOG.md` only. The runtime
-# dependencies are graphql, inquirer, js-yaml and kleur. Any dependency alerts on
-# socket.dev that trace to dev/test tooling (jest, ts-jest, eslint, typescript)
-# never ship to consumers.
+# dependencies are graphql, typescript (parser only), the scoped inquirer
+# prompts, js-yaml, kleur and picomatch. Any dependency alerts on socket.dev
+# that trace to dev/test tooling (jest, ts-jest, eslint) never ship to
+# consumers.
 version: 2
 
 # Only run pull-request alert scans when a dependency manifest actually changes.
