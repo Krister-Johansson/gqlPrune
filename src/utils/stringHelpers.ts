@@ -77,3 +77,18 @@ export function wholeWordPattern(text: string, flags?: string): RegExp {
     : '';
   return new RegExp(`${before}${body}${after}`, `u${flags ?? ''}`);
 }
+
+/** Every maximal run of identifier characters, wherever it starts. */
+const IDENTIFIER_WORD = new RegExp(`${IDENTIFIER_CLASS}+`, 'gu');
+
+/**
+ * The identifier-shaped words inside a piece of text, for example the ones
+ * written in a string literal. Used to grade how much a name is mentioned
+ * without treating a string as a reference.
+ *
+ * @param {string} text - Any text, typically the contents of a string literal.
+ * @returns {Set<string>} - The distinct words, in order of first appearance.
+ */
+export function identifierWords(text: string): Set<string> {
+  return new Set(text.match(IDENTIFIER_WORD) ?? []);
+}
