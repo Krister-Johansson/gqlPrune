@@ -427,6 +427,18 @@ class Walker {
     ) {
       this.propertyName(node.name);
       this.children(node, node.name);
+    } else if (
+      ts.isBinaryExpression(node) &&
+      commonJsExportName(node) !== undefined
+    ) {
+      const name = commonJsExportName(node) as string;
+      this.declare(name);
+      this.module.exports.set(name, {
+        kind: 'local',
+        exported: name,
+        local: name,
+      });
+      this.visit(node.right);
     } else if (ts.isShorthandPropertyAssignment(node)) {
       this.reference(node.name, 'shorthand');
       this.children(node, node.name);
@@ -748,6 +760,22 @@ class Walker {
     }
     this.module.inlineSites.push(site);
   }
+}
+
+/** The name assigned by `exports.X = ...` or `module.exports.X = ...`, a CommonJS export. */
+function commonJsExportName(node: ts.BinaryExpression): string | undefined {
+  if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+  const target = node.left;
+  if (!ts.isPropertyAccessExpression(target) || !ts.isIdentifier(target.name))
+    return undefined;
+  const object = target.expression;
+  const isExports =
+    (ts.isIdentifier(object) && object.text === 'exports') ||
+    (ts.isPropertyAccessExpression(object) &&
+      ts.isIdentifier(object.expression) &&
+      object.expression.text === 'module' &&
+      object.name.text === 'exports');
+  return isExports ? target.name.text : undefined;
 }
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {

@@ -380,6 +380,27 @@ describe('parseSourceModule', () => {
       ).toEqual(['useQuery', 'GetUserDocument']);
     });
 
+    it('records exports.X = and module.exports.X = as exports, not references', () => {
+      const module = parseSourceModule(
+        'a.cjs',
+        'exports.useGetUserQuery = () => 1;\nmodule.exports.GetUserDocument = doc;\nother.useX = 1;',
+      );
+
+      expect([...module.exports.keys()]).toEqual([
+        'useGetUserQuery',
+        'GetUserDocument',
+      ]);
+      expect([...module.declarations]).toEqual([
+        'useGetUserQuery',
+        'GetUserDocument',
+      ]);
+      expect(module.references.map((ref) => ref.name)).toEqual([
+        'doc',
+        'other',
+        'useX',
+      ]);
+    });
+
     it('does not list export specifiers as references', () => {
       const module = parseSourceModule(
         'a.ts',
