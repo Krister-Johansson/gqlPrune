@@ -1,0 +1,36 @@
+# Asks Context7 (https://context7.com/krister-johansson/gqlprune) to re-index
+# the repository whenever a GitHub release is published, so the docs that
+# coding agents fetch for gqlPrune follow each release instead of Context7's
+# popularity-based refresh schedule. What gets indexed is governed by
+# context7.json at the repository root.
+#
+# Needs the CONTEXT7_API_KEY repository secret: an API key from the Context7
+# dashboard (https://context7.com/dashboard). It can only trigger refreshes of
+# libraries the account owns; see docs/security-policies.md.
+name: context7-refresh
+
+on:
+  release:
+    types: [published]
+  # Manual refresh, e.g. after a README-only change lands on main between releases.
+  workflow_dispatch:
+
+# No checkout and no GitHub API call, so the job needs no token at all.
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger a Context7 refresh
+        env:
+          CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+        run: |
+          if [ -z "$CONTEXT7_API_KEY" ]; then
+            echo "::error::CONTEXT7_API_KEY is not set; add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          curl --silent --show-error --fail-with-body -X POST https://context7.com/api/v1/refresh \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $CONTEXT7_API_KEY" \
+            -d '{"libraryName": "/krister-johansson/gqlprune"}'

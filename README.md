@@ -11,6 +11,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Krister-Johansson/gqlPrune/badge)](https://scorecard.dev/viewer/?uri=github.com/Krister-Johansson/gqlPrune)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13364/badge)](https://www.bestpractices.dev/projects/13364)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/13364/baseline)](https://www.bestpractices.dev/projects/13364)
+[![Context7](https://img.shields.io/badge/Context7-verified-2ea44f)](https://context7.com/krister-johansson/gqlprune)
 
 `gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
 
