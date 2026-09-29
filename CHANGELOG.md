@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [3.1.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v3.0.0...gqlprune-v3.1.0) (2026-09-29)
+
+
+### Features
+
+* **scan:** add the module model and reference index for the AST engine ([#191](https://github.com/Krister-Johansson/gqlPrune/issues/191)) ([d76ed39](https://github.com/Krister-Johansson/gqlPrune/commit/d76ed39e4639194a0ee2b749ed92aeee10c4f408)), closes [#190](https://github.com/Krister-Johansson/gqlPrune/issues/190)
+
 ## [3.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.12.0...gqlprune-v3.0.0) (2026-09-04)
 
 
