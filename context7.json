@@ -1,0 +1,40 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "gqlPrune",
+  "description": "Schema-free CLI that finds unused GraphQL operations, fragments, and orphaned .gql files by searching source for their generated names.",
+  "folders": [],
+  "excludeFolders": [
+    "test",
+    "coverage",
+    "dist",
+    "node_modules",
+    ".claude",
+    ".vscode",
+    "docs/research"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "CODE_OF_CONDUCT.md",
+    "NOTICES.md",
+    "package-lock.json"
+  ],
+  "rules": [
+    "gqlPrune reports candidates, not proof. Review each finding before deleting an operation, fragment, or file.",
+    "Set usagePatterns and fragmentUsagePatterns in gqlPrune.config.yaml when the project does not use the GraphQL Code Generator hook and Document naming. Without them, used operations are reported as unused.",
+    "In scripts and CI, pass --json. Stdout then carries only the JSON report and diagnostics go to stderr.",
+    "Pass --inline to include gql`...` documents embedded in TypeScript and JavaScript source. By default only .gql and .graphql files are read.",
+    "gqlPrune 2.x and later need Node.js 20 or newer. The command is gqlprune, lowercase."
+  ],
+  "previousVersions": [
+    {
+      "tag": "gqlprune-v2.12.0"
+    },
+    {
+      "tag": "v1.2.2"
+    }
+  ]
+}
