@@ -38,16 +38,21 @@ The project is designed to hold as few secrets as possible:
 - Publishing needs no stored credential. npm releases use OIDC trusted
   publishing from GitHub Actions, so there is no npm token to store, leak, or
   rotate.
-- The only standing secret is the Codecov upload token, kept as a GitHub
-  Actions repository secret. It can only upload coverage reports; it grants no
-  access to code, accounts, or publishing.
+- The Codecov upload token is kept as a GitHub Actions repository secret. It
+  can only upload coverage reports; it grants no access to code, accounts, or
+  publishing.
+- The Context7 API key is kept as a GitHub Actions repository secret and used
+  by `context7-refresh.yml` to ask Context7 to re-index the public repository
+  after each release. It can only trigger refreshes of libraries the Context7
+  account owns; it grants no access to code, accounts, or publishing.
 - Secrets are never hard-coded or committed. GitHub secret scanning runs on
   the repository, and local artifacts are gitignored.
 - Access to repository secrets requires admin access to the repository, which
   is governed by the escalated-permissions policy in
   [GOVERNANCE.md](../GOVERNANCE.md).
-- Rotation: the Codecov token is rotated from the Codecov dashboard whenever
-  exposure is suspected and whenever repository access changes. A secret that
+- Rotation: the Codecov token is rotated from the Codecov dashboard, and the
+  Context7 key from the Context7 dashboard, whenever exposure is suspected and
+  whenever repository access changes. A secret that
   gains broader scope than described here must be documented in this section
   first.
 
