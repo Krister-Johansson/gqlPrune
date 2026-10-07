@@ -15,6 +15,9 @@ describe('cli dispatch', () => {
     } else {
       process.env.GITHUB_ACTIONS = realGHA;
     }
+    // Restores every console and fetch spy, also when an assertion threw
+    // before the test's own mockRestore() ran.
+    jest.restoreAllMocks();
     jest.resetModules();
     process.exitCode = 0; // error paths set exitCode; don't leak to the runner
   });
@@ -32,7 +35,6 @@ describe('cli dispatch', () => {
     let mocks: {
       generateConfig: jest.Mock;
       mainFunction: jest.Mock;
-      notifyUpdate: jest.Mock;
     };
     jest.isolateModules(() => {
       jest.doMock('../src/core/configGenerator', () => ({
@@ -47,22 +49,21 @@ describe('cli dispatch', () => {
         ...jest.requireActual('../src/core/gqlPruner'),
         mainFunction: jest.fn(),
       }));
-      jest.doMock('../src/utils/updateNotifier', () => ({
-        notifyUpdate: jest.fn(),
-      }));
       // pkgInfo reads package.json via import.meta (ESM-only); stub it so the
       // CommonJS test transform never touches it.
       jest.doMock('../src/utils/pkgInfo', () => ({
-        pkg: { name: 'gqlprune', version: '0.0.0-test' },
+        pkg: {
+          name: 'gqlprune',
+          version: '0.0.0-test',
+          homepage: 'https://example.test/gqlprune#readme',
+        },
       }));
       const cfg = require('../src/core/configGenerator');
       const pruner = require('../src/core/gqlPruner');
-      const notifier = require('../src/utils/updateNotifier');
       require('../src/cli');
       mocks = {
         generateConfig: cfg.generateConfig,
         mainFunction: pruner.mainFunction,
-        notifyUpdate: notifier.notifyUpdate,
       };
     });
     // @ts-expect-error assigned synchronously inside isolateModules
@@ -79,13 +80,10 @@ describe('cli dispatch', () => {
     const logSpy = jest
       .spyOn(console, 'log')
       .mockImplementation(() => undefined);
-    const { mainFunction, generateConfig, notifyUpdate } = runCli([
-      '--version',
-    ]);
+    const { mainFunction, generateConfig } = runCli(['--version']);
     expect(logSpy).toHaveBeenCalledWith('0.0.0-test');
     expect(mainFunction).not.toHaveBeenCalled();
     expect(generateConfig).not.toHaveBeenCalled();
-    expect(notifyUpdate).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });
 
@@ -100,12 +98,24 @@ describe('cli dispatch', () => {
     expect(generateConfig).not.toHaveBeenCalled();
   });
 
-  it('checks for updates after running', () => {
-    const { notifyUpdate } = runCli([]);
-    expect(notifyUpdate).toHaveBeenCalledWith(
-      { name: 'gqlprune', version: '0.0.0-test' },
-      { json: false },
+  it('links the package homepage at the end of --help', () => {
+    const logSpy = jest
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    runCli(['--help']);
+    const help = String(logSpy.mock.calls[0][0]);
+    expect(help.split('\n').at(-1)).toBe(
+      'Docs: https://example.test/gqlprune#readme',
     );
+    logSpy.mockRestore();
+  });
+
+  it('makes no network request on a scan', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+    runCli([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it('passes --json through to the pruner', () => {
@@ -162,11 +172,10 @@ describe('cli dispatch', () => {
     const logSpy = jest
       .spyOn(console, 'log')
       .mockImplementation(() => undefined);
-    const { mainFunction, generateConfig, notifyUpdate } = runCli(['--help']);
+    const { mainFunction, generateConfig } = runCli(['--help']);
     expect(logSpy.mock.calls.flat().join('\n')).toContain('Usage:');
     expect(mainFunction).not.toHaveBeenCalled();
     expect(generateConfig).not.toHaveBeenCalled();
-    expect(notifyUpdate).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     logSpy.mockRestore();
   });
@@ -175,12 +184,11 @@ describe('cli dispatch', () => {
     const errorSpy = jest
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
-    const { mainFunction, notifyUpdate } = runCli(['--jsn']);
+    const { mainFunction } = runCli(['--jsn']);
     const errs = errorSpy.mock.calls.flat().join('\n');
     expect(errs).toContain('Unknown flag: --jsn');
     expect(errs).toContain('--help');
     expect(mainFunction).not.toHaveBeenCalled();
-    expect(notifyUpdate).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(2);
     errorSpy.mockRestore();
   });
@@ -268,15 +276,10 @@ describe('cli dispatch', () => {
     const logSpy = jest
       .spyOn(console, 'log')
       .mockImplementation(() => undefined);
-    const { mainFunction, generateConfig, notifyUpdate } = runCli([
-      'completion',
-      'zsh',
-    ]);
+    const { mainFunction, generateConfig } = runCli(['completion', 'zsh']);
     expect(logSpy.mock.calls.flat().join('\n')).toContain('compdef');
     expect(mainFunction).not.toHaveBeenCalled();
     expect(generateConfig).not.toHaveBeenCalled();
-    // The script is eval'd at shell startup; keep that path free of chatter.
-    expect(notifyUpdate).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     logSpy.mockRestore();
   });

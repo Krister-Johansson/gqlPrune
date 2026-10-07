@@ -42,7 +42,6 @@ src/
     jsLexer.ts            The comment/string lexer codegen.ts reads a config with
     completions.ts        Shell completion scripts
     usagePatterns.ts      Default patterns and pattern expansion
-    updateNotifier.ts     Once-a-day version check against the npm registry
     stringHelpers.ts      Small string utilities
     pkgInfo.ts            Reads the package's own name and version
   types/                  Shared interfaces (GqlPruneConfig, OperationInfo, ...)
@@ -112,5 +111,4 @@ documents), `typescript` (parsing source files; only `createSourceFile` and the
 module resolver are used, never a program or a type checker), `js-yaml`
 (config), `picomatch` (exclude globs), `kleur` (terminal color), and
 `@inquirer/checkbox`, `@inquirer/confirm` and `@inquirer/input` (the prompts
-`init` uses). The update check uses Node's built-in `fetch` rather than a
-dependency.
+`init` uses). gqlPrune makes no network requests.

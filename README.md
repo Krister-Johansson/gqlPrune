@@ -26,6 +26,7 @@ Usage detection changed engines. gqlPrune 3.x decided "used" with a whole-word t
 - A usage pattern must expand to an identifier. `use{Name}{Type}` and `{Name}Document` do; a pattern such as `{Name}.graphql` is rejected with exit code 2, because usage is decided by references to identifiers and such a pattern could never match.
 - A source file that does not fully parse is read as far as it parsed, and the run warns and names it.
 - Files outside the eight JavaScript and TypeScript extensions, such as a `.vue` file named in `sourceExtensions`, are scanned by their tokens without import resolution; see [Single-file components](#single-file-components).
+- gqlPrune makes no network requests. The once-a-day npm version check and its stderr notice are gone, so `NO_UPDATE_NOTIFIER` has no effect; Dependabot or `npm outdated` report new versions.
 - `--verbose` cites the file, line and column of the reference that decided a used operation, plus the import chain it went through, and the closing reminder line now reads "These are candidates from a static scan."
 
 The human-readable sections, the exit codes, every configuration key and every JSON key are unchanged.
@@ -587,10 +588,6 @@ jobs:
 ```
 
 Drop `--min-confidence high` to fail on every finding. The annotations need no extra step: `GITHUB_ACTIONS` is set in every job, so they are on.
-
-### Update notifications
-
-gqlPrune checks npm (cached, at most once a day) and prints a one-line notice to stderr when a newer version is available. It stays silent in CI and when stdout isn't a TTY, never writes to stdout (so `--json` stays clean), and never affects the exit code. Opt out with `NO_UPDATE_NOTIFIER=1`; the check is also skipped whenever `CI` is set.
 
 ### Shell completion
 
