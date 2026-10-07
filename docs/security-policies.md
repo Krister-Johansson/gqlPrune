@@ -73,7 +73,7 @@ in [#101](https://github.com/Krister-Johansson/gqlPrune/pull/101).
 
 ## Static analysis (SAST)
 
-CodeQL scans every pull request and push to `main`, and runs weekly
+CodeQL scans every pull request to `main` and every push to `main`, and runs weekly
 (`.github/workflows/codeql.yml`, javascript-typescript plus actions). It skips
 `test/fixtures`, which holds deliberately broken input data for the e2e suite
 (`.github/codeql/codeql-config.yml`). ESLint and TypeScript
