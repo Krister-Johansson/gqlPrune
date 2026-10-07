@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v3.0.0...gqlprune-v4.0.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scan:** usage is detected by parsing source files with the TypeScript compiler API and resolving imports, re-exports, barrels and renamed bindings, instead of a whole-word string search. A name in a comment, a string or an unread import no longer counts as usage. The confidence reason `source-mention` is replaced by `name-referenced` and `string-mention` (both low). Usage patterns must expand to identifiers. `typescript` is a runtime dependency. Files outside the eight JS/TS extensions get lexical detection without import resolution. Refs ADR 0001.
+
+### Features
+
+* **scan:** add the module model and reference index for the AST engine ([#191](https://github.com/Krister-Johansson/gqlPrune/issues/191)) ([d76ed39](https://github.com/Krister-Johansson/gqlPrune/commit/d76ed39e4639194a0ee2b749ed92aeee10c4f408)), closes [#190](https://github.com/Krister-Johansson/gqlPrune/issues/190)
+* **scan:** replace the string search with TypeScript AST usage detection ([#192](https://github.com/Krister-Johansson/gqlPrune/issues/192)) ([a6b440a](https://github.com/Krister-Johansson/gqlPrune/commit/a6b440a011629436235f209da4cc2ecfa83830f7)), closes [#142](https://github.com/Krister-Johansson/gqlPrune/issues/142)
+
+
+### Bug Fixes
+
+* **cli:** remove the npm update check and the createRequire use that Socket flags ([#199](https://github.com/Krister-Johansson/gqlPrune/issues/199)) ([eeb0761](https://github.com/Krister-Johansson/gqlPrune/commit/eeb0761b443e9bbc652fff328cca75887f4e1f65)), closes [#197](https://github.com/Krister-Johansson/gqlPrune/issues/197)
+
 ## [3.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v2.12.0...gqlprune-v3.0.0) (2026-09-04)
 
 
