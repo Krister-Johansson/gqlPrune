@@ -181,6 +181,9 @@ CodeRabbit auto-reviews the PR. When its comments land:
 - When working through a queue of PRs, space them out; several PRs opened within
   the same hour can still exhaust the budget.
 
+[`docs/coderabbit.md`](docs/coderabbit.md) lists what CodeRabbit flags per path,
+the pre-merge checks, the tools it runs and its commands.
+
 ### 6. Keep the board up to date
 
 Treat the [project board](https://github.com/users/Krister-Johansson/projects/3)
