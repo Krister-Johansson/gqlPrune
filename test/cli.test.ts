@@ -15,6 +15,9 @@ describe('cli dispatch', () => {
     } else {
       process.env.GITHUB_ACTIONS = realGHA;
     }
+    // Restores every console and fetch spy, also when an assertion threw
+    // before the test's own mockRestore() ran.
+    jest.restoreAllMocks();
     jest.resetModules();
     process.exitCode = 0; // error paths set exitCode; don't leak to the runner
   });
