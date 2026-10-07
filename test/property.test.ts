@@ -4,10 +4,8 @@
 import fc from 'fast-check';
 import { capitalizeFirstLetter } from '../src/utils/stringHelpers';
 import { buildUsagePatterns, expandPattern } from '../src/utils/usagePatterns';
-import {
-  createExcludeMatcher,
-  isOperationUsedInContents,
-} from '../src/utils/fileUtils';
+import { createExcludeMatcher } from '../src/utils/fileUtils';
+import { indexOf } from './support';
 import { createConfigExcludeMatcher } from '../src/core/gqlPruner';
 import {
   findUnusedFragments,
@@ -180,29 +178,42 @@ describe('property-based invariants', () => {
     });
   });
 
-  describe('isOperationUsedInContents', () => {
-    // Anything that cannot continue a JavaScript identifier, so the pattern
-    // stands as its own word wherever it is dropped in.
-    const separatorArb = fc.stringMatching(/^[ ;(),.[\]{}=<>+*/!?:'"`\n\t-]*$/);
+  describe('reference index', () => {
+    // A syntax tree, not a text search: the pattern is a reference in every
+    // expression shape however it is spaced, commented or padded, and never
+    // when it is welded into a longer identifier.
+    const shapes: ((name: string) => string)[] = [
+      (name) => `${name};`,
+      (name) => `(${name});`,
+      (name) => `const x = ${name};`,
+      (name) => `run(${name});`,
+      (name) => `const xs = [${name}];`,
+      (name) => `const o = { ${name} };`,
+      (name) => `api.${name}();`,
+      (name) => `${name}.field;`,
+      (name) => `if (${name}) {}`,
+      (name) => `let t: ${name};`,
+    ];
+    const shapeArb = fc.constantFrom(...shapes);
+    const paddingArb = fc.stringMatching(/^(?: |\n|\t|\/\/ c\n|\/\* c \*\/)*$/);
 
-    it('finds a pattern standing as its own word, and only then', () => {
+    it('finds a pattern in every expression shape, and only then', () => {
       fc.assert(
         fc.property(
           identifierArb,
-          separatorArb,
-          separatorArb,
-          fc.array(separatorArb, { maxLength: 4 }),
-          (pattern, before, after, otherContents) => {
-            const embedded = `${before}${pattern}${after}`;
+          shapeArb,
+          paddingArb,
+          paddingArb,
+          (pattern, shape, before, after) => {
+            const embedded = `${before}${shape(pattern)}${after}`;
             expect(
-              isOperationUsedInContents(
-                [pattern],
-                [...otherContents, embedded],
-              ),
-            ).toBe(true);
-            expect(isOperationUsedInContents([pattern], otherContents)).toBe(
-              false,
-            );
+              indexOf({ 'a.ts': embedded }).firstReference([pattern]),
+            ).toBeDefined();
+            expect(
+              indexOf({ 'a.ts': `${before}${after}` }).firstReference([
+                pattern,
+              ]),
+            ).toBeUndefined();
           },
         ),
       );
@@ -210,16 +221,25 @@ describe('property-based invariants', () => {
 
     it('never finds a pattern welded into a longer identifier', () => {
       fc.assert(
-        fc.property(identifierArb, identifierArb, (pattern, glued) => {
-          // Either side is enough to make it a different identifier, which is
-          // what stops a short operation name hiding inside a longer one.
-          expect(
-            isOperationUsedInContents([pattern], [`${glued}${pattern}`]),
-          ).toBe(false);
-          expect(
-            isOperationUsedInContents([pattern], [`${pattern}${glued}`]),
-          ).toBe(false);
-        }),
+        fc.property(
+          identifierArb,
+          identifierArb,
+          shapeArb,
+          (pattern, glued, shape) => {
+            // Either side is enough to make it a different identifier, which is
+            // what stops a short operation name hiding inside a longer one.
+            expect(
+              indexOf({ 'a.ts': shape(`${glued}${pattern}`) }).firstReference([
+                pattern,
+              ]),
+            ).toBeUndefined();
+            expect(
+              indexOf({ 'a.ts': shape(`${pattern}${glued}`) }).firstReference([
+                pattern,
+              ]),
+            ).toBeUndefined();
+          },
+        ),
       );
     });
   });
@@ -328,10 +348,12 @@ describe('property-based invariants', () => {
                 document: null,
               },
             ];
-            const contents = [
-              `import { ${capitalizeFirstLetter(referenced)}FragmentDoc } from './gql';`,
-            ];
-            const unused = findUnusedFragmentsInCorpus(parsed, contents);
+            // An import alone is not a reference; the constant has to be read.
+            const doc = `${capitalizeFirstLetter(referenced)}FragmentDoc`;
+            const index = indexOf({
+              'a.ts': `import { ${doc} } from './gql';\nuseFragment(${doc});`,
+            });
+            const unused = findUnusedFragmentsInCorpus(parsed, index);
             expect(
               unused.some((fragment) => fragment.name === referenced),
             ).toBe(false);

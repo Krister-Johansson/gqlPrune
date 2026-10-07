@@ -1,0 +1,10 @@
+# Seven operations whose names appear in src/dead in a shape that is not a
+# reference, one file per shape. Every one must be reported unused; the grade
+# says what kind of mention, if any, was found.
+query GetImportOnly { item(id: 11) { id } }
+query GetDeclaredOnly { item(id: 12) { id } }
+query GetCommentedName { item(id: 13) { id } }
+query GetPatternInString { item(id: 14) { id } }
+query GetNameInString { item(id: 15) { id } }
+query GetNameReferenced { item(id: 16) { id } }
+query GetObjectKey { item(id: 17) { id } }

@@ -13,7 +13,22 @@
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/13364/baseline)](https://www.bestpractices.dev/projects/13364)
 [![Context7](https://img.shields.io/badge/Context7-verified-2ea44f)](https://context7.com/krister-johansson/gqlprune)
 
-`gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then checks whether each operation is referenced in your TypeScript/JavaScript source and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
+`gqlPrune` is a schema-free CLI: it finds unused GraphQL operations (queries, mutations, subscriptions) and unused fragments with no schema file, no running server, and no introspection step. It scans your `.gql`/`.graphql` files, then parses your TypeScript/JavaScript source and follows imports, re-exports and barrel files to check whether each operation is referenced, and whether each fragment is spread by an operation or referenced in source. What it reports are candidates for you to review rather than proof; see [Limitations](#limitations).
+
+## Migrating from 3.x to 4.0
+
+Usage detection changed engines. gqlPrune 3.x decided "used" with a whole-word text search over `srcDir`; 4.0 parses each source file with the TypeScript compiler and resolves imports, re-exports, barrel files, renamed and default imports before it judges an operation. What that means for an existing project:
+
+- `typescript` is installed with gqlPrune. Only its parser and module resolver run; no program is created and no type checking happens, and your own TypeScript version is untouched.
+- A name in a comment, in a string or in a template literal no longer counts as usage. An `import` that nothing reads does not count either, and a declaration of a pattern name never did on purpose. Expect an operation that was "used" only that way to be reported now, graded `low` when the bare name is still mentioned somewhere.
+- Usage through a re-export, a barrel `index.ts`, a renamed import (`import { GetUserDocument as Doc }`), a default import or a namespace member is found, so some findings you had to dismiss by hand disappear.
+- The JSON `reason` vocabulary changed. `source-mention` is gone; `name-referenced` (an identifier with the exact bare name is read somewhere) and `string-mention` (an exact string literal holds it) replace it, both graded `low`. `name-absent`, `generated-only` and `heuristic-cap` are unchanged, and no key changed shape. A script that switches on `reason` needs the two new values.
+- A usage pattern must expand to an identifier. `use{Name}{Type}` and `{Name}Document` do; a pattern such as `{Name}.graphql` is rejected with exit code 2, because usage is decided by references to identifiers and such a pattern could never match.
+- A source file that does not fully parse is read as far as it parsed, and the run warns and names it.
+- Files outside the eight JavaScript and TypeScript extensions, such as a `.vue` file named in `sourceExtensions`, are scanned by their tokens without import resolution; see [Single-file components](#single-file-components).
+- `--verbose` cites the file, line and column of the reference that decided a used operation, plus the import chain it went through, and the closing reminder line now reads "These are candidates from a static scan."
+
+The human-readable sections, the exit codes, every configuration key and every JSON key are unchanged.
 
 ## Migrating from 2.x to 3.0
 
@@ -46,7 +61,7 @@ every configuration key are unchanged.
 
 ## How it detects usage
 
-An operation counts as used if any of the search strings derived from its name appears in your source files. By default `gqlPrune` looks for the conventions emitted by [GraphQL Code Generator](https://the-guild.dev/graphql/codegen) (the `typescript-react-apollo` / near-operation-file presets):
+An operation counts as used when something in your source references an identifier that resolves to one of the names derived from the operation. gqlPrune parses every `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts` file with the TypeScript compiler (a parse only: nothing is executed and no type checker runs) and follows imports, `export ... from`, `export *`, barrel files, renamed and default imports back to the exported name. A call, an argument, a property access (`api.useGetUserQuery()`), a type annotation and a JSX tag are references; an unread `import`, a declaration, an object key, a comment and a string are not. By default `gqlPrune` looks for the conventions emitted by [GraphQL Code Generator](https://the-guild.dev/graphql/codegen) (the `typescript-react-apollo` / near-operation-file presets):
 
 For an operation `query GetUser`, the defaults match:
 
@@ -89,13 +104,13 @@ Two shapes are recognized, the ones graphql-tag, Apollo, urql and the GraphQL Co
 - Tagged templates: ``gql`query GetUser { ... }` `` and ``graphql`...` ``, including a tag reached through a member expression such as ``api.gql`...` ``.
 - Helper calls taking a single string argument: `graphql('query GetUser { ... }')`, `graphql("...")`, ``graphql(`...`)``, and the same for `gql(...)`.
 
-Recognition is textual: gqlPrune tracks where comments and strings begin and end, so a tag written inside one is skipped and commented-out code produces no findings, but it does not parse JavaScript, so an unusual construct can still be missed or misread.
+Documents are found on the parsed syntax tree, so a tag written inside a comment or a string is never a document and commented-out code produces no findings.
 
 Each embedded document is parsed on its own and located against the file it sits in, so a finding points at the source file and the real line inside it (`src/User.tsx:12` rather than line 1). A body that does not parse, such as a half-written template or an operation name built by interpolation, is skipped and counted; `--verbose` prints how many. Interpolations like `${UserFieldsFragmentDoc}` are blanked before parsing, which is how graphql-tag treats them anyway, and the names inside them still count as references to the documents they name. Fragments resolve across both worlds: a fragment defined in a `.tsx` file and spread from a `.gql` operation counts as used, and so does the reverse.
 
-The pass is off by default because turning it on changes what a scan is. A source file becomes both a place where documents are defined and part of the text searched for usage, and those two roles have to be kept apart or every document would find itself. gqlPrune keeps them apart by blanking each document, together with the statement that assigns it, out of the text it searches. So a document never counts as its own usage, and `const GetUserDocument = graphql('query GetUser { ... }')` does not make `GetUser` look used through the `{Name}Document` pattern when nothing reads the constant.
+The pass is off by default because turning it on changes what a scan is. A source file becomes both a place where documents are defined and a place where usage is looked for, and those two roles have to be kept apart or every document would find itself. The syntax tree keeps them apart: a document's body is a string literal, never an identifier, and the constant it is assigned to is a declaration, never a reference. So a document never counts as its own usage, and `const GetUserDocument = graphql('query GetUser { ... }')` does not make `GetUser` look used through the `{Name}Document` pattern when nothing reads the constant.
 
-That constant is a usage signal in its own right. Under the client preset, `const q = graphql('query GetUser { ... }')` followed by `useQuery(q)` never writes the operation name outside the document, so no usage pattern can match it. gqlPrune therefore counts an inline document as used when the constant it is assigned to appears anywhere else in the scanned source, matched as a whole word. Read that with the same caution as everything else here: a constant called `query`, `doc` or `q` matches something unrelated in any real codebase and can hide a genuine finding, so give a document a distinctive name if you want the check to mean much for it.
+That constant is a usage signal in its own right. Under the client preset, `const q = graphql('query GetUser { ... }')` followed by `useQuery(q)` never writes the operation name outside the document, so no usage pattern can match it. gqlPrune therefore counts an inline document as used when the constant it is assigned to is referenced, in its own file or through an import from another one. The reference has to resolve to that constant: two files that both call their document `query` do not vouch for each other.
 
 Whole-file [orphan detection](#orphaned-files) never applies to a source file. A `.tsx` component whose only query is unused is not a dead file, and pointing you at it for deletion would be bad advice, so only `.gql`/`.graphql` files are ever listed as orphaned.
 
@@ -115,7 +130,7 @@ A key becomes a candidate when it appears **nowhere** in any scanned source file
 
 The list is advisory. It prints after the other sections, adds `unusedFields` to the JSON report, emits one `::warning` annotation per key, and never changes the exit code.
 
-Read it as a starting shortlist, not a verdict. A string search cannot see how your code consumes data, and this check errs in both directions:
+Read it as a starting shortlist, not a verdict. The field check is still a text search over the source files, the one place in gqlPrune that is, and a text search cannot see how your code consumes data, so this check errs in both directions:
 
 - It flags fields you do use. A field reached through a computed key (`user[fieldKey]`, where the key comes from a variable or a list of column names), spread into props (`<Avatar {...user} />`), serialized whole, or consumed by a different repository never appears by name in `srcDir`. Renaming while destructuring is safe, though: `const { avatarUrl: avatar } = user` still writes `avatarUrl` out, so the match finds it.
 - It stays quiet about fields you don't use. A field with a common name (`id`, `name`, `title`, `url`) matches somewhere in any real codebase, so it can never be flagged, even when it is genuinely dead.
@@ -124,7 +139,7 @@ Removing a field also changes the response shape for every consumer of that oper
 
 ### Avoiding false "all clear" results
 
-Because usage is detected by string-matching `srcDir`, GraphQL Code Generator output that lives inside `srcDir` is a trap: a single generated file (such as `src/gql/graphql.ts`) references every operation, so everything looks used and nothing is ever reported unused, with no error to tell you so.
+GraphQL Code Generator output that lives inside `srcDir` is a trap: a single generated file (such as `src/gql/graphql.ts`) references every `{Name}Document` constant from inside the hook it declares for it, so everything looks used and nothing is ever reported unused, with no error to tell you so.
 
 gqlPrune guards against this. When one source file alone references most of your operations, it prints a warning naming the file and pointing you at `exclude`:
 
@@ -185,15 +200,16 @@ If the file named by `schemaFile` cannot be read or is not valid SDL, the run st
 
 Every candidate carries a grade that answers one question: how much evidence is there that something references the definition anyway, even though no usage pattern matched?
 
-That evidence comes from a second search. The scan itself looks for the strings your usage patterns expand to, such as `useGetUserQuery` and `GetUserDocument`. The grading also looks for the bare definition name, `GetUser`, as a whole word, which the pattern search never does.
+That evidence comes from the same parse. The scan itself looks for references to the identifiers your usage patterns expand to, such as `useGetUserQuery` and `GetUserDocument`. The grading also looks for the bare definition name, `GetUser`, both as an identifier and inside string literals, which the usage check never does.
 
-- **high**: the name appears nowhere in the scanned source. Nothing in `srcDir` mentions it at all.
-- **medium**: the name appears only in files that look generated (see [Avoiding false "all clear" results](#avoiding-false-all-clear-results)), so the mention is probably codegen output rather than hand-written use.
-- **low**: the name appears in ordinary source, but never in a form a usage pattern recognizes. Something refers to that identifier, so a dynamic lookup or a naming convention gqlPrune does not know about is plausible.
+- **high** (`name-absent`): the name appears nowhere in the scanned source, neither as an identifier nor inside a string.
+- **medium** (`generated-only`): the name appears only in files that look generated (see [Avoiding false "all clear" results](#avoiding-false-all-clear-results)), so the mention is probably codegen output rather than hand-written use.
+- **low** (`name-referenced`): an identifier with exactly that name is read in ordinary source, but nothing that resolves to a usage pattern. A naming convention gqlPrune does not know about, or a lookup by name, is plausible; check `usagePatterns`.
+- **low** (`string-mention`): the name appears inside a string in ordinary source. A registry key or a telemetry event may be building the reference at runtime; check where that string goes.
 
 Unused operations, unused fragments and orphaned files are all graded. An orphaned file takes the lowest grade among the definitions it holds, because one definition that still looks live undermines the verdict on the whole file.
 
-Field candidates never rise above medium, whatever the name search finds. They come from a name-absence heuristic that cannot see a field read through a rename, a spread, or a computed key, so calling one of them high confidence would claim more than the check can know.
+Field candidates never rise above medium (`heuristic-cap`), whatever the name evidence says. They come from a name-absence heuristic that cannot see a field read through a rename, a spread, or a computed key, so calling one of them high confidence would claim more than the check can know.
 
 Deprecated selections carry no grade. They are validated against a real schema, so they are facts rather than candidates.
 
@@ -220,13 +236,17 @@ gqlPrune reports whole operations and fragments that nothing references. The def
 
 ### Results are candidates, not proof
 
-Usage detection is a string search over `srcDir`. An operation is reported as unused when none of its search strings appear there, and that is not the same as the operation being unreachable. Three cases produce false positives:
+Usage detection is a static read of `srcDir`: the source is parsed, never run. An operation is reported as unused when no reference resolves to one of its identifiers, and that is not the same as the operation being unreachable. Three cases produce false positives:
 
-- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the literal name never appears in the source.
-- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not read (it reads `.ts`, `.tsx`, `.js`, and `.jsx`).
+- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the identifier never appears in the source.
+- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not parse (it parses `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`).
 - Another repository consumes it, for example a shared GraphQL package that several applications import.
 
-Check each finding before you delete it. Its [confidence grade](#confidence-grades) says how much corroborating evidence there is, and `--verbose` prints the exact search strings that were tried for every operation, which usually explains a surprising result quickly.
+Check each finding before you delete it. Its [confidence grade](#confidence-grades) says how much corroborating evidence there is, and `--verbose` prints, for a used operation, the reference that decided it and the import chain behind it, and for an unused one the identifiers looked for, which usually explains a surprising result quickly.
+
+### Single-file components
+
+Vue, Svelte and Astro files are not parsed as modules. A file whose extension is not one of the eight above but is named in `sourceExtensions` is scanned by its tokens instead: every identifier in it counts as a reference by name, strings count as mentions, and imports inside it are not resolved. That keeps a `.vue` file's `useGetUserQuery()` call visible, but a hook it reaches through a renamed import is not followed. Extracting the `<script>` block and parsing it as a module is a planned follow-up.
 
 ### Generated code can hide findings
 
@@ -266,12 +286,12 @@ srcDir: ./src
 exclude:
   - src/gql/graphql.ts
   - '**/__generated__'
-# Optional — override how operation usage is detected.
-# Supports {name}, {Name}, {type}, {Type} placeholders.
+# Optional — which identifiers count as a use of an operation. Each pattern
+# must expand to an identifier. Supports {name}, {Name}, {type}, {Type}.
 usagePatterns:
   - use{Name}{Type}
   - '{Name}Document'
-# Optional — override how fragments are matched in source (e.g. masking).
+# Optional — which identifiers count as a use of a fragment (e.g. masking).
 # Supports {name}, {Name} placeholders.
 fragmentUsagePatterns:
   - '{Name}FragmentDoc'
@@ -288,11 +308,11 @@ minConfidence: high
 
 - `graphqlDir`: directory, array of directories, or glob pattern (`packages/*/graphql`) covering your `.gql`/`.graphql` files.
 - `srcDir`: directory, array of directories, or glob pattern covering your source files.
-- `sourceExtensions` (optional): the file extensions to scan for usage. Defaults to `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`. Single-file component formats are not scanned unless you name them, so a Vue, Svelte or Astro project needs `sourceExtensions: ['.vue']` or the equivalent. A scan that reads no source file at all warns and tells you this, because every operation would otherwise look unused.
+- `sourceExtensions` (optional): the file extensions to scan for usage. Defaults to `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`, the extensions the parser takes. Single-file component formats are not scanned unless you name them, so a Vue, Svelte or Astro project needs `sourceExtensions: ['.vue']` or the equivalent, and such files are then scanned by their tokens (see [Single-file components](#single-file-components)). A scan that reads no source file at all warns and tells you this, because every operation would otherwise look unused.
 - `exclude` (optional): gitignore-flavored glob patterns for files and folders to skip. A name without a slash matches anywhere in the tree (`__generated__`), a path with a slash is anchored to the project root (`src/legacy`), `**` matches any depth, `*.generated.ts` matches files, and a leading `!` re-includes. Excluding a directory excludes everything under it, and `./src/gql`, `src/gql/` and `src/gql` are the same pattern written three ways. A `!` re-include always wins regardless of order but, as in gitignore, it cannot re-include a path whose parent directory is excluded, because excluded directories are not traversed. `node_modules` and `.git` are always excluded; a `!node_modules` pattern cannot re-include them.
 - `excludedFolders` (optional, deprecated in favor of `exclude`): folder names or root-relative paths. Still honored and merged into the same matcher.
-- `usagePatterns` (optional): templates used to detect operation usage. Defaults to the table above when omitted.
-- `fragmentUsagePatterns` (optional): templates for detecting fragments referenced directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
+- `usagePatterns` (optional): templates for the identifiers that count as a use of an operation. Each must expand to an identifier. Defaults to the table above when omitted.
+- `fragmentUsagePatterns` (optional): templates for the identifiers that count as a use of a fragment directly in source (fragment masking). Defaults to `{Name}FragmentDoc`.
 - `schemaFile` (optional): path to a local SDL file. Turns on the [deprecated-usage check](#deprecated-selections-opt-in); omit it and no schema is read.
 - `codegenConfig` (optional): path to a GraphQL Code Generator config to derive settings from, for a config that does not sit in the project root. See [reading your codegen config](#reading-your-codegen-config).
 - `checkFields` (optional): set to `true` to add the advisory [field candidates](#field-candidates-opt-in) list. Off by default.
@@ -492,7 +512,7 @@ Both keys are absent without the flag, so a consumer can tell "nothing found" fr
 
 ### Verbose output
 
-Pass `--verbose` to see why each operation was judged used or unused: the resolved configuration, the files scanned, and for each operation the exact search string that matched and the file it matched in.
+Pass `--verbose` to see why each operation was judged used or unused: the resolved configuration, the files scanned, and for each operation the identifier that was referenced, where, and through which imports.
 
 ```bash
 npx gqlprune --verbose
@@ -506,12 +526,14 @@ npx gqlprune --verbose
 [verbose] fragmentUsagePatterns: {Name}FragmentDoc
 [verbose] GraphQL files (1): graphql/user.gql
 [verbose] Source files scanned: 42
-[verbose] used:   GetUser (query) — "useGetUserQuery" found in src/App.tsx
-[verbose] unused: OldQuery (query) — no match for useOldQueryQuery, useOldQueryLazyQuery, useOldQuerySuspenseQuery, OldQueryDocument
+[verbose] used:   GetUser (query) — "useGetUserQuery" referenced in src/App.tsx:12:17
+[verbose]         via imported from './api' in src/App.tsx
+[verbose]         via re-exported from './generated/graphql' in src/api/index.ts, which is outside the scanned files
+[verbose] unused: OldQuery (query) — no reference to useOldQueryQuery, useOldQueryLazyQuery, useOldQuerySuspenseQuery, OldQueryDocument
 [verbose] confidence: operation "OldQuery" is high (name-absent: the name appears in no scanned source file)
 ```
 
-This is the fastest way to debug a surprising result. For an operation you believe is used, it shows exactly which patterns were searched, and if every operation matches in the same file, that file is almost certainly [generated output masking your results](#avoiding-false-all-clear-results). Verbose lines go to stderr, so `--verbose --json` still emits pure JSON on stdout.
+This is the fastest way to debug a surprising result. For an operation you believe is used, it shows exactly which identifiers were looked for, and if every operation is referenced in the same file, that file is almost certainly [generated output masking your results](#avoiding-false-all-clear-results). Verbose lines go to stderr, so `--verbose --json` still emits pure JSON on stdout.
 
 ### In CI
 
@@ -621,10 +643,10 @@ Field       Confidence  Selected in
 avatarUrl   medium      graphql/user.gql:4
                         graphql/post.gql:9
 
-These are candidates from a string search. Verify each one before deleting.
+These are candidates from a static scan. Verify each one before deleting.
 ```
 
-The closing line is a reminder, not a warning about your project: usage comes from a string search, so check a finding before removing it (see [Limitations](#limitations)). It prints whenever a candidate was reported, whether that is an unused operation, a fragment, an orphaned file or a field candidate, and never in `--json` mode. The deprecated section does not trigger it: those selections come from your schema, not from a string search. The field-candidate section adds a caveat of its own above it, covering only the blind spots specific to fields.
+The closing line is a reminder, not a warning about your project: usage comes from reading your source, never from running it, so check a finding before removing it (see [Limitations](#limitations)). It prints whenever a candidate was reported, whether that is an unused operation, a fragment, an orphaned file or a field candidate, and never in `--json` mode. The deprecated section does not trigger it: those selections come from your schema, not from a scan of your source. The field-candidate section adds a caveat of its own above it, covering only the blind spots specific to fields.
 
 ## Contributing
 

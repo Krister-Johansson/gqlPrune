@@ -1,4 +1,4 @@
-// Fixture source file; string-searched only, never compiled.
+// Fixture source file; parsed by gqlPrune, never compiled.
 import { useGetInvoiceQuery } from './hooks';
 
 export function Invoice() {

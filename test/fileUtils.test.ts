@@ -7,10 +7,8 @@ import {
   directoryExists,
   expandDirPatterns,
   findFilesWithExtension,
-  isOperationUsedInContents,
   readSourceFiles,
 } from '../src/utils/fileUtils';
-import { buildUsagePatterns } from '../src/utils/usagePatterns';
 
 jest.mock('fs');
 
@@ -586,23 +584,6 @@ describe('fileUtils', () => {
     });
   });
 
-  describe('isOperationUsedInContents', () => {
-    it('does not count a pattern hiding inside a longer identifier', () => {
-      expect(
-        isOperationUsedInContents(['UserDocument'], ['GetUserDocument']),
-      ).toBe(false);
-    });
-
-    it('counts a pattern standing on its own', () => {
-      expect(
-        isOperationUsedInContents(
-          ['UserDocument'],
-          ['import { UserDocument } from "./gen";'],
-        ),
-      ).toBe(true);
-    });
-  });
-
   describe('directoryExists', () => {
     afterEach(() => {
       jest.resetAllMocks();
@@ -745,41 +726,6 @@ describe('fileUtils', () => {
       expect(readSourceFiles(['bad.ts', 'b.ts'])).toEqual([
         { file: 'b.ts', content: 'content-b' },
       ]);
-    });
-  });
-
-  describe('isOperationUsedInContents', () => {
-    it('should detect a pattern across cached contents', () => {
-      expect(
-        isOperationUsedInContents(['useFoo'], ['nope', 'const x = useFoo()']),
-      ).toBe(true);
-      expect(isOperationUsedInContents(['useFoo'], ['nope', 'nada'])).toBe(
-        false,
-      );
-    });
-
-    it('should detect lazy, suspense and document usage (regression)', () => {
-      const patterns = buildUsagePatterns({
-        name: 'GetUser',
-        type: 'query',
-        filePath: 'GetUser.gql',
-      });
-
-      expect(isOperationUsedInContents(patterns, ['useGetUserQuery()'])).toBe(
-        true,
-      );
-      expect(
-        isOperationUsedInContents(patterns, ['useGetUserLazyQuery()']),
-      ).toBe(true);
-      expect(
-        isOperationUsedInContents(patterns, ['useGetUserSuspenseQuery()']),
-      ).toBe(true);
-      expect(
-        isOperationUsedInContents(patterns, ['useQuery(GetUserDocument)']),
-      ).toBe(true);
-      expect(isOperationUsedInContents(patterns, ['useGetThingQuery()'])).toBe(
-        false,
-      );
     });
   });
 });

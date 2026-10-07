@@ -1,4 +1,4 @@
-// Fixture source file. gqlPrune only string-searches it; it is never compiled,
+// Fixture source file. gqlPrune parses it; it is never compiled,
 // typechecked, or linted, and the import target does not exist.
 import { useGetUserQuery } from './hooks';
 

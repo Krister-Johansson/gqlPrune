@@ -1,4 +1,4 @@
-// FIXTURE source file; string-searched only, never compiled.
+// FIXTURE source file; parsed by gqlPrune, never compiled.
 import { useGetCombinedUserQuery } from './__generated__';
 
 export function useUser(id: string) {

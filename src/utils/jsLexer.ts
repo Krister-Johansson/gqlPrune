@@ -2,21 +2,18 @@
 // Copyright (c) 2023 Krister Johansson
 
 /**
- * The one JavaScript lexer the textual scanners share: the inline document
- * scanner and the codegen config reader both walk source text deciding what
- * is code, what is a comment and what is a string, and both used to carry
- * their own copy of that decision. The copies drifted, so one lost track of
- * a template literal that escaped a backtick after an interpolation while the
- * other did not. This module is the single definition.
+ * The small JavaScript lexer the codegen config reader walks source text
+ * with, deciding what is code, what is a comment and what is a string, so it
+ * can pull string literals out of a `codegen.ts` without executing it. The
+ * inline document scanner used to share it; documents are now found on the
+ * parsed syntax tree (see sourceModule.ts), and this is the one textual
+ * reader left.
  *
  * It is a lexer of the parts that matter for skipping, not a parser. The blind
  * spot every function here shares: a regular-expression literal holding a
  * quote or a comment marker, such as `/["']/`, is read as the start of a
  * string or comment and can throw the scan off for the rest of the line.
  */
-
-/** A half-open `[start, end)` range of offsets within a source text. */
-export type Range = { start: number; end: number };
 
 /** Whether `char` opens a string or template literal. */
 export function isQuote(char: string | undefined): boolean {
@@ -80,43 +77,6 @@ export function findInterpolationEnd(
       depth -= 1;
       if (depth === 0) return i + 1;
     }
-  }
-  return null;
-}
-
-/**
- * Scans a string or template literal from its first body character to its
- * closing quote, collecting the interpolations on the way. Returns `null` when
- * the literal never closes (a quoted argument may not cross a line), so a
- * half-written template is skipped instead of swallowing the rest of the file.
- */
-export function scanLiteral(
-  text: string,
-  bodyStart: number,
-  quote: string,
-): { bodyEnd: number; interpolations: Range[] } | null {
-  const interpolations: Range[] = [];
-  let i = bodyStart;
-  while (i < text.length) {
-    const char = text[i];
-    if (char === '\\') {
-      i += 2;
-      continue;
-    }
-    if (char === quote) {
-      return { bodyEnd: i, interpolations };
-    }
-    if (char === '\n' && quote !== '`') {
-      return null;
-    }
-    if (quote === '`' && char === '$' && text[i + 1] === '{') {
-      const end = findInterpolationEnd(text, i);
-      if (end === null) return null;
-      interpolations.push({ start: i, end });
-      i = end;
-      continue;
-    }
-    i += 1;
   }
   return null;
 }

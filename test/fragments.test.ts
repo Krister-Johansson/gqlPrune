@@ -10,6 +10,10 @@ import {
 } from '../src/utils/fragments';
 import { extractGraphqlEntities } from '../src/utils/operations';
 import { FragmentInfo } from '../src/types/FragmentInfo';
+import { indexOf } from './support';
+
+/** An index over no source at all: nothing in it references anything. */
+const emptyIndex = indexOf({});
 
 jest.mock('fs');
 
@@ -137,7 +141,7 @@ describe('fragments', () => {
       });
       const unused = findUnusedFragmentsInCorpus(
         ['ops.gql', 'frags.gql'].map(extractGraphqlEntities),
-        [],
+        emptyIndex,
         ['{Name}FragmentDoc'],
       );
       expect(unused.map((f) => f.name)).toEqual(['Dead']);
@@ -147,9 +151,10 @@ describe('fragments', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue(
         'fragment Masked on T { id }',
       );
+      // The masking signal is a reference to the constant, not its text.
       const unused = findUnusedFragmentsInCorpus(
         ['f.gql'].map(extractGraphqlEntities),
-        ['const x = MaskedFragmentDoc;'],
+        indexOf({ 'src/a.ts': 'useFragment(MaskedFragmentDoc);' }),
         ['{Name}FragmentDoc'],
       );
       expect(unused).toEqual([]);
@@ -162,7 +167,7 @@ describe('fragments', () => {
       });
       const unused = findUnusedFragmentsInCorpus(
         ['ops.gql', 'frags.gql'].map(extractGraphqlEntities),
-        [],
+        emptyIndex,
         ['{Name}FragmentDoc'],
       );
       expect(unused.map((f) => f.name)).toEqual(['Lonely']);
@@ -174,7 +179,7 @@ describe('fragments', () => {
       );
       const unused = findUnusedFragmentsInCorpus(
         ['f.gql'].map(extractGraphqlEntities),
-        [],
+        emptyIndex,
         [],
         ['Outer'],
       );
@@ -186,7 +191,7 @@ describe('fragments', () => {
       expect(
         findUnusedFragmentsInCorpus(
           ['ops.gql'].map(extractGraphqlEntities),
-          [],
+          emptyIndex,
           [],
         ),
       ).toEqual([]);
@@ -206,7 +211,7 @@ describe('fragments', () => {
 
       const unused = findUnusedFragmentsInCorpus(
         ['a.gql', 'b.gql'].map(extractGraphqlEntities),
-        [],
+        emptyIndex,
         ['{Name}FragmentDoc'],
       );
 

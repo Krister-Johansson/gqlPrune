@@ -182,7 +182,7 @@ describe('every option at once, as a human reads it', () => {
       '--- Orphaned GraphQL Files ---',
       '--- Deprecated Field Usage ---',
       '--- Unused Field Candidates ---',
-      'These are candidates from a string search.',
+      'These are candidates from a static scan.',
     ]);
     expect(result.code).toBe(1);
   });
