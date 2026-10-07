@@ -16,7 +16,7 @@ Reviews count against an hourly allowance. Spend them this way:
 
 ## What it skips
 
-`package-lock.json`, `CHANGELOG.md` (release-please writes it) and `docs/research/`. CodeRabbit's own defaults also skip `dist`, `node_modules`, images and directories named `generated`.
+`package-lock.json` and `docs/research/`. `CHANGELOG.md` stays in scope: release-please PRs are not reviewed, so a change to it in a reviewed PR is a hand edit, which the Markdown rule flags. CodeRabbit's own defaults also skip `dist`, `node_modules`, images and directories named `generated`.
 
 ## What it flags
 
