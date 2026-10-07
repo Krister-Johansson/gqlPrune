@@ -73,9 +73,7 @@ What to expect:
 
 `gqlprune` is a local/CI command-line tool. It reads a `gqlPrune.config.yaml`,
 parses `.gql`/`.graphql` files, and scans source files for usage. It does not
-execute project code and handles no credentials. Its only network activity is a
-once-a-day version check against the npm registry, which you can disable with
-`NO_UPDATE_NOTIFIER=1` and which is skipped in CI.
+execute project code, handles no credentials, and makes no network requests.
 
 The most relevant reports concern parsing of untrusted input (the YAML config or
 GraphQL documents) or path handling that escapes the configured directories. The

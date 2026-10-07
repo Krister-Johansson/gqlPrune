@@ -9,8 +9,8 @@ behind each claim. Report anything that contradicts it through
 
 gqlPrune is a developer tool that runs locally or in CI with the invoking
 user's permissions. It reads files, searches text, and prints a report. It has
-no server component, no accounts, no credentials, and no persistent state
-beyond a small cache file for the update check.
+no server component, no accounts, no credentials, no persistent state, and
+it makes no network requests.
 
 ## Threat model
 
@@ -73,11 +73,8 @@ and a hung scan is an annoyance, not a breach.
 - Dependabot, CodeQL, OpenSSF Scorecard, and Socket all run against the
   repository, and dependency updates land through the same reviewed-PR process
   as code.
-- The update check calls Node's built-in `fetch` against
-  `https://registry.npmjs.org` with a timeout; the response is only compared
-  against the current version string. The check is skipped in CI and can be
-  disabled with `NO_UPDATE_NOTIFIER=1`. A failed or slow check is ignored and
-  never affects results or exit codes.
+- gqlPrune makes no network requests. Its own code reads one environment
+  variable, `GITHUB_ACTIONS`, which switches on the annotation output.
 
 ### 4. Output errs toward honesty
 
