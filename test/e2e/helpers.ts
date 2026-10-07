@@ -54,14 +54,13 @@ export type CliResult = {
 
 /**
  * The environment every case runs under. Pinned so a developer's terminal and
- * a GitHub runner produce the same bytes: no ANSI colour, no update-check line,
- * and no implicit `--annotate` from `GITHUB_ACTIONS`.
+ * a GitHub runner produce the same bytes: no ANSI colour and no implicit
+ * `--annotate` from `GITHUB_ACTIONS`.
  */
 function childEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     NO_COLOR: '1',
-    NO_UPDATE_NOTIFIER: '1',
     ...extra,
   };
   delete env.GITHUB_ACTIONS;
@@ -141,7 +140,7 @@ export function runCliInteractive(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
       cwd: options.cwd,
-      env: { ...process.env, NO_COLOR: '1', NO_UPDATE_NOTIFIER: '1' },
+      env: { ...process.env, NO_COLOR: '1' },
     });
     const pending = [...options.answers];
     let stdout = '';

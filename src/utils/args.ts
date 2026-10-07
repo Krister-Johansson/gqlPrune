@@ -261,8 +261,12 @@ function helpRow(label: string, description: string): string {
   return `  ${label.padEnd(LABEL_WIDTH)}${description}`;
 }
 
-/** The usage screen printed by `--help` / `-h`, rendered from the tables. */
-export function formatHelp(): string {
+/**
+ * The usage screen printed by `--help` / `-h`, rendered from the tables. The
+ * caller passes the docs link (package.json's `homepage`), so the published
+ * code holds no URL literal of its own.
+ */
+export function formatHelp(docsUrl: string): string {
   const commands = COMMANDS.map((spec) =>
     helpRow(commandLabel(spec), spec.description),
   ).join('\n');
@@ -283,7 +287,7 @@ ${flags}
 
 Flags accept both "--flag value" and "--flag=value" and override the matching
 field in gqlPrune.config.yaml.
-Docs: https://github.com/Krister-Johansson/gqlPrune#readme`;
+Docs: ${docsUrl}`;
 }
 
 /**

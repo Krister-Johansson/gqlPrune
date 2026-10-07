@@ -18,7 +18,7 @@ const npm = isWindows ? 'npm.cmd' : 'npm';
 
 const pkg = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
-) as { name: string; version: string };
+) as { name: string; version: string; homepage: string };
 
 /** Runs npm synchronously and returns its stdout. */
 function npmSync(args: string[], cwd: string): string {
@@ -133,6 +133,31 @@ describe('the published tarball', () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(pkg.version);
+  });
+
+  it('links the homepage from package.json at the end of --help', async () => {
+    const result = await runInstalled(['--help']);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim().split('\n').at(-1)).toBe(
+      `Docs: ${pkg.homepage}`,
+    );
+  });
+
+  // Socket flags these in the published files: a network call, node:module,
+  // and URL literals. The scan needs none of them.
+  it('ships no network call, node:module import or URL literal', () => {
+    const distDir = path.join(installDir, 'node_modules', pkg.name, 'dist');
+    const jsFiles = fs
+      .readdirSync(distDir, { recursive: true, encoding: 'utf8' })
+      .filter((file) => file.endsWith('.js'));
+    const offending = jsFiles.filter((file) => {
+      const code = fs.readFileSync(path.join(distDir, file), 'utf8');
+      return /\bfetch\(|node:module|https?:\/\/[a-z0-9]/i.test(code);
+    });
+
+    expect(jsFiles.length).toBeGreaterThan(0);
+    expect(offending).toEqual([]);
   });
 
   it('scans a clean project and exits 0', async () => {

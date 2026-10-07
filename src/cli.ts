@@ -11,7 +11,6 @@ import {
   completionUsage,
   isShell,
 } from './utils/completions.js';
-import { notifyUpdate } from './utils/updateNotifier.js';
 import { pkg } from './utils/pkgInfo.js';
 
 const {
@@ -52,7 +51,7 @@ async function run(): Promise<void> {
   }
 
   if (help) {
-    console.log(formatHelp());
+    console.log(formatHelp(pkg.homepage));
     return;
   }
 
@@ -61,8 +60,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  // Shells eval this output at startup, so it returns before the update check:
-  // both stdout and stderr stay clean on this path.
+  // Shells eval this output at startup, so stdout carries only the script.
   if (command === 'completion') {
     if (!isShell(commandArg)) {
       reportUsageErrors(
@@ -91,9 +89,6 @@ async function run(): Promise<void> {
       config,
     });
   }
-
-  // After the main work: a cached, stderr-only nudge if a newer version exists.
-  await notifyUpdate(pkg, { json });
 }
 
 run().catch((error: unknown) => {

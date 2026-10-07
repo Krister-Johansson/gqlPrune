@@ -487,8 +487,14 @@ describe('CLI metadata tables', () => {
 });
 
 describe('formatHelp', () => {
+  const DOCS_URL = 'https://example.test/gqlprune#readme';
+
+  it('ends with the docs link it is given', () => {
+    expect(formatHelp(DOCS_URL).split('\n').at(-1)).toBe(`Docs: ${DOCS_URL}`);
+  });
+
   it('documents the command and every flag', () => {
-    const help = formatHelp();
+    const help = formatHelp(DOCS_URL);
     expect(help).toContain('init');
     for (const flag of [
       '--graphql',
@@ -512,7 +518,7 @@ describe('formatHelp', () => {
   });
 
   it('documents every flag in the FLAGS table', () => {
-    const help = formatHelp();
+    const help = formatHelp(DOCS_URL);
     for (const spec of FLAGS) {
       expect(help).toContain(spec.flag);
       expect(help).toContain(spec.description);
@@ -521,7 +527,7 @@ describe('formatHelp', () => {
   });
 
   it('documents every command in the COMMANDS table', () => {
-    const help = formatHelp();
+    const help = formatHelp(DOCS_URL);
     for (const spec of COMMANDS) {
       expect(help).toContain(spec.name);
       expect(help).toContain(spec.description);
@@ -529,7 +535,7 @@ describe('formatHelp', () => {
   });
 
   it('starts every command and flag description in the same column', () => {
-    const lines = formatHelp().split('\n');
+    const lines = formatHelp(DOCS_URL).split('\n');
     for (const spec of [...COMMANDS, ...FLAGS]) {
       const line = lines.find((l) => l.endsWith(spec.description));
       expect(line?.indexOf(spec.description)).toBe(28);
@@ -537,7 +543,7 @@ describe('formatHelp', () => {
   });
 
   it('marks --ignore as deprecated in favor of --exclude', () => {
-    const line = formatHelp()
+    const line = formatHelp(DOCS_URL)
       .split('\n')
       .find((l) => l.includes('--ignore'));
     expect(line).toMatch(/deprecated/i);

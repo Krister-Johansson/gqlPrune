@@ -48,7 +48,7 @@
   "bugs": {
     "url": "https://github.com/Krister-Johansson/gqlPrune/issues"
   },
-  "homepage": "https://github.com/Krister-Johansson/gqlPrune",
+  "homepage": "https://github.com/Krister-Johansson/gqlPrune#readme",
   "dependencies": {
     "@inquirer/checkbox": "^5.2.1",
     "@inquirer/confirm": "^6.1.1",
