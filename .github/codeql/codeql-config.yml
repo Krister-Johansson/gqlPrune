@@ -1,0 +1,8 @@
+# CodeQL configuration for .github/workflows/codeql.yml.
+name: gqlPrune CodeQL config
+
+# test/fixtures is input data for the e2e suite. It imitates a consumer's
+# tree on purpose, is never compiled or published, and includes a file with
+# a deliberate syntax error (resolution/src/Broken.ts).
+paths-ignore:
+  - test/fixtures

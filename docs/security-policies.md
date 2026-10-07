@@ -73,8 +73,10 @@ in [#101](https://github.com/Krister-Johansson/gqlPrune/pull/101).
 
 ## Static analysis (SAST)
 
-CodeQL scans every pull request and push to `main` (GitHub code scanning,
-default setup, javascript-typescript plus actions). ESLint and TypeScript
+CodeQL scans every pull request and push to `main`, and runs weekly
+(`.github/workflows/codeql.yml`, javascript-typescript plus actions). It skips
+`test/fixtures`, which holds deliberately broken input data for the e2e suite
+(`.github/codeql/codeql-config.yml`). ESLint and TypeScript
 `strict` mode run in the required CI checks and fail the build on any error.
 
 Remediation thresholds for code scanning alerts:
