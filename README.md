@@ -125,16 +125,34 @@ Operations and fragments are the default unit of detection. Pass `--fields` (or 
 npx gqlprune --fields
 ```
 
-gqlPrune collects the response key of every field selected by a **used** operation, and by the fragments those operations reach through the spread graph. The response key is the alias when a field is aliased (`nickname: displayName` contributes `nickname`), otherwise the field name. `__typename` is always skipped, and so are the fields of operations and fragments that are already reported unused, since those are reported whole.
+gqlPrune builds the selection of every **used** operation with the fragments it spreads merged in, keyed by response key: the alias when a field is aliased (`nickname: displayName` contributes `nickname`), otherwise the field name. `__typename` is always skipped, and so are the operations and fragments that are already reported unused, since those are reported whole. Each operation is then judged in one of two ways.
 
-A key becomes a candidate when it appears **nowhere** in any scanned source file. The test is a case-sensitive whole-word match, `\bkey\b`, so `id` matches `data.id` but not `video`.
+#### Traced from its call sites
 
-The list is advisory. It prints after the other sections, adds `unusedFields` to the JSON report, emits one `::warning` annotation per key, and never changes the exit code.
+gqlPrune finds every call site of the operation: a call to one of its usage-pattern identifiers (`useGetUserQuery()`, `useGetUserLazyQuery()`) or a call that takes its document constant (`useQuery(GetUserDocument)`), an [inline document](#inline-documents-opt-in)'s constant included. It parses the files that hold them a second time and follows each call's result through the function it sits in. The result's `data` is the root of the selection, also when the hook returns a tuple (`const [execute, { data }] = useGetUserLazyQuery()`, or urql's `const [{ data }] = useQuery(...)`). The trace follows:
 
-Read it as a starting shortlist, not a verdict. The field check is still a text search over the source files, the one place in gqlPrune that is, and a text search cannot see how your code consumes data, so this check errs in both directions:
+- variable aliases and plain assignments
+- destructuring, nested and renamed (`const { user: { name: fullName } } = data`)
+- property and optional chains, string keys (`user['name']`) and the `!` operator
+- list callbacks and loops (`map`, `forEach`, `filter`, `find`, `some`, `every`, `flatMap`, `for...of`, `[0]`), which pass through a list without adding a path segment
+- one JSX attribute into a function component the import index resolves: `<UserCard user={data.user} />` continues at `props.user` or `({ user })` inside `UserCard`, declared as a function or an arrow, or wrapped in `memo` or `forwardRef`
 
-- It flags fields you do use. A field reached through a computed key (`user[fieldKey]`, where the key comes from a variable or a list of column names), spread into props (`<Avatar {...user} />`), serialized whole, or consumed by a different repository never appears by name in `srcDir`. Renaming while destructuring is safe, though: `const { avatarUrl: avatar } = user` still writes `avatarUrl` out, so the match finds it.
-- It stays quiet about fields you don't use. A field with a common name (`id`, `name`, `title`, `url`) matches somewhere in any real codebase, so it can never be flagged, even when it is genuinely dead.
+A value the trace cannot follow counts as read, with everything under it: one passed to a function, spread, returned, put in an object or array literal, assigned to a property, read with a computed key, or handed on to a second component. A call site that takes a callback, such as `onCompleted`, counts as reading all of the data, and so does a result method used with one, such as `fetchMore({ updateQuery })`. Reading a value as a whole (a truthiness check, a comparison, a template literal, JSX text, an attribute of a plain HTML element) reads that field and nothing under it.
+
+A field that no read path reaches, and that sits under nothing the trace lost track of, is a candidate graded **high** (`never-read`). An object field counts as read as soon as one of its children is read. Only the topmost unread field of a branch is reported, since removing it removes everything under it.
+
+#### Matched by name
+
+Some operations have no call site to trace: nothing references their identifiers, one reference is not a call (`client.query({ query: GetUserDocument })`, `refetchQueries: [GetUserDocument]`), or the operation is a mutation, whose selection may exist only to update the cache. One such reference is enough, because a read behind it could reach any field. For these operations each of their own keys is matched against the source text instead. A key that appears nowhere as a case-sensitive whole word (`\bkey\b`, so `id` matches `data.id` but not `video`) is a candidate graded **medium** (`heuristic-cap`).
+
+#### Reading the list
+
+Findings are per operation and per path (`user.address.city`), so a fragment field that two operations never read is listed once for each. The list is advisory. It prints after the other sections, adds `unusedFields` to the JSON report, emits one `::warning` annotation per finding, and never changes the exit code. `--verbose` says for each operation whether it was traced, and through which call sites, or why it was matched by name.
+
+Read it as a shortlist, not a verdict:
+
+- A traced candidate is only as complete as the source gqlPrune reads. A field read by another repository, by code outside `srcDir`, or by a component that reads the cache by id (Apollo's `useFragment` with `from`) looks unread.
+- A candidate matched by name errs in both directions. A field reached through a computed key or a spread looks unread, and a field with a common name (`id`, `name`, `title`) matches somewhere and is never flagged, even when it is genuinely dead.
 
 Removing a field also changes the response shape for every consumer of that operation, which no schema-free tool can check for you. Verify each candidate by hand before trimming it.
 
@@ -210,7 +228,7 @@ That evidence comes from the same parse. The scan itself looks for references to
 
 Unused operations, unused fragments and orphaned files are all graded. An orphaned file takes the lowest grade among the definitions it holds, because one definition that still looks live undermines the verdict on the whole file.
 
-Field candidates never rise above medium (`heuristic-cap`), whatever the name evidence says. They come from a name-absence heuristic that cannot see a field read through a rename, a spread, or a computed key, so calling one of them high confidence would claim more than the check can know.
+Field candidates have two grades of their own. A traced candidate grades high (`never-read`): every call site of its operation was followed, anything the trace lost track of already counted as read, and no read reaches the field. A candidate matched by name never rises above medium (`heuristic-cap`), whatever the name evidence says, because a name search cannot see a field read through a rename, a spread, or a computed key, so calling it high confidence would claim more than the check can know.
 
 Deprecated selections carry no grade. They are validated against a real schema, so they are facts rather than candidates.
 
@@ -233,7 +251,7 @@ Findings below the level are left out of the report, so one repository can fail 
 
 ### Operations and fragments, not fields
 
-gqlPrune reports whole operations and fragments that nothing references. The default scan stops there: it does not inspect the fields inside an operation that is used, so over-fetching goes unreported. The opt-in `--fields` / `checkFields` heuristic covers exactly that ground, but what it produces is an advisory shortlist of candidates rather than a verdict (see [Field candidates (opt-in)](#field-candidates-opt-in)). Deciding it precisely requires a schema and data-flow analysis, which is why that sits outside the schema-free design; it is tracked in [issue #25](https://github.com/Krister-Johansson/gqlPrune/issues/25).
+gqlPrune reports whole operations and fragments that nothing references. The default scan stops there: it does not inspect the fields inside an operation that is used, so over-fetching goes unreported. The opt-in `--fields` / `checkFields` check covers that ground by tracing each operation's call sites through the source, but it does so without a schema or a type checker, so what it produces is an advisory shortlist of candidates rather than a verdict (see [Field candidates (opt-in)](#field-candidates-opt-in)). The trace judges a value by the syntax around it. A value it cannot follow counts as read, which makes it miss dead fields rather than flag live ones, and an operation it cannot trace at all falls back to a name search.
 
 ### Results are candidates, not proof
 
@@ -251,7 +269,7 @@ Vue, Svelte and Astro files are not parsed as modules. A file whose extension is
 
 ### Generated code can hide findings
 
-The opposite failure also happens: codegen output inside `srcDir` references every operation, so everything looks used and nothing is reported. gqlPrune warns you when it spots this; see [Avoiding false "all clear" results](#avoiding-false-all-clear-results).
+The opposite failure also happens: codegen output inside `srcDir` references every operation, so everything looks used and nothing is reported. gqlPrune warns you when it spots this; see [Avoiding false "all clear" results](#avoiding-false-all-clear-results). The same output hides field candidates: each generated hook returns the result of the call it wraps, and a returned value counts as read with everything under it.
 
 ## Setup
 
@@ -296,7 +314,7 @@ usagePatterns:
 # Supports {name}, {Name} placeholders.
 fragmentUsagePatterns:
   - '{Name}FragmentDoc'
-# Optional: also list selected fields whose name appears nowhere in srcDir.
+# Optional: also list selected fields that nothing in srcDir appears to read.
 # Advisory only; off by default.
 checkFields: true
 # Optional: also scan gql`...` templates and graphql() calls in srcDir.
@@ -493,10 +511,12 @@ With `--fields`, the report gains an `unusedFields` array and a matching `summar
 {
   "unusedFields": [
     {
+      "operation": "GetUser",
+      "path": "user.avatarUrl",
       "field": "avatarUrl",
       "locations": [{ "file": "graphql/user.gql", "line": 4 }],
-      "confidence": "medium",
-      "reason": "heuristic-cap"
+      "confidence": "high",
+      "reason": "never-read"
     }
   ],
   "summary": {
@@ -504,12 +524,12 @@ With `--fields`, the report gains an `unusedFields` array and a matching `summar
     "unusedFragments": 0,
     "orphanedFiles": 0,
     "unusedFields": 1,
-    "byConfidence": { "high": 0, "medium": 1, "low": 0 }
+    "byConfidence": { "high": 1, "medium": 0, "low": 0 }
   }
 }
 ```
 
-Both keys are absent without the flag, so a consumer can tell "nothing found" from "never checked". One entry lists every place that key is selected.
+Both keys are absent without the flag, so a consumer can tell "nothing found" from "never checked". There is one entry per operation and path: `operation` names the operation, `path` joins the response keys from its root with dots, `field` is the last of them, and `locations` lists every place that key is selected for that operation.
 
 ### Verbose output
 
@@ -533,6 +553,8 @@ npx gqlprune --verbose
 [verbose] unused: OldQuery (query) — no reference to useOldQueryQuery, useOldQueryLazyQuery, useOldQuerySuspenseQuery, OldQueryDocument
 [verbose] confidence: operation "OldQuery" is high (name-absent: the name appears in no scanned source file)
 ```
+
+With `--fields`, one more line per used operation says how its fields were judged, for example `[verbose] fields: GetUser (query) traced through 1 call site: src/App.tsx:12:17`, or the reason it was matched by name instead.
 
 This is the fastest way to debug a surprising result. For an operation you believe is used, it shows exactly which identifiers were looked for, and if every operation is referenced in the same file, that file is almost certainly [generated output masking your results](#avoiding-false-all-clear-results). Verbose lines go to stderr, so `--verbose --json` still emits pure JSON on stdout.
 
@@ -562,7 +584,7 @@ See [Confidence grades](#confidence-grades) for what each level means.
 
 ### GitHub Actions annotations
 
-Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), at each orphaned file, and at each [deprecated selection](#deprecated-selections-opt-in) when a schema is configured, so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection. Every candidate annotation ends with its [confidence grade](#confidence-grades), for example `[confidence: high]`, so a reviewer can triage from the Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
+Under GitHub Actions, gqlPrune emits inline `::warning` annotations pointing at each unused operation or fragment (file and line), at each orphaned file, and at each [deprecated selection](#deprecated-selections-opt-in) when a schema is configured, so they show up on the PR's Files changed tab. With `--fields`, each field candidate gets one annotation too, placed at its first selection and naming the path and the operation. Every candidate annotation ends with its [confidence grade](#confidence-grades), for example `[confidence: high]`, so a reviewer can triage from the Files changed tab. It turns on automatically when `GITHUB_ACTIONS` is set; force it anywhere with `--annotate`:
 
 ```bash
 npx gqlprune --annotate
@@ -616,7 +638,7 @@ Completion needs `gqlprune` on your `PATH`, so it applies to global installs (`n
 
 ## Output
 
-Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and a fourth when a [schema](#deprecated-selections-opt-in) is configured and something selects a deprecated field or enum value. `--fields` adds a fifth with the [field candidates](#field-candidates-opt-in), one row per selection and the key shown on its first row. Every candidate section has a Confidence column carrying its [grade](#confidence-grades); the deprecated section has none, because those selections are not graded.
+Unused operations and fragments are listed in separate sections: operations by type, name, and file; fragments by name and file. A third section follows when a whole file is [orphaned](#orphaned-files), and a fourth when a [schema](#deprecated-selections-opt-in) is configured and something selects a deprecated field or enum value. `--fields` adds a fifth with the [field candidates](#field-candidates-opt-in), one row per selection, with the operation, the path and the grade on its first row. Every candidate section has a Confidence column carrying its [grade](#confidence-grades); the deprecated section has none, because those selections are not graded.
 
 ```bash
 --- Unused GraphQL Operations ---
@@ -636,9 +658,9 @@ File               Line Message
 graphql/user.gql   3    The field User.nickname is deprecated. Use displayName
 
 --- Unused Field Candidates ---
-Field       Confidence  Selected in
-avatarUrl   medium      graphql/user.gql:4
-                        graphql/post.gql:9
+Operation  Path            Confidence  Selected in
+GetUser    user.avatarUrl  high        graphql/user.gql:4
+GetFeed    feed.legacyId   medium      graphql/feed.gql:9
 
 These are candidates from a static scan. Verify each one before deleting.
 ```

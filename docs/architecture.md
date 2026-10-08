@@ -36,7 +36,10 @@ src/
     tsconfig.ts           baseUrl and paths from the nearest tsconfig
     inline.ts             Inline gql/graphql documents (opt-in --inline)
     confidence.ts         Grades findings by the evidence in the index
-    fields.ts             Field candidates (opt-in --fields), still a text search
+    fields.ts             Field candidates (opt-in --fields): traced, or matched
+                          by name when an operation has nothing to trace
+    selectionTree.ts      An operation's response keys, fragments merged in
+    resultFlow.ts         Follows a call site's result to the fields it reads
     deprecated.ts         Deprecated selections against a local SDL (opt-in)
     codegen.ts            Reads a GraphQL Code Generator config for defaults
     jsLexer.ts            The comment/string lexer codegen.ts reads a config with
@@ -82,9 +85,21 @@ test/                     Jest specs, one per source module
    fragments, or when a reference resolves to a fragment pattern. Inline
    documents are used when the constant they are assigned to is referenced, by
    binding identity. The generated-file heuristic and the confidence grades
-   read the same index; the opt-in field check is the one pass that still
-   reads the files as text.
-7. **Reporting.** Findings go to stdout as tables, or as a single JSON document
+   read the same index.
+7. **Field tracing (opt-in).** With `--fields`, each used query or
+   subscription gets a selection tree with its fragments merged in. Its call
+   sites come from the index: calls to its usage-pattern identifiers and calls
+   that take its document constant. Only the files that hold a call site, and
+   the files of components one of them renders, are parsed a second time with
+   `ts.createSourceFile` and parent pointers, since the module model keeps no
+   syntax tree. The trace walks up from each call through aliases,
+   destructuring, property access, list callbacks and one JSX attribute into a
+   component, and anything it has no rule for counts as reading everything
+   under it. A field no read reaches is a candidate. An operation with a
+   reference that is not a call, with no reference at all, or that is a
+   mutation is matched by name against the source text instead, the one place
+   the scan still reads files as text.
+8. **Reporting.** Findings go to stdout as tables, or as a single JSON document
    with `--json`. Diagnostics, warnings, and GitHub Actions annotations go to
    stderr, so JSON output stays parseable. Exit code 0 means clean, 1 means
    findings, 2 means the run itself failed.
