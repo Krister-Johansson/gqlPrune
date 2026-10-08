@@ -57,7 +57,11 @@ import {
   ModuleResolver,
 } from '../utils/moduleResolver.js';
 import { loadCompilerOptions } from '../utils/tsconfig.js';
-import { findUnusedFieldCandidates } from '../utils/fields.js';
+import {
+  findUnusedFieldCandidates,
+  OperationFieldTrace,
+  SourcePosition,
+} from '../utils/fields.js';
 import { findOrphanedFiles } from '../utils/orphans.js';
 import { DeprecatedUsage, findDeprecatedUsages } from '../utils/deprecated.js';
 import {
@@ -485,29 +489,39 @@ function formatFieldLocation(location: {
 
 /**
  * Prints the advisory table of field candidates: one row per selection, with
- * the key shown on its first row only.
+ * the operation, the path and the grade shown on its first row only.
  */
 function reportUnusedFieldCandidates(candidates: GradedField[]): void {
-  const fieldWidth = columnWidth(
-    'Field',
-    candidates.map((candidate) => candidate.field),
+  const operationWidth = columnWidth(
+    'Operation',
+    candidates.map((candidate) => candidate.operation),
+  );
+  const pathWidth = columnWidth(
+    'Path',
+    candidates.map((candidate) => candidate.path),
   );
 
   printSection('Unused Field Candidates', () => {
-    console.log('Field'.padEnd(fieldWidth), CONFIDENCE_HEADER, 'Selected in');
+    console.log(
+      'Operation'.padEnd(operationWidth),
+      'Path'.padEnd(pathWidth),
+      CONFIDENCE_HEADER,
+      'Selected in',
+    );
     candidates.forEach((candidate) => {
       candidate.locations.forEach((location, index) => {
-        const label = index === 0 ? candidate.field : '';
-        // The grade belongs to the key, not to each of its selections, so it
-        // sits on the first row with the key and the rest stay blank.
-        const grade =
-          index === 0
-            ? confidenceCell(candidate.confidence)
-            : ''.padEnd(CONFIDENCE_HEADER.length);
+        const first = index === 0;
+        // The operation, path and grade belong to the finding, not to each of
+        // its selections, so they sit on the first row and the rest stay blank.
+        const operation = first ? candidate.operation : '';
+        const fieldPath = first ? candidate.path : '';
+        const grade = first
+          ? confidenceCell(candidate.confidence)
+          : ''.padEnd(CONFIDENCE_HEADER.length);
         console.log(
-          `${kleur.cyan(label.padEnd(fieldWidth))} ${grade} ${kleur.magenta(
-            formatFieldLocation(location),
-          )}`,
+          `${kleur.cyan(operation.padEnd(operationWidth))} ${kleur.cyan(
+            fieldPath.padEnd(pathWidth),
+          )} ${grade} ${kleur.magenta(formatFieldLocation(location))}`,
         );
       });
     });
@@ -515,19 +529,20 @@ function reportUnusedFieldCandidates(candidates: GradedField[]): void {
   const count = candidates.length;
   console.log(
     kleur.yellow(
-      `Found ${count} ${pluralize(count, 'field candidate')} whose ` +
-        `${pluralize(count, 'name appears', 'names appear')} nowhere in the ` +
-        'source.',
+      `Found ${count} ${pluralize(count, 'field candidate')} that nothing ` +
+        'in the source appears to read.',
     ),
   );
   // Only what is specific to fields. The closing reminder covers the rest, so
   // saying "verify before deleting" here as well would print it twice.
   console.log(
     kleur.dim(
-      'A field is matched by name alone, so one read through a computed key, ' +
-        'spread into props, or used by another repository looks the same as ' +
-        'one nothing reads. A field with a common name never reaches this ' +
-        'list at all.',
+      'A high candidate was traced from every call site of its operation, ' +
+        'and a value handed to code the trace cannot follow counts as read. ' +
+        'A medium candidate was matched by name alone, so a read through a ' +
+        'computed key or a spread looks the same as no read, and a common ' +
+        'name is never flagged. A field read by another repository looks ' +
+        'unread either way.',
     ),
   );
 }
@@ -704,7 +719,8 @@ function escapeAnnotationProperty(value: string): string {
  * Formats GitHub Actions `::warning` annotations for the unused operations and
  * fragments, for each orphaned file and for each deprecated selection, so they
  * surface inline on a PR. Omits the line when unknown. Field candidates get one
- * annotation each, pinned to their first selection.
+ * annotation each, pinned to their first selection and naming the path and
+ * the operation.
  *
  * Every candidate annotation ends with its confidence grade, so a reviewer can
  * triage straight from the Files changed tab. Deprecated selections carry no
@@ -771,7 +787,12 @@ export function formatAnnotations(
         candidate.locations[0].file,
         candidate.locations[0].line,
         graded(
-          `Unused GraphQL field candidate "${candidate.field}" (name not found in source)`,
+          `Unused GraphQL field candidate "${candidate.path}" in operation ` +
+            `"${candidate.operation}" (${
+              candidate.reason === 'never-read'
+                ? 'no traced read reaches it'
+                : 'name not found in source'
+            })`,
           candidate.confidence,
         ),
       ),
@@ -1235,6 +1256,8 @@ export type ScanResult = {
    * detection does not run at all when the option is off.
    */
   unusedFieldCandidates: GradedField[];
+  /** How each used operation's fields were judged; empty unless `checkFields` is on. */
+  fieldTraces: OperationFieldTrace[];
   /** Advisory duplicate-name warnings (operations and fragments). */
   duplicateWarnings: string[];
   generatedWarnings: string[];
@@ -1290,9 +1313,47 @@ export function formatVerboseConfidenceLines(
     ),
     ...result.unusedFieldCandidates.map(
       (candidate) =>
-        `confidence: field "${candidate.field}" is ${describeConfidence(candidate)}`,
+        `confidence: field "${candidate.path}" of ${candidate.operation} is ${describeConfidence(candidate)}`,
     ),
   ];
+}
+
+/** Formats a source position as `file:line:column`. */
+function formatPosition(position: SourcePosition): string {
+  return `${position.file}:${position.line}:${position.column}`;
+}
+
+/** Why an operation's fields were matched by name, in words, for `--verbose`. */
+const FIELD_FALLBACK_TEXT = {
+  'no-reference': () => 'nothing references its identifiers',
+  'untraceable-reference': (reference?: SourcePosition) =>
+    `the reference at ${reference ? formatPosition(reference) : 'an unknown place'} is not a call it can trace`,
+  mutation: () => "a mutation's selection may exist only to update the cache",
+};
+
+/**
+ * Renders the `--verbose` line for every used operation the field check
+ * judged: traced, with the call sites it followed, or matched by name, with
+ * the reason no trace was possible.
+ *
+ * @param {OperationFieldTrace[]} traces - From the field check.
+ * @returns {string[]} - One line per operation.
+ */
+export function formatVerboseFieldLines(
+  traces: OperationFieldTrace[],
+): string[] {
+  return traces.map((trace) => {
+    const head = `fields: ${trace.operation} (${trace.type})`;
+    if (trace.mode === 'traced') {
+      const count = trace.callSites.length;
+      return (
+        `${head} traced through ${count} ${pluralize(count, 'call site')}: ` +
+        trace.callSites.map(formatPosition).join(', ')
+      );
+    }
+    const reason = FIELD_FALLBACK_TEXT[trace.fallback ?? 'no-reference'];
+    return `${head} matched by name: ${reason(trace.reference)}`;
+  });
 }
 
 /**
@@ -1505,11 +1566,15 @@ export function scanProject(
     operations,
     usagePatterns,
   );
-  // Opt-in: skip the whole pass (and its per-key text sweep) when it is off.
-  // The field check still reads the files as text; with inline documents on,
-  // their bodies are blanked so a document's own selections never vouch for
+  // Opt-in: skip the whole pass when it is off. Call sites are traced over a
+  // fresh parse of the files that hold them; an operation with nothing to
+  // trace falls back to a text search, and with inline documents on, their
+  // bodies are blanked so a document's own selections never vouch for
   // themselves.
-  const unusedFieldCandidates = resolveCheckFields(config)
+  const sourcesByPath = new Map(
+    modules.map((module, i) => [module.path, rawSources[i]]),
+  );
+  const fieldAnalysis = resolveCheckFields(config)
     ? findUnusedFieldCandidates(
         parsedFiles,
         unusedOperations,
@@ -1520,8 +1585,13 @@ export function scanProject(
               content: blankRanges(source.content, extractions[i].bodyRanges),
             }))
           : rawSources,
+        {
+          index,
+          usagePatterns,
+          source: (modulePath) => sourcesByPath.get(modulePath),
+        },
       )
-    : [];
+    : { candidates: [], traces: [] };
 
   // Grade what the scan found. The bare-name evidence is what the usage pass
   // above never gathers, and it only runs over the findings, which are few by
@@ -1564,7 +1634,8 @@ export function scanProject(
       gradedFragments,
     ),
     deprecatedUsages: schema ? findDeprecatedUsages(schema, parsedFiles) : [],
-    unusedFieldCandidates: gradeFieldCandidates(unusedFieldCandidates),
+    unusedFieldCandidates: gradeFieldCandidates(fieldAnalysis.candidates),
+    fieldTraces: fieldAnalysis.traces,
     duplicateWarnings: findDuplicateNameWarnings(parsedFiles),
     generatedWarnings: formatGeneratedFileWarnings(generatedFiles),
     readWarnings,
@@ -1818,6 +1889,7 @@ export function mainFunction(
 
   if (verbose) {
     logVerbose(formatVerboseScanLines(result));
+    logVerbose(formatVerboseFieldLines(result.fieldTraces));
     // From the unfiltered scan, so a gated run still explains what it hid.
     logVerbose(formatVerboseConfidenceLines(result));
   }

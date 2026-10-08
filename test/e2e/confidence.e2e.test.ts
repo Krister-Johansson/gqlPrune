@@ -201,16 +201,17 @@ describe('what is graded and what is not', () => {
     }
   });
 
-  it('never grades a field candidate above medium', async () => {
+  it('grades a field candidate high when every call site was traced', async () => {
     const report = parseReport(
       await runCli([...APP_SCAN, '--fields', '--json']),
     );
 
-    // The name appears nowhere at all, which is `high` evidence, but the check
-    // cannot see a read through a rename, a spread or a computed key, so the
-    // grade is capped and says why.
+    // useUser.ts is the one call site of GetUser, and it reads every key of
+    // the user but this one.
     expect(report.unusedFields).toEqual([
       {
+        operation: 'GetUser',
+        path: 'user.internalAuditTrail',
         field: 'internalAuditTrail',
         locations: [
           {
@@ -218,8 +219,8 @@ describe('what is graded and what is not', () => {
             line: expect.any(Number),
           },
         ],
-        confidence: 'medium',
-        reason: 'heuristic-cap',
+        confidence: 'high',
+        reason: 'never-read',
       },
     ]);
   });

@@ -136,15 +136,22 @@ describe('the JSON report', () => {
     }
   });
 
-  it('shapes each field candidate as field, locations and grade', () => {
+  it('shapes each field candidate as operation, path, field, locations and grade', () => {
+    // `operation` and `path` arrived when the check started tracing call
+    // sites: one entry per operation and path instead of one per key. Both are
+    // additions, so a consumer that reads the old keys keeps working.
     expect(full.unusedFields?.length).toBeGreaterThan(0);
     for (const entry of full.unusedFields ?? []) {
       expect(keysOf(entry)).toEqual([
         'confidence',
         'field',
         'locations',
+        'operation',
+        'path',
         'reason',
       ]);
+      expect(typeof entry.operation).toBe('string');
+      expect(typeof entry.path).toBe('string');
       expect(entry.locations.length).toBeGreaterThan(0);
       for (const location of entry.locations) {
         expect(keysOf(location)).toEqual(['file', 'line']);

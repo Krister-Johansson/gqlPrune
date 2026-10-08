@@ -27,7 +27,9 @@ const REASON_TEXT: Record<ConfidenceReason, string> = {
   'string-mention':
     'the name appears inside a string in ordinary source, which may be a reference built at runtime',
   'heuristic-cap':
-    'the field check cannot see a read through a rename, a spread, or a computed key',
+    'no call site of the operation could be traced, so the field was matched by name, which cannot see a read through a rename, a spread, or a computed key',
+  'never-read':
+    'every call site of the operation was traced and no read reaches this field',
 };
 
 /** An unused operation with its grade. */
@@ -36,8 +38,8 @@ export type GradedOperation = OperationInfo & ConfidenceGrade;
 /** An unused fragment with its grade. */
 export type GradedFragment = FragmentInfo & ConfidenceGrade;
 
-/** A field candidate with its grade, which never exceeds `medium`. */
-export type GradedField = UnusedFieldInfo & ConfidenceGrade;
+/** A field candidate with its grade; the trace flag behind the grade is dropped. */
+export type GradedField = Omit<UnusedFieldInfo, 'traced'> & ConfidenceGrade;
 
 /** An orphaned file with the lowest grade among the definitions it holds. */
 export type OrphanedFile = { file: string } & ConfidenceGrade;
@@ -159,24 +161,26 @@ export function gradeFragments(
 }
 
 /**
- * Grades every field candidate `medium`, the ceiling for the field check. A
- * candidate only exists because its name appears nowhere in the scanned
- * source, which is the evidence that grades an operation `high`; but the
- * name-absence heuristic cannot see a field read through a rename, a spread,
- * or a computed key, so however absent the name is, calling one of them high
- * confidence would claim more than the check can know. Nothing is searched
- * here: the sweep that produced the candidate already established the absence.
+ * Grades every field candidate by how its operation was judged. A traced
+ * candidate grades `high` (`never-read`): every call site of its operation was
+ * followed and no read reaches the field, while anything the trace lost track
+ * of already counted as read. A candidate matched by name grades `medium`
+ * (`heuristic-cap`): its name appears nowhere, which grades an operation
+ * `high`, but a name search cannot see a field read through a rename, a
+ * spread or a computed key, so calling it high would claim more than the
+ * check can know.
  *
  * @param {UnusedFieldInfo[]} candidates - The field candidates to grade.
- * @returns {GradedField[]} - The same candidates, each graded medium.
+ * @returns {GradedField[]} - The same candidates, graded, without the trace flag.
  */
 export function gradeFieldCandidates(
   candidates: UnusedFieldInfo[],
 ): GradedField[] {
-  return candidates.map((candidate) => ({
+  return candidates.map(({ traced, ...candidate }) => ({
     ...candidate,
-    confidence: 'medium',
-    reason: 'heuristic-cap',
+    ...(traced
+      ? { confidence: 'high', reason: 'never-read' }
+      : { confidence: 'medium', reason: 'heuristic-cap' }),
   }));
 }
 

@@ -98,28 +98,30 @@ describe('every option at once', () => {
         line: expect.any(Number),
       },
     ]);
-    // internalNotes is selected by a .gql document and read nowhere.
-    // refreshedAt is selected by an inline document and read right beside it,
-    // which is the only thing that keeps it off this list: a document's own
-    // text is blanked out of the corpus before the keys are searched for.
-    expect(report.unusedFields?.map((candidate) => candidate.field)).toEqual([
-      'internalNotes',
-    ]);
+    // internalNotes is selected by a .gql document and read on no traced
+    // path. refreshedAt is selected by an inline document and read right
+    // beside it, through the call that takes the document's constant, which
+    // is what keeps it off this list.
+    expect(
+      report.unusedFields?.map(
+        (candidate) => `${candidate.operation}: ${candidate.path}`,
+      ),
+    ).toEqual(['GetCombinedUser: user.internalNotes']);
   });
 
   it('counts every graded finding once, across all four kinds', () => {
     const report = parseReport(result);
 
-    // 2 high operations + 1 high orphan, 1 medium field candidate, 1 low
-    // operation + 1 low orphan. The deprecated selection is ungraded and is
-    // counted nowhere here.
+    // 2 high operations + 1 high orphan + 1 traced (high) field candidate,
+    // 1 low operation + 1 low orphan. The deprecated selection is ungraded and
+    // is counted nowhere here.
     expect(report.summary).toMatchObject({
       unusedOperations: 3,
       unusedFragments: 0,
       orphanedFiles: 2,
       deprecatedUsages: 1,
       unusedFields: 1,
-      byConfidence: { high: 3, medium: 1, low: 2 },
+      byConfidence: { high: 4, medium: 0, low: 2 },
     });
   });
 });
@@ -147,7 +149,7 @@ describe('every option at once, gated at medium', () => {
     expect(report.summary).toMatchObject({
       unusedOperations: 2,
       orphanedFiles: 1,
-      byConfidence: { high: 3, medium: 1, low: 0 },
+      byConfidence: { high: 4, medium: 0, low: 0 },
     });
     expect(result.code).toBe(1);
   });
@@ -203,7 +205,7 @@ describe('every option at once, as a human reads it', () => {
         'advisory and does not affect the exit code.',
     );
     expect(result.stdout).toContain(
-      'Found 1 field candidate whose name appears nowhere in the source.',
+      'Found 1 field candidate that nothing in the source appears to read.',
     );
   });
 
@@ -211,9 +213,8 @@ describe('every option at once, as a human reads it', () => {
     // The field-candidate caveat says what only fields suffer from; the
     // closing line covers verifying a candidate, for every section at once.
     expect(result.stdout).toContain(
-      'A field is matched by name alone, so one read through a computed key, ' +
-        'spread into props, or used by another repository looks the same as ' +
-        'one nothing reads.',
+      'A high candidate was traced from every call site of its operation, ' +
+        'and a value handed to code the trace cannot follow counts as read.',
     );
     expect(result.stdout).not.toContain('before trimming it');
     expect(

@@ -22,6 +22,7 @@ import {
   formatGeneratedFileWarnings,
   formatVerboseConfidenceLines,
   formatVerboseConfigLines,
+  formatVerboseFieldLines,
   formatVerboseScanLines,
   mainFunction,
   resolveCheckFields,
@@ -653,6 +654,7 @@ describe('gqlPruner', () => {
       orphanedFiles: [],
       deprecatedUsages: [],
       unusedFieldCandidates: [],
+      fieldTraces: [],
       duplicateWarnings: [],
       generatedWarnings: [],
       readWarnings: [],
@@ -721,6 +723,67 @@ describe('gqlPruner', () => {
     });
   });
 
+  describe('formatVerboseFieldLines', () => {
+    it('says how each operation was judged, traced or matched by name', () => {
+      expect(
+        formatVerboseFieldLines([
+          {
+            operation: 'GetUser',
+            type: 'query',
+            file: 'a.gql',
+            mode: 'traced',
+            callSites: [
+              { file: 'src/App.tsx', line: 2, column: 20 },
+              { file: 'src/B.tsx', line: 7, column: 3 },
+            ],
+          },
+          {
+            operation: 'GetOne',
+            type: 'query',
+            file: 'a.gql',
+            mode: 'traced',
+            callSites: [{ file: 'src/C.tsx', line: 1, column: 1 }],
+          },
+          {
+            operation: 'GetFeed',
+            type: 'query',
+            file: 'a.gql',
+            mode: 'fallback',
+            fallback: 'no-reference',
+            callSites: [],
+          },
+          {
+            operation: 'GetPosts',
+            type: 'query',
+            file: 'a.gql',
+            mode: 'fallback',
+            fallback: 'untraceable-reference',
+            reference: { file: 'src/App.tsx', line: 5, column: 25 },
+            callSites: [],
+          },
+          {
+            operation: 'SaveUser',
+            type: 'mutation',
+            file: 'a.gql',
+            mode: 'fallback',
+            fallback: 'mutation',
+            callSites: [],
+          },
+        ]),
+      ).toEqual([
+        'fields: GetUser (query) traced through 2 call sites: src/App.tsx:2:20, src/B.tsx:7:3',
+        'fields: GetOne (query) traced through 1 call site: src/C.tsx:1:1',
+        'fields: GetFeed (query) matched by name: nothing references its identifiers',
+        'fields: GetPosts (query) matched by name: the reference at src/App.tsx:5:25 is not a call it can trace',
+        "fields: SaveUser (mutation) matched by name: a mutation's selection may exist only to update the cache",
+      ]);
+    });
+
+    it('returns nothing when the check did not run', () => {
+      expect(formatVerboseFieldLines([])).toEqual([]);
+    });
+  });
+
   describe('formatVerboseConfidenceLines', () => {
     it('explains the grade of every graded kind', () => {
       const lines = formatVerboseConfidenceLines({
@@ -731,6 +794,8 @@ describe('gqlPruner', () => {
         orphanedFiles: [{ file: 'a.gql', ...LOW }],
         unusedFieldCandidates: [
           {
+            operation: 'GetUser',
+            path: 'user.avatarUrl',
             field: 'avatarUrl',
             locations: [{ file: 'a.gql' }],
             confidence: 'medium',
@@ -742,7 +807,7 @@ describe('gqlPruner', () => {
         'confidence: operation "Dead" is high (name-absent: the name appears in no scanned source file)',
         'confidence: fragment "DeadFields" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)',
         'confidence: orphaned file "a.gql" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)',
-        'confidence: field "avatarUrl" is medium (heuristic-cap: the field check cannot see a read through a rename, a spread, or a computed key)',
+        'confidence: field "user.avatarUrl" of GetUser is medium (heuristic-cap: no call site of the operation could be traced, so the field was matched by name, which cannot see a read through a rename, a spread, or a computed key)',
       ]);
     });
 
@@ -895,6 +960,8 @@ describe('gqlPruner', () => {
         [],
         [
           {
+            operation: 'GetUser',
+            path: 'avatarUrl',
             field: 'avatarUrl',
             locations: [{ file: 'a.gql' }],
             confidence: 'medium',
@@ -975,19 +1042,23 @@ describe('gqlPruner', () => {
         [],
         [
           {
+            operation: 'GetUser',
+            path: 'user.avatarUrl',
             field: 'avatarUrl',
             locations: [{ file: 'a.gql', line: 4 }],
-            confidence: 'medium',
-            reason: 'heuristic-cap',
+            confidence: 'high',
+            reason: 'never-read',
           },
         ],
       );
       expect(report.unusedFields).toEqual([
         {
+          operation: 'GetUser',
+          path: 'user.avatarUrl',
           field: 'avatarUrl',
           locations: [{ file: 'a.gql', line: 4 }],
-          confidence: 'medium',
-          reason: 'heuristic-cap',
+          confidence: 'high',
+          reason: 'never-read',
         },
       ]);
       expect(report.summary).toEqual({
@@ -996,7 +1067,7 @@ describe('gqlPruner', () => {
         orphanedFiles: 0,
         deprecatedUsages: 0,
         unusedFields: 1,
-        byConfidence: { high: 0, medium: 1, low: 0 },
+        byConfidence: { high: 1, medium: 0, low: 0 },
       });
     });
 
@@ -1082,18 +1153,29 @@ describe('gqlPruner', () => {
           [],
           [
             {
+              operation: 'GetUser',
+              path: 'user.avatarUrl',
               field: 'avatarUrl',
               locations: [
                 { file: 'graphql/user.gql', line: 4 },
                 { file: 'graphql/post.gql', line: 9 },
               ],
+              confidence: 'high',
+              reason: 'never-read',
+            },
+            {
+              operation: 'GetFeed',
+              path: 'feed.bio',
+              field: 'bio',
+              locations: [{ file: 'graphql/feed.gql', line: 3 }],
               confidence: 'medium',
               reason: 'heuristic-cap',
             },
           ],
         ),
       ).toEqual([
-        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
+        '::warning file=graphql/user.gql,line=4::Unused GraphQL field candidate "user.avatarUrl" in operation "GetUser" (no traced read reaches it) [confidence: high]',
+        '::warning file=graphql/feed.gql,line=3::Unused GraphQL field candidate "feed.bio" in operation "GetFeed" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -1106,6 +1188,8 @@ describe('gqlPruner', () => {
           [],
           [
             {
+              operation: 'GetUser',
+              path: 'avatarUrl',
               field: 'avatarUrl',
               locations: [{ file: 'a.gql' }],
               confidence: 'medium',
@@ -1114,7 +1198,7 @@ describe('gqlPruner', () => {
           ],
         ),
       ).toEqual([
-        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" (name not found in source) [confidence: medium]',
+        '::warning file=a.gql::Unused GraphQL field candidate "avatarUrl" in operation "GetUser" (name not found in source) [confidence: medium]',
       ]);
     });
 
@@ -1745,14 +1829,64 @@ describe('gqlPruner', () => {
         checkFields: true,
       });
 
+      // The one call site reads `id` and nothing else.
       expect(result.unusedFieldCandidates).toEqual([
         {
+          operation: 'GetUser',
+          path: 'avatarUrl',
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 2 }],
+          confidence: 'high',
+          reason: 'never-read',
+        },
+      ]);
+      expect(result.fieldTraces).toEqual([
+        {
+          operation: 'GetUser',
+          type: 'query',
+          file: 'a.gql',
+          mode: 'traced',
+          callSites: [{ file: 'App.tsx', line: 1, column: 16 }],
+        },
+      ]);
+    });
+
+    it('matches the keys by name when nothing calls the operation', () => {
+      mockedFind
+        .mockReturnValueOnce(['a.gql'])
+        .mockReturnValueOnce(['App.tsx']);
+      mockedExtract.mockReturnValue(
+        entitiesWithDocument('a.gql', 'query GetUser {\n  avatarUrl\n  id\n}', [
+          { name: 'GetUser', type: 'query', filePath: 'a.gql' },
+        ]),
+      );
+      mockedReadSources.mockReturnValue([
+        {
+          file: 'App.tsx',
+          content: 'client.query({ query: GetUserDocument, id });',
+        },
+      ]);
+
+      const result = scanProject({
+        graphqlDir: './g',
+        srcDir: './s',
+        checkFields: true,
+      });
+
+      expect(result.unusedFieldCandidates).toEqual([
+        {
+          operation: 'GetUser',
+          path: 'avatarUrl',
           field: 'avatarUrl',
           locations: [{ file: 'a.gql', line: 2 }],
           confidence: 'medium',
           reason: 'heuristic-cap',
         },
       ]);
+      expect(result.fieldTraces[0]).toMatchObject({
+        mode: 'fallback',
+        fallback: 'untraceable-reference',
+      });
     });
   });
 
@@ -2005,12 +2139,15 @@ describe('gqlPruner', () => {
       );
 
       expect(result.unusedOperations).toEqual([]);
+      // The constant is passed to a call whose result nothing reads.
       expect(result.unusedFieldCandidates).toEqual([
         {
+          operation: 'GetUser',
+          path: 'avatarUrl',
           field: 'avatarUrl',
           locations: [{ file: 'src/queries.ts', line: 2 }],
-          confidence: 'medium',
-          reason: 'heuristic-cap',
+          confidence: 'high',
+          reason: 'never-read',
         },
       ]);
     });
@@ -2952,16 +3089,19 @@ describe('gqlPruner', () => {
         expect(out).toContain('Unused Field Candidates');
         expect(out).toContain('avatarUrl');
         expect(out).toContain('a.gql:2');
+        expect(out).toContain('GetUser');
         expect(out).toContain(
-          'Found 1 field candidate whose name appears nowhere in the source.',
+          'Found 1 field candidate that nothing in the source appears to read.',
         );
         // The caveat says only what is specific to fields; the closing reminder
         // below it carries the shared "verify before deleting" message.
         expect(out).toContain(
-          'A field is matched by name alone, so one read through a computed ' +
-            'key, spread into props, or used by another repository looks the ' +
-            'same as one nothing reads. A field with a common name never ' +
-            'reaches this list at all.',
+          'A high candidate was traced from every call site of its operation, ' +
+            'and a value handed to code the trace cannot follow counts as read. ' +
+            'A medium candidate was matched by name alone, so a read through a ' +
+            'computed key or a spread looks the same as no read, and a common ' +
+            'name is never flagged. A field read by another repository looks ' +
+            'unread either way.',
         );
         expect(out).not.toContain('before trimming it');
       });
@@ -3076,10 +3216,12 @@ describe('gqlPruner', () => {
         const report = JSON.parse(logged());
         expect(report.unusedFields).toEqual([
           {
+            operation: 'GetUser',
+            path: 'avatarUrl',
             field: 'avatarUrl',
             locations: [{ file: 'a.gql', line: 2 }],
-            confidence: 'medium',
-            reason: 'heuristic-cap',
+            confidence: 'high',
+            reason: 'never-read',
           },
         ]);
         expect(report.summary.unusedFields).toBe(1);
@@ -3091,7 +3233,7 @@ describe('gqlPruner', () => {
         mainFunction({ annotate: true });
 
         expect(errorSpy.mock.calls.flat().join('\n')).toContain(
-          '::warning file=a.gql,line=2::Unused GraphQL field candidate "avatarUrl" (name not found in source)',
+          '::warning file=a.gql,line=2::Unused GraphQL field candidate "avatarUrl" in operation "GetUser" (no traced read reaches it)',
         );
       });
 
