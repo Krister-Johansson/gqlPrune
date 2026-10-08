@@ -1,10 +1,10 @@
 // Fixture source file. gqlPrune parses it; it is never compiled, typechecked,
 // or linted, and the import target does not exist.
 //
-// Every response key the used documents select is named somewhere in this
-// directory except one, which is what the --fields case relies on. Do not add
-// that key here, not even in a comment: the field check is still a plain text
-// search, unlike usage detection.
+// Every response key the used documents select is read somewhere in this
+// directory except one, which is what the --fields case relies on. Do not read
+// that key here, and keep its name out of comments too: an operation the
+// field check cannot trace falls back to a plain text search.
 import { useGetDashboardQuery } from './hooks';
 
 export function Dashboard() {

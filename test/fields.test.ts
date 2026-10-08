@@ -3,11 +3,18 @@
 
 import * as fs from 'fs';
 import {
+  FieldTraceOptions,
   findUnusedFieldCandidates,
   isResponseKeyInSources,
 } from '../src/utils/fields';
-import { extractGraphqlEntities } from '../src/utils/operations';
+import {
+  buildGraphqlEntities,
+  extractGraphqlEntities,
+} from '../src/utils/operations';
 import { SourceFile } from '../src/utils/fileUtils';
+import { parse, Source } from 'graphql';
+import { DEFAULT_USAGE_PATTERNS } from '../src/utils/usagePatterns';
+import { indexOf } from './support';
 
 jest.mock('fs');
 
@@ -65,57 +72,63 @@ describe('fields', () => {
     });
   });
 
-  describe('findUnusedFieldCandidates', () => {
-    it('flags a field whose response key appears nowhere in the source', () => {
+  describe('findUnusedFieldCandidates (name fallback)', () => {
+    // Without trace options no call site can be found, so every operation
+    // falls back to the whole-word search over its own keys.
+    const candidatesOf = (
+      parsed: ReturnType<typeof parseFiles>,
+      sources: SourceFile[],
+      unusedOperations: Parameters<typeof findUnusedFieldCandidates>[1] = [],
+      unusedFragments: Parameters<typeof findUnusedFieldCandidates>[2] = [],
+    ) =>
+      findUnusedFieldCandidates(
+        parsed,
+        unusedOperations,
+        unusedFragments,
+        sources,
+      ).candidates;
+
+    it('flags a key of an operation whose name appears nowhere in the source', () => {
       const parsed = parseFiles({
         'a.gql': 'query GetUser {\n  user {\n    avatarUrl\n  }\n}',
       });
 
       // `user` is read in source, `avatarUrl` is not.
       expect(
-        findUnusedFieldCandidates(
-          parsed,
-          [],
-          [],
-          [source('const { user } = useGetUserQuery().data;')],
-        ),
+        candidatesOf(parsed, [
+          source('const { user } = useGetUserQuery().data;'),
+        ]),
       ).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 3 }] },
+        {
+          operation: 'GetUser',
+          path: 'user.avatarUrl',
+          field: 'avatarUrl',
+          locations: [{ file: 'a.gql', line: 3 }],
+          traced: false,
+        },
       ]);
     });
 
-    it('does not flag a field whose key appears in the source', () => {
+    it('does not flag a key that appears in the source', () => {
       const parsed = parseFiles({
         'a.gql': 'query GetUser {\n  user {\n    avatarUrl\n  }\n}',
       });
 
       expect(
-        findUnusedFieldCandidates(
-          parsed,
-          [],
-          [],
-          [source('const { avatarUrl } = data.user;')],
-        ),
+        candidatesOf(parsed, [source('const { avatarUrl } = data.user;')]),
       ).toEqual([]);
     });
 
-    it('checks the alias rather than the field name when a field is aliased', () => {
+    it('checks the alias rather than the field name', () => {
       const parsed = parseFiles({
         'a.gql': 'query GetUser {\n  picture: avatarUrl\n}',
       });
 
-      // The underlying name is read in source, the alias is not. The alias is
-      // the response key the app actually sees, so it is what gets flagged.
-      const candidates = findUnusedFieldCandidates(
-        parsed,
-        [],
-        [],
-        [source('const a = avatarUrl;')],
-      );
-
-      expect(candidates).toEqual([
-        { field: 'picture', locations: [{ file: 'a.gql', line: 2 }] },
-      ]);
+      expect(
+        candidatesOf(parsed, [source('const a = avatarUrl;')]).map(
+          (candidate) => candidate.path,
+        ),
+      ).toEqual(['picture']);
     });
 
     it('never flags __typename', () => {
@@ -123,72 +136,46 @@ describe('fields', () => {
         'a.gql': 'query GetUser {\n  __typename\n}',
       });
 
-      expect(findUnusedFieldCandidates(parsed, [], [], [source('')])).toEqual(
-        [],
-      );
+      expect(candidatesOf(parsed, [source('')])).toEqual([]);
     });
 
     it('ignores fields of an unused operation', () => {
-      const parsed = parseFiles({
-        'a.gql': 'query Dead {\n  deadField\n}',
-      });
+      const parsed = parseFiles({ 'a.gql': 'query Dead {\n  deadField\n}' });
 
       expect(
-        findUnusedFieldCandidates(
+        candidatesOf(
           parsed,
-          [{ name: 'Dead', type: 'query', filePath: 'a.gql' }],
-          [],
           [source('')],
+          [{ name: 'Dead', type: 'query', filePath: 'a.gql' }],
         ),
       ).toEqual([]);
     });
 
-    it('treats an anonymous operation as used', () => {
+    it('names an anonymous operation as such', () => {
       const parsed = parseFiles({ 'a.gql': 'query {\n  anonField\n}' });
 
-      expect(findUnusedFieldCandidates(parsed, [], [], [source('')])).toEqual([
-        { field: 'anonField', locations: [{ file: 'a.gql', line: 2 }] },
-      ]);
-    });
-
-    it('ignores fields of a fragment only reachable from an unused operation', () => {
-      const parsed = parseFiles({
-        'ops.gql': 'query Dead {\n  ...DeadFields\n}',
-        'frags.gql': 'fragment DeadFields on User {\n  deadField\n}',
-      });
-
       expect(
-        findUnusedFieldCandidates(
-          parsed,
-          [{ name: 'Dead', type: 'query', filePath: 'ops.gql' }],
-          [],
-          [source('')],
+        candidatesOf(parsed, [source('')]).map(
+          (candidate) => candidate.operation,
         ),
-      ).toEqual([]);
+      ).toEqual(['(anonymous)']);
     });
 
-    it('reports fields of a fragment reachable from a used operation', () => {
-      const parsed = parseFiles({
-        'ops.gql': 'query Live {\n  ...LiveFields\n}',
-        'frags.gql': 'fragment LiveFields on User {\n  liveField\n}',
-      });
-
-      expect(
-        findUnusedFieldCandidates(parsed, [], [], [source('useLiveQuery()')]),
-      ).toEqual([
-        { field: 'liveField', locations: [{ file: 'frags.gql', line: 2 }] },
-      ]);
-    });
-
-    it('follows transitive spreads from a used operation', () => {
+    it('reports fields of a spread fragment under the operation that spreads it', () => {
       const parsed = parseFiles({
         'ops.gql': 'query Live {\n  ...Outer\n}',
         'frags.gql':
           'fragment Outer on User {\n  ...Inner\n}\nfragment Inner on User {\n  nestedField\n}',
       });
 
-      expect(findUnusedFieldCandidates(parsed, [], [], [source('')])).toEqual([
-        { field: 'nestedField', locations: [{ file: 'frags.gql', line: 5 }] },
+      expect(candidatesOf(parsed, [source('')])).toEqual([
+        {
+          operation: 'Live',
+          path: 'nestedField',
+          field: 'nestedField',
+          locations: [{ file: 'frags.gql', line: 5 }],
+          traced: false,
+        },
       ]);
     });
 
@@ -199,11 +186,11 @@ describe('fields', () => {
       });
 
       expect(
-        findUnusedFieldCandidates(
+        candidatesOf(
           parsed,
+          [source('')],
           [],
           [{ name: 'DeadFields', filePath: 'frags.gql' }],
-          [source('')],
         ),
       ).toEqual([]);
     });
@@ -214,49 +201,250 @@ describe('fields', () => {
         'a.gql': 'query GetUser {\n  avatarUrl\n}',
       });
 
-      expect(findUnusedFieldCandidates(parsed, [], [], [source('')])).toEqual([
-        { field: 'avatarUrl', locations: [{ file: 'a.gql', line: 2 }] },
-      ]);
+      expect(
+        candidatesOf(parsed, [source('')]).map((candidate) => candidate.path),
+      ).toEqual(['avatarUrl']);
     });
 
-    it('aggregates every selection of the same key onto one finding', () => {
+    it('reports a key once per operation that selects it', () => {
       const parsed = parseFiles({
         'a.gql': 'query One {\n  user {\n    avatarUrl\n  }\n}',
         'b.gql': 'query Two {\n  avatarUrl\n}',
       });
 
       expect(
-        findUnusedFieldCandidates(
-          parsed,
-          [],
-          [],
-          [source('const { user } = data;')],
+        candidatesOf(parsed, [source('const { user } = data;')]).map(
+          (candidate) => `${candidate.operation}: ${candidate.path}`,
         ),
-      ).toEqual([
-        {
-          field: 'avatarUrl',
-          locations: [
-            { file: 'a.gql', line: 3 },
-            { file: 'b.gql', line: 2 },
-          ],
-        },
-      ]);
+      ).toEqual(['One: user.avatarUrl', 'Two: avatarUrl']);
     });
 
-    it('collects nested selections and keeps first-seen order', () => {
+    it('checks every key on its own, nested ones included', () => {
       const parsed = parseFiles({
         'a.gql': 'query One {\n  outerField {\n    innerField\n  }\n}',
       });
 
       expect(
-        findUnusedFieldCandidates(parsed, [], [], [source('')]).map(
-          (candidate) => candidate.field,
-        ),
-      ).toEqual(['outerField', 'innerField']);
+        candidatesOf(parsed, [source('')]).map((candidate) => candidate.path),
+      ).toEqual(['outerField', 'outerField.innerField']);
     });
 
-    it('returns [] when there is nothing to scan', () => {
-      expect(findUnusedFieldCandidates([], [], [], [])).toEqual([]);
+    it('records each operation as matched by name, with nothing to trace', () => {
+      const parsed = parseFiles({ 'a.gql': 'query One {\n  id\n}' });
+
+      expect(
+        findUnusedFieldCandidates(parsed, [], [], [source('id')]).traces,
+      ).toEqual([
+        {
+          operation: 'One',
+          type: 'query',
+          file: 'a.gql',
+          mode: 'fallback',
+          fallback: 'no-reference',
+          callSites: [],
+        },
+      ]);
+    });
+
+    it('returns nothing when there is nothing to scan', () => {
+      expect(findUnusedFieldCandidates([], [], [], [])).toEqual({
+        candidates: [],
+        traces: [],
+      });
+    });
+  });
+
+  describe('findUnusedFieldCandidates (traced)', () => {
+    /** Parses gql documents in memory; files are keyed by absolute path. */
+    const documents = (files: Record<string, string>) =>
+      Object.entries(files).map(([file, text]) =>
+        buildGraphqlEntities(parse(new Source(text, file)), file),
+      );
+
+    const traceOptions = (
+      files: Record<string, string>,
+    ): FieldTraceOptions => ({
+      index: indexOf(files),
+      usagePatterns: DEFAULT_USAGE_PATTERNS,
+      source: (path) =>
+        files[path] === undefined
+          ? undefined
+          : { file: path, content: files[path] },
+    });
+
+    const analyse = (
+      gql: Record<string, string>,
+      files: Record<string, string>,
+    ) =>
+      findUnusedFieldCandidates(
+        documents(gql),
+        [],
+        [],
+        Object.entries(files).map(([file, content]) => ({ file, content })),
+        traceOptions(files),
+      );
+
+    const USER = {
+      '/g/user.gql':
+        'query GetUser {\n  user {\n    id\n    avatarUrl\n    ...Extra\n  }\n}\nfragment Extra on User {\n  bio\n}',
+    };
+
+    it('reports what no traced read reaches, fragments merged in', () => {
+      const result = analyse(USER, {
+        '/p/App.tsx':
+          'export function App() {\n  const { data } = useGetUserQuery();\n  return <p>{data.user.id}</p>;\n}',
+      });
+
+      expect(result.candidates).toEqual([
+        {
+          operation: 'GetUser',
+          path: 'user.avatarUrl',
+          field: 'avatarUrl',
+          locations: [{ file: '/g/user.gql', line: 4 }],
+          traced: true,
+        },
+        {
+          operation: 'GetUser',
+          path: 'user.bio',
+          field: 'bio',
+          locations: [{ file: '/g/user.gql', line: 9 }],
+          traced: true,
+        },
+      ]);
+      expect(result.traces).toEqual([
+        {
+          operation: 'GetUser',
+          type: 'query',
+          file: '/g/user.gql',
+          mode: 'traced',
+          callSites: [{ file: '/p/App.tsx', line: 2, column: 20 }],
+        },
+      ]);
+    });
+
+    it('unions the reads of every call site', () => {
+      const result = analyse(USER, {
+        '/p/A.tsx':
+          'export function A() {\n  const { data } = useGetUserQuery();\n  return `${data.user.id}`;\n}',
+        '/p/B.tsx':
+          'export function B() {\n  const { data } = useQuery(GetUserDocument);\n  return `${data.user.bio}`;\n}',
+      });
+
+      expect(result.candidates.map((candidate) => candidate.path)).toEqual([
+        'user.avatarUrl',
+      ]);
+      expect(result.traces[0].callSites).toHaveLength(2);
+    });
+
+    it('traces an inline document through the constant passed to a call', () => {
+      const inline = buildGraphqlEntities(
+        parse(
+          new Source(
+            'query GetFeed {\n  feed {\n    id\n    title\n  }\n}',
+            '/p/App.tsx',
+          ),
+        ),
+        '/p/App.tsx',
+      );
+      const files = {
+        '/p/App.tsx':
+          'const feedQuery = gql``;\nexport function App() {\n  const { data } = useQuery(feedQuery);\n  return `${data.feed.title}`;\n}',
+      };
+
+      const result = findUnusedFieldCandidates(
+        [{ ...inline, identifier: 'feedQuery' }],
+        [],
+        [],
+        [{ file: '/p/App.tsx', content: files['/p/App.tsx'] }],
+        traceOptions(files),
+      );
+
+      expect(result.candidates.map((candidate) => candidate.path)).toEqual([
+        'feed.id',
+      ]);
+      expect(result.traces[0].mode).toBe('traced');
+    });
+
+    it('falls back to the name search when a reference is not a call', () => {
+      const result = analyse(USER, {
+        '/p/App.tsx':
+          'export function App() {\n  const { data } = useGetUserQuery();\n  return `${data.user.id}`;\n}\nconst refetchQueries = [GetUserDocument];\nconst bio = 1;',
+      });
+
+      expect(result.traces[0]).toEqual({
+        operation: 'GetUser',
+        type: 'query',
+        file: '/g/user.gql',
+        mode: 'fallback',
+        fallback: 'untraceable-reference',
+        reference: { file: '/p/App.tsx', line: 5, column: 25 },
+        callSites: [],
+      });
+      // `id` and `bio` are words in the file, `avatarUrl` is not.
+      expect(result.candidates).toEqual([
+        {
+          operation: 'GetUser',
+          path: 'user.avatarUrl',
+          field: 'avatarUrl',
+          locations: [{ file: '/g/user.gql', line: 4 }],
+          traced: false,
+        },
+      ]);
+    });
+
+    it('falls back for an operation nothing calls, beside one that is traced', () => {
+      const result = analyse(
+        {
+          ...USER,
+          '/g/feed.gql': 'query GetFeed {\n  feed {\n    title\n  }\n}',
+        },
+        {
+          '/p/App.tsx':
+            'export function App() {\n  const { data } = useGetUserQuery();\n  return `${data.user.id} ${data.user.bio}`;\n}',
+        },
+      );
+
+      expect(
+        result.candidates.map(
+          (candidate) =>
+            `${candidate.operation}: ${candidate.path} (${candidate.traced})`,
+        ),
+      ).toEqual([
+        'GetUser: user.avatarUrl (true)',
+        'GetFeed: feed (false)',
+        'GetFeed: feed.title (false)',
+      ]);
+      expect(result.traces.map((trace) => trace.fallback)).toEqual([
+        undefined,
+        'no-reference',
+      ]);
+    });
+
+    it('falls back for a mutation, whose selection may only feed the cache', () => {
+      const result = analyse(
+        {
+          '/g/save.gql':
+            'mutation SaveUser {\n  saveUser {\n    id\n    updatedAt\n  }\n}',
+        },
+        {
+          '/p/App.tsx':
+            'export function App() {\n  const [save] = useSaveUserMutation();\n  save();\n}\nconst id = 1;',
+        },
+      );
+
+      expect(result.traces[0].fallback).toBe('mutation');
+      expect(result.candidates.map((candidate) => candidate.path)).toEqual([
+        'saveUser',
+        'saveUser.updatedAt',
+      ]);
+    });
+
+    it('treats a reference in a file the parser cannot take as untraceable', () => {
+      const result = analyse(USER, {
+        '/p/App.vue': '<script>useGetUserQuery()</script>',
+      });
+
+      expect(result.traces[0].fallback).toBe('untraceable-reference');
     });
   });
 });

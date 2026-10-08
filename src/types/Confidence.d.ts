@@ -20,14 +20,18 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
  * - `string-mention`: the name appears inside a string in ordinary source,
  *   which may be a reference built at runtime.
  * - `heuristic-cap`: the detection itself is too weak for the grade the
- *   evidence would otherwise give (see the field candidates).
+ *   evidence would otherwise give: a field candidate matched by name because
+ *   its operation had no call site to trace.
+ * - `never-read`: a field candidate whose operation was traced from every
+ *   call site, with no read path reaching the field.
  */
 export type ConfidenceReason =
   | 'name-absent'
   | 'generated-only'
   | 'name-referenced'
   | 'string-mention'
-  | 'heuristic-cap';
+  | 'heuristic-cap'
+  | 'never-read';
 
 /** The grade carried by every finding gqlPrune reports as a candidate. */
 export interface ConfidenceGrade {

@@ -32,7 +32,9 @@ src/
     fragments.ts          findUnusedFragmentsInCorpus (cross-file spread graph)
     orphans.ts            findOrphanedFiles (whole-file dead documents)
     deprecated.ts         findDeprecatedUsages (opt-in, needs a local SDL)
-    fields.ts             findUnusedFieldCandidates (opt-in `--fields`, advisory)
+    fields.ts             findUnusedFieldCandidates (opt-in `--fields`): traced or name fallback
+    selectionTree.ts      buildSelectionTree: an operation's response keys, fragments merged
+    resultFlow.ts         traceCallSite: follows a call's result to the fields it reads
     inline.ts             extractInlineDocuments (opt-in `--inline`, sites from sourceModule)
     sourceModule.ts       parseSourceModule: one file → imports, exports, references, sites
     referenceIndex.ts     buildReferenceIndex: references resolved to canonical names
@@ -52,6 +54,7 @@ test/                     Jest specs, one per source module
     confidence.e2e.test.ts  Grades, reasons, --min-confidence
     interactions.e2e.test.ts  Every option at once, on one project
     resolution.e2e.test.ts  Usage through re-exports, barrels, renames, defaults
+    fields.e2e.test.ts    Field candidates: traced, fallback, escapes, grades
     contract.e2e.test.ts  The JSON shape and the exit-code matrix, pinned
     completion.e2e.test.ts  The shell completion scripts
     packaging.e2e.test.ts   Pack, install, run the installed binary
