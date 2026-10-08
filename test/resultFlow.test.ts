@@ -727,6 +727,21 @@ describe('traceCallSite (less common shapes)', () => {
     ).toEqual([]);
   });
 
+  it('never swaps a named import it cannot follow for the default export', () => {
+    // UserCard is not a function component, so the trace cannot follow it.
+    // The file's default export is an unrelated component that reads nothing
+    // the query selects; tracing into it would flag every field.
+    expect(
+      unread(USER_QUERY, {
+        '/p/App.tsx': `import { UserCard } from './UserCard';\n${component(
+          'const { data } = useGetUserQuery();\nreturn <UserCard user={data.user} />;',
+        )}`,
+        '/p/UserCard.tsx':
+          'export const UserCard = styled.div`color: red`;\nexport default function Other() { return null; }',
+      }),
+    ).toEqual([]);
+  });
+
   it('reads everything for a component in a file it cannot parse', () => {
     expect(
       unread(USER_QUERY, {

@@ -35,12 +35,16 @@ export function createFieldReads(): FieldReads {
 export interface TraceEnvironment {
   /** The parsed file at a resolved path; undefined outside the corpus or for a file the parser cannot take. */
   sourceFile(path: string): ts.SourceFile | undefined;
-  /** The file and name that declare the identifier at this 1-based position, when it is in the corpus. */
+  /**
+   * The file and name that declare the identifier at this 1-based position,
+   * when it is in the corpus. `anonymousDefault` marks a binding to an
+   * anonymous default export, whose `name` is only the importer's name for it.
+   */
   declarationOf(
     path: string,
     line: number,
     column: number,
-  ): { path: string; name: string } | undefined;
+  ): { path: string; name: string; anonymousDefault?: boolean } | undefined;
 }
 
 /** A call that receives an operation's result, located in a parsed file. */
@@ -103,9 +107,11 @@ export function createTraceEnvironment(
         .get(path)
         ?.find((ref) => ref.line === line && ref.column === column);
       if (reference === undefined) return undefined;
-      const { origin, name } = reference.canonical;
+      const { origin, name, anonymousDefault } = reference.canonical;
       if (origin === 'outside' || origin === 'unbound') return undefined;
-      return { path: origin, name };
+      return anonymousDefault
+        ? { path: origin, name, anonymousDefault }
+        : { path: origin, name };
     },
   };
 }
@@ -1227,9 +1233,11 @@ class Tracer {
     if (declared === undefined || declared.path === ctx.path) return undefined;
     const sourceFile = this.env.sourceFile(declared.path);
     if (sourceFile === undefined) return undefined;
-    const fn =
-      findComponent(sourceFile, declared.name) ??
-      defaultExportComponent(sourceFile);
+    // Only an anonymous default export is looked up as "the default": a named
+    // binding that is not a component must escape, never borrow another one.
+    const fn = declared.anonymousDefault
+      ? defaultExportComponent(sourceFile)
+      : findComponent(sourceFile, declared.name);
     return fn === undefined
       ? undefined
       : { fn, sourceFile, path: declared.path };
