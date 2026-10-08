@@ -1,0 +1,17 @@
+# FIXTURE for the field-tracing e2e spec; never sent to a server.
+# Traced: src/UserPage.tsx is the one call site. It reads the name, the city
+# and the id, and hands the user to ProfileCard, which reads the bio. Nothing
+# reads avatarUrl, address.zip or website.
+query GetTracedUser($id: ID!) {
+  user(id: $id) {
+    __typename
+    id
+    name
+    avatarUrl
+    address {
+      city
+      zip
+    }
+    ...ProfileFields
+  }
+}

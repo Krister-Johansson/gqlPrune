@@ -1,0 +1,6 @@
+# FIXTURE for the field-tracing e2e spec. Spread by GetTracedUser, so its
+# fields are judged as part of that operation's selection.
+fragment ProfileFields on User {
+  bio
+  website
+}
