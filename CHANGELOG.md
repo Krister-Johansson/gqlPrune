@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.1.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v4.0.0...gqlprune-v4.1.0) (2026-10-19)
+
+
+### Features
+
+* **fields:** trace call-site results to find fields nothing reads ([#209](https://github.com/Krister-Johansson/gqlPrune/issues/209)) ([2bedf3f](https://github.com/Krister-Johansson/gqlPrune/commit/2bedf3fa5a003fc9b8d0f36b04675592e223f8b5)), closes [#145](https://github.com/Krister-Johansson/gqlPrune/issues/145)
+
 ## [4.0.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v3.0.0...gqlprune-v4.0.0) (2026-10-07)
 
 
