@@ -2,21 +2,21 @@
 // Copyright (c) 2023 Krister Johansson
 
 import { OperationDefinitionNode, parse, Source } from 'graphql';
-import { buildGraphqlEntities } from '../src/utils/operations';
+import { buildGraphqlEntities } from '../src/utils/operations.js';
 import {
   createFieldReads,
   createTraceEnvironment,
   findCallSite,
   traceCallSite,
   unreadSelections,
-} from '../src/utils/resultFlow';
+} from '../src/utils/resultFlow.js';
 import {
   buildSelectionTree,
   collectFragmentDefinitions,
   SelectionNode,
-} from '../src/utils/selectionTree';
-import { parseForTrace } from '../src/utils/resultFlow';
-import { indexOf } from './support';
+} from '../src/utils/selectionTree.js';
+import { parseForTrace } from '../src/utils/resultFlow.js';
+import { indexOf } from './support/index.js';
 
 const USER_QUERY = `
 query GetUser {

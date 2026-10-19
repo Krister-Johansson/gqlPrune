@@ -17,8 +17,8 @@ import {
   generateConfig,
   splitFolders,
   topLevelRoots,
-} from '../src/core/configGenerator';
-import { scanProject } from '../src/core/gqlPruner';
+} from '../src/core/configGenerator.js';
+import { scanProject } from '../src/core/gqlPruner.js';
 
 jest.mock('fs');
 jest.mock('@inquirer/checkbox', () => ({
@@ -33,13 +33,14 @@ jest.mock('@inquirer/input', () => ({
   __esModule: true,
   default: jest.fn(),
 }));
-jest.mock('../src/core/gqlPruner', () => ({
+jest.mock('../src/core/gqlPruner.js', () => ({
   scanProject: jest.fn(),
   resolveDirs: (value: unknown) =>
     Array.isArray(value) ? value : value ? [value] : [],
   // Real, so `init` expands globs and checks directories exactly as a scan
   // does; the mocked fs tree below is what it walks.
-  resolveScanDirs: jest.requireActual('../src/core/gqlPruner').resolveScanDirs,
+  resolveScanDirs: jest.requireActual('../src/core/gqlPruner.js')
+    .resolveScanDirs,
 }));
 
 const mockedScan = scanProject as jest.Mock;

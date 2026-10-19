@@ -8,8 +8,8 @@ import {
   parseSourceModule,
   scriptKindFor,
   tokenizeSourceModule,
-} from '../src/utils/sourceModule';
-import type { Reference } from '../src/utils/sourceModule';
+} from '../src/utils/sourceModule.js';
+import type { Reference } from '../src/utils/sourceModule.js';
 
 function refs(content: string, file = 'src/App.tsx'): Reference[] {
   return parseSourceModule(file, content).references;

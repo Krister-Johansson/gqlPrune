@@ -2,13 +2,13 @@
 // Copyright (c) 2023 Krister Johansson
 
 import { OperationDefinitionNode, parse, Source } from 'graphql';
-import { buildGraphqlEntities } from '../src/utils/operations';
+import { buildGraphqlEntities } from '../src/utils/operations.js';
 import {
   buildSelectionTree,
   collectFragmentDefinitions,
   SelectionNode,
   selectionNodes,
-} from '../src/utils/selectionTree';
+} from '../src/utils/selectionTree.js';
 
 /** Parses one document per file and returns the entities a scan would hold. */
 const entitiesOf = (files: Record<string, string>) =>

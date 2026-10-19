@@ -15,6 +15,11 @@ module.exports = {
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { diagnostics: { ignoreCodes: [151002] } }],
   },
+  // The specs import with `.js` specifiers, as src/ does under "module":
+  // "node16"; map them back to their `.ts` files, as jest.config.cjs does.
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   // Spawning processes is slower than the mocked unit tests; the packaging case
   // raises its own limit further.
   testTimeout: 60_000,

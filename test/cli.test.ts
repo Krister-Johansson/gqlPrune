@@ -37,7 +37,7 @@ describe('cli dispatch', () => {
       mainFunction: jest.Mock;
     };
     jest.isolateModules(() => {
-      jest.doMock('../src/core/configGenerator', () => ({
+      jest.doMock('../src/core/configGenerator.js', () => ({
         generateConfig: jest
           .fn()
           .mockImplementation(() =>
@@ -45,22 +45,22 @@ describe('cli dispatch', () => {
           ),
       }));
       // Partial mock: cli.ts also imports the real escapeAnnotationMessage.
-      jest.doMock('../src/core/gqlPruner', () => ({
-        ...jest.requireActual('../src/core/gqlPruner'),
+      jest.doMock('../src/core/gqlPruner.js', () => ({
+        ...jest.requireActual('../src/core/gqlPruner.js'),
         mainFunction: jest.fn(),
       }));
       // pkgInfo reads package.json via import.meta (ESM-only); stub it so the
       // CommonJS test transform never touches it.
-      jest.doMock('../src/utils/pkgInfo', () => ({
+      jest.doMock('../src/utils/pkgInfo.js', () => ({
         pkg: {
           name: 'gqlprune',
           version: '0.0.0-test',
           homepage: 'https://example.test/gqlprune#readme',
         },
       }));
-      const cfg = require('../src/core/configGenerator');
-      const pruner = require('../src/core/gqlPruner');
-      require('../src/cli');
+      const cfg = require('../src/core/configGenerator.js');
+      const pruner = require('../src/core/gqlPruner.js');
+      require('../src/cli.js');
       mocks = {
         generateConfig: cfg.generateConfig,
         mainFunction: pruner.mainFunction,

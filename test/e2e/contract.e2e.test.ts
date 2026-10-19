@@ -21,7 +21,7 @@ import {
   parseReport,
   runCli,
   type JsonReport,
-} from './helpers';
+} from './helpers.js';
 
 const combined = fixtureProject('combined');
 const CLEAN_SCAN = ['--graphql', 'clean/graphql', '--src', 'clean/src'];

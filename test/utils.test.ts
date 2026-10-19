@@ -6,7 +6,7 @@ import {
   escapeRegExp,
   pluralize,
   wholeWordPattern,
-} from '../src/utils/stringHelpers';
+} from '../src/utils/stringHelpers.js';
 
 describe('capitalizeFirstLetter', () => {
   it('should capitalize the first letter of a string', () => {

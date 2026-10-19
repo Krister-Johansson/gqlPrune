@@ -2,10 +2,10 @@
 // Copyright (c) 2023 Krister Johansson
 
 import * as path from 'path';
-import { findOrphanedFiles } from '../src/utils/orphans';
-import { GraphqlFileEntities } from '../src/utils/operations';
-import { OperationInfo } from '../src/types/OperationInfo';
-import { FragmentInfo } from '../src/types/FragmentInfo';
+import { findOrphanedFiles } from '../src/utils/orphans.js';
+import { GraphqlFileEntities } from '../src/utils/operations.js';
+import { OperationInfo } from '../src/types/OperationInfo.js';
+import { FragmentInfo } from '../src/types/FragmentInfo.js';
 
 const op = (name: string, filePath: string): OperationInfo => ({
   name,

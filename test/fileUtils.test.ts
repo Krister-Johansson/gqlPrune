@@ -8,7 +8,7 @@ import {
   expandDirPatterns,
   findFilesWithExtension,
   readSourceFiles,
-} from '../src/utils/fileUtils';
+} from '../src/utils/fileUtils.js';
 
 jest.mock('fs');
 

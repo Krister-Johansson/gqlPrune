@@ -13,11 +13,11 @@ import {
   formatCodegenVerboseLines,
   globToDirectory,
   loadCodegenConfig,
-} from '../src/utils/codegen';
+} from '../src/utils/codegen.js';
 import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
   DEFAULT_USAGE_PATTERNS,
-} from '../src/utils/usagePatterns';
+} from '../src/utils/usagePatterns.js';
 
 jest.mock('fs');
 

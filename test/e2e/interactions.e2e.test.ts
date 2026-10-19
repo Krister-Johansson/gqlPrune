@@ -25,7 +25,7 @@ import {
   runCli,
   toPosix,
   type CliResult,
-} from './helpers';
+} from './helpers.js';
 
 const combined = fixtureProject('combined');
 const EVERYTHING = [

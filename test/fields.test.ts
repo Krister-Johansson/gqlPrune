@@ -6,15 +6,15 @@ import {
   FieldTraceOptions,
   findUnusedFieldCandidates,
   isResponseKeyInSources,
-} from '../src/utils/fields';
+} from '../src/utils/fields.js';
 import {
   buildGraphqlEntities,
   extractGraphqlEntities,
-} from '../src/utils/operations';
-import { SourceFile } from '../src/utils/fileUtils';
+} from '../src/utils/operations.js';
+import { SourceFile } from '../src/utils/fileUtils.js';
 import { parse, Source } from 'graphql';
-import { DEFAULT_USAGE_PATTERNS } from '../src/utils/usagePatterns';
-import { indexOf } from './support';
+import { DEFAULT_USAGE_PATTERNS } from '../src/utils/usagePatterns.js';
+import { indexOf } from './support/index.js';
 
 jest.mock('fs');
 
