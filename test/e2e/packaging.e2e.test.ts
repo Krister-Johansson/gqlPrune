@@ -11,7 +11,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fixtureRoot, repoRoot, runProcess, toPosix } from './helpers';
+import { fixtureRoot, repoRoot, runProcess, toPosix } from './helpers.js';
 
 const isWindows = process.platform === 'win32';
 const npm = isWindows ? 'npm.cmd' : 'npm';

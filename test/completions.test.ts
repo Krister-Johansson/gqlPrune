@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Krister Johansson
 
-import { COMMANDS, FLAGS, SHELLS } from '../src/utils/args';
-import type { FlagSpec, Shell } from '../src/utils/args';
-import { completionScript, isShell } from '../src/utils/completions';
+import { COMMANDS, FLAGS, SHELLS } from '../src/utils/args.js';
+import type { FlagSpec, Shell } from '../src/utils/args.js';
+import { completionScript, isShell } from '../src/utils/completions.js';
 
 /**
  * How each shell spells a long flag in its completion script. Driving the

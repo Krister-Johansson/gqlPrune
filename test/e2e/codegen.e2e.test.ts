@@ -32,7 +32,7 @@ import {
   runCli,
   runCliInteractive,
   toPosix,
-} from './helpers';
+} from './helpers.js';
 
 const derived = fixtureProject('codegen', 'derived');
 const precedence = fixtureProject('codegen', 'precedence');

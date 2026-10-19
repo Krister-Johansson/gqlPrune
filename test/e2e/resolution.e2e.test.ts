@@ -19,7 +19,7 @@ import {
   parseReport,
   runCli,
   type CliResult,
-} from './helpers';
+} from './helpers.js';
 
 const SCAN = ['--graphql', 'resolution/graphql', '--src', 'resolution/src'];
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Krister Johansson
 
-import { createCorpusResolver } from '../../src/utils/moduleResolver';
+import { createCorpusResolver } from '../../src/utils/moduleResolver.js';
 import {
   buildReferenceIndex,
   ReferenceIndex,
-} from '../../src/utils/referenceIndex';
-import { parseSourceModule } from '../../src/utils/sourceModule';
+} from '../../src/utils/referenceIndex.js';
+import { parseSourceModule } from '../../src/utils/sourceModule.js';
 
 /**
  * Builds a reference index over in-memory source files, keyed by the path the

@@ -6,8 +6,8 @@ import {
   buildFragmentPatterns,
   buildUsagePatterns,
   expandPattern,
-} from '../src/utils/usagePatterns';
-import { OperationInfo } from '../src/types/OperationInfo';
+} from '../src/utils/usagePatterns.js';
+import { OperationInfo } from '../src/types/OperationInfo.js';
 
 const op: OperationInfo = {
   name: 'getUser',

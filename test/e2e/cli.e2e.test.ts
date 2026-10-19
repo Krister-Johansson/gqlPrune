@@ -39,7 +39,7 @@ import {
   runCli,
   toPosix,
   type CliResult,
-} from './helpers';
+} from './helpers.js';
 
 const APP_SCAN = ['--graphql', 'app/graphql', '--src', 'app/src'];
 const CLEAN_SCAN = ['--graphql', 'clean/graphql', '--src', 'clean/src'];

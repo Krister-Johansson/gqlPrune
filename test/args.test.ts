@@ -7,7 +7,7 @@ import {
   SHELLS,
   formatHelp,
   parseArgs,
-} from '../src/utils/args';
+} from '../src/utils/args.js';
 
 describe('parseArgs', () => {
   it('rejects a value passed to a flag that takes none', () => {

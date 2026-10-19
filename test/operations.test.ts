@@ -8,7 +8,7 @@ import {
   extractGraphqlEntities,
   extractImports,
   getFragmentSpreads,
-} from '../src/utils/operations';
+} from '../src/utils/operations.js';
 
 jest.mock('fs');
 

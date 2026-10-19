@@ -27,7 +27,7 @@ import {
   runCli,
   toPosix,
   type CliResult,
-} from './helpers';
+} from './helpers.js';
 
 const INLINE_SCAN = ['--graphql', 'inline/graphql', '--src', 'inline/src'];
 const FRAGMENT_SCAN = [

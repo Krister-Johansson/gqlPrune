@@ -14,9 +14,9 @@ import {
   isConfidenceLevel,
   lowestConfidence,
   meetsMinConfidence,
-} from '../src/utils/confidence';
-import { OperationInfo } from '../src/types/OperationInfo';
-import { indexOf } from './support';
+} from '../src/utils/confidence.js';
+import { OperationInfo } from '../src/types/OperationInfo.js';
+import { indexOf } from './support/index.js';
 
 /** The index the grader reads: one file unless a second is given. */
 const source = (content: string, file = 'src/App.tsx') =>

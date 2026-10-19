@@ -13,7 +13,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { assertCliBuilt, runCli } from './helpers';
+import { assertCliBuilt, runCli } from './helpers.js';
 
 /** Whether a shell is on PATH and runnable. */
 function hasShell(shell: string): boolean {

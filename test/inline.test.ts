@@ -5,9 +5,9 @@ import {
   extractInlineDocuments,
   findInlineIdentifierUsage,
   toInlineEntities,
-} from '../src/utils/inline';
-import { parseSourceModule } from '../src/utils/sourceModule';
-import { indexOf } from './support';
+} from '../src/utils/inline.js';
+import { parseSourceModule } from '../src/utils/sourceModule.js';
+import { indexOf } from './support/index.js';
 
 // Document sites come from the parsed syntax tree now (see
 // test/sourceModule.test.ts for the recognition cases); these tests cover

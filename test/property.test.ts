@@ -2,19 +2,22 @@
 // Copyright (c) 2023 Krister Johansson
 
 import fc from 'fast-check';
-import { capitalizeFirstLetter } from '../src/utils/stringHelpers';
-import { buildUsagePatterns, expandPattern } from '../src/utils/usagePatterns';
-import { createExcludeMatcher } from '../src/utils/fileUtils';
-import { indexOf } from './support';
-import { createConfigExcludeMatcher } from '../src/core/gqlPruner';
+import { capitalizeFirstLetter } from '../src/utils/stringHelpers.js';
+import {
+  buildUsagePatterns,
+  expandPattern,
+} from '../src/utils/usagePatterns.js';
+import { createExcludeMatcher } from '../src/utils/fileUtils.js';
+import { indexOf } from './support/index.js';
+import { createConfigExcludeMatcher } from '../src/core/gqlPruner.js';
 import {
   findUnusedFragments,
   findUnusedFragmentsInCorpus,
   reachableFragments,
-} from '../src/utils/fragments';
-import { OperationInfo } from '../src/types/OperationInfo';
-import { FragmentInfo } from '../src/types/FragmentInfo';
-import { GraphqlFileEntities } from '../src/utils/operations';
+} from '../src/utils/fragments.js';
+import { OperationInfo } from '../src/types/OperationInfo.js';
+import { FragmentInfo } from '../src/types/FragmentInfo.js';
+import { GraphqlFileEntities } from '../src/utils/operations.js';
 
 // Property-based tests: instead of hand-picked examples, fast-check generates
 // hundreds of inputs per property and asserts invariants that must hold for

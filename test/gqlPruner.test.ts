@@ -3,11 +3,11 @@
 
 import * as fs from 'fs';
 import { buildSchema, GraphQLSchema, parse, Source } from 'graphql';
-import * as fileUtils from '../src/utils/fileUtils';
-import { DEFAULT_SOURCE_EXTENSIONS } from '../src/utils/fileUtils';
-import { extractGraphqlEntities } from '../src/utils/operations';
-import * as fragments from '../src/utils/fragments';
-import * as inline from '../src/utils/inline';
+import * as fileUtils from '../src/utils/fileUtils.js';
+import { DEFAULT_SOURCE_EXTENSIONS } from '../src/utils/fileUtils.js';
+import { extractGraphqlEntities } from '../src/utils/operations.js';
+import * as fragments from '../src/utils/fragments.js';
+import * as inline from '../src/utils/inline.js';
 import {
   buildJsonReport,
   resolveSourceExtensions,
@@ -36,20 +36,20 @@ import {
   scanProject,
   sectionRule,
   sectionTitle,
-} from '../src/core/gqlPruner';
+} from '../src/core/gqlPruner.js';
 import {
   DEFAULT_FRAGMENT_USAGE_PATTERNS,
   DEFAULT_USAGE_PATTERNS,
-} from '../src/utils/usagePatterns';
-import { OperationInfo } from '../src/types/OperationInfo';
-import { GqlPruneConfig } from '../src/types/GqlPruneConfig';
-import { indexOf } from './support';
+} from '../src/utils/usagePatterns.js';
+import { OperationInfo } from '../src/types/OperationInfo.js';
+import { GqlPruneConfig } from '../src/types/GqlPruneConfig.js';
+import { indexOf } from './support/index.js';
 
 jest.mock('fs');
 // Partial mock: keep the pure helpers (findUsageMatch) real, stub the
 // filesystem-backed ones so mainFunction's orchestration can be driven directly.
-jest.mock('../src/utils/fileUtils', () => {
-  const actual = jest.requireActual('../src/utils/fileUtils');
+jest.mock('../src/utils/fileUtils.js', () => {
+  const actual = jest.requireActual('../src/utils/fileUtils.js');
   return {
     ...actual,
     directoryExists: jest.fn(),
@@ -59,26 +59,26 @@ jest.mock('../src/utils/fileUtils', () => {
 });
 // Partial mock again: only the filesystem-backed extractor is stubbed, so the
 // pure AST helpers (getFragmentSpreads) stay real for the field pass.
-jest.mock('../src/utils/operations', () => ({
-  ...jest.requireActual('../src/utils/operations'),
+jest.mock('../src/utils/operations.js', () => ({
+  ...jest.requireActual('../src/utils/operations.js'),
   extractGraphqlEntities: jest.fn(),
 }));
-jest.mock('../src/utils/fragments', () => ({
-  ...jest.requireActual('../src/utils/fragments'),
+jest.mock('../src/utils/fragments.js', () => ({
+  ...jest.requireActual('../src/utils/fragments.js'),
   findUnusedFragmentsInCorpus: jest.fn(() => []),
 }));
 // The tsconfig lookup goes through the compiler's own file-system host, which
 // the fs mock cannot serve; the scan resolves modules with the defaults here.
-jest.mock('../src/utils/tsconfig', () => {
-  const actual = jest.requireActual('../src/utils/tsconfig');
+jest.mock('../src/utils/tsconfig.js', () => {
+  const actual = jest.requireActual('../src/utils/tsconfig.js');
   return {
     ...actual,
     loadCompilerOptions: jest.fn(() => actual.DEFAULT_COMPILER_OPTIONS),
   };
 });
 // Real extraction, wrapped so a test can assert the opt-in pass never runs.
-jest.mock('../src/utils/inline', () => {
-  const actual = jest.requireActual('../src/utils/inline');
+jest.mock('../src/utils/inline.js', () => {
+  const actual = jest.requireActual('../src/utils/inline.js');
   return {
     ...actual,
     extractInlineDocuments: jest.fn(actual.extractInlineDocuments),
@@ -2058,7 +2058,7 @@ describe('gqlPruner', () => {
 
     it('resolves a fragment defined inline and spread from a gql file', () => {
       mockedUnusedFragments.mockImplementationOnce(
-        jest.requireActual('../src/utils/fragments')
+        jest.requireActual('../src/utils/fragments.js')
           .findUnusedFragmentsInCorpus,
       );
       mockedFind

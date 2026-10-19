@@ -5,8 +5,8 @@ import ts from 'typescript';
 import {
   createCorpusResolver,
   createMapResolver,
-} from '../src/utils/moduleResolver';
-import { DEFAULT_COMPILER_OPTIONS } from '../src/utils/tsconfig';
+} from '../src/utils/moduleResolver.js';
+import { DEFAULT_COMPILER_OPTIONS } from '../src/utils/tsconfig.js';
 
 const corpus = [
   '/p/src/App.tsx',

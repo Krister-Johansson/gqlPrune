@@ -7,10 +7,10 @@ import {
   findUnusedFragments,
   findUnusedFragmentsInCorpus,
   reachableFragments,
-} from '../src/utils/fragments';
-import { extractGraphqlEntities } from '../src/utils/operations';
-import { FragmentInfo } from '../src/types/FragmentInfo';
-import { indexOf } from './support';
+} from '../src/utils/fragments.js';
+import { extractGraphqlEntities } from '../src/utils/operations.js';
+import { FragmentInfo } from '../src/types/FragmentInfo.js';
+import { indexOf } from './support/index.js';
 
 /** An index over no source at all: nothing in it references anything. */
 const emptyIndex = indexOf({});

@@ -4,14 +4,14 @@
 import {
   createCorpusResolver,
   createMapResolver,
-} from '../src/utils/moduleResolver';
-import type { ModuleResolver } from '../src/utils/moduleResolver';
+} from '../src/utils/moduleResolver.js';
+import type { ModuleResolver } from '../src/utils/moduleResolver.js';
 import {
   buildReferenceIndex,
   describeResolution,
-} from '../src/utils/referenceIndex';
-import type { ReferenceIndex } from '../src/utils/referenceIndex';
-import { parseSourceModule } from '../src/utils/sourceModule';
+} from '../src/utils/referenceIndex.js';
+import type { ReferenceIndex } from '../src/utils/referenceIndex.js';
+import { parseSourceModule } from '../src/utils/sourceModule.js';
 
 /** Builds an index over in-memory files keyed by absolute posix path. */
 function indexOf(

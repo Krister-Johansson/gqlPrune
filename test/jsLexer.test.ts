@@ -10,7 +10,7 @@ import {
   skipLineComment,
   skipLiteral,
   skipTrivia,
-} from '../src/utils/jsLexer';
+} from '../src/utils/jsLexer.js';
 
 describe('jsLexer', () => {
   describe('isQuote', () => {

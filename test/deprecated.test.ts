@@ -2,8 +2,8 @@
 // Copyright (c) 2023 Krister Johansson
 
 import { buildSchema, parse, Source } from 'graphql';
-import { findDeprecatedUsages } from '../src/utils/deprecated';
-import { GraphqlFileEntities } from '../src/utils/operations';
+import { findDeprecatedUsages } from '../src/utils/deprecated.js';
+import { GraphqlFileEntities } from '../src/utils/operations.js';
 
 const schema = buildSchema(`
   enum Color {

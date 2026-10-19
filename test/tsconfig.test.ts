@@ -6,7 +6,7 @@ import {
   DEFAULT_COMPILER_OPTIONS,
   compilerOptionsFromConfig,
   loadCompilerOptions,
-} from '../src/utils/tsconfig';
+} from '../src/utils/tsconfig.js';
 
 /** A ParseConfigHost over an in-memory file map, so no test touches the disk. */
 function hostOf(files: Record<string, string>): ts.ParseConfigHost {
