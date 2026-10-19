@@ -1,0 +1,14 @@
+# FIXTURE for the field-tracing e2e spec. Traced through the call that takes
+# the document constant: src/FeedList.tsx filters and maps the list, reading
+# title, id and author.name, never body or author.id.
+query GetTracedFeed {
+  feed {
+    id
+    title
+    body
+    author {
+      id
+      name
+    }
+  }
+}

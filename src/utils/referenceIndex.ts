@@ -36,6 +36,11 @@ export interface Canonical {
   origin: string | 'outside' | 'unbound';
   /** True for a namespace binding (`import * as ns`, `export * as ns from`). */
   namespace?: boolean;
+  /**
+   * True when the chain ends at an anonymous default export, which has no
+   * name of its own: `name` is then the importer's local name for it.
+   */
+  anonymousDefault?: boolean;
   steps: ResolutionStep[];
 }
 
@@ -195,7 +200,12 @@ class Resolver {
     }
     if (entry.kind === 'local') {
       if (entry.local === undefined)
-        return { name: fallback, origin: path, steps: [] };
+        return {
+          name: fallback,
+          origin: path,
+          steps: [],
+          anonymousDefault: true,
+        };
       if (module.imports.has(entry.local))
         return this.local(path, entry.local, active);
       return { name: entry.local, origin: path, steps: [] };

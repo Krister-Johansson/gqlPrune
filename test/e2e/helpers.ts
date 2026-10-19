@@ -194,6 +194,8 @@ export type JsonReport = {
   orphanedFiles: { file: string; confidence: string; reason: string }[];
   deprecatedUsages: { message: string; file: string; line?: number }[];
   unusedFields?: {
+    operation: string;
+    path: string;
     field: string;
     locations: { file: string; line?: number }[];
     confidence: string;

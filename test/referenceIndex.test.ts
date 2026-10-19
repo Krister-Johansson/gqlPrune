@@ -288,6 +288,20 @@ describe('buildReferenceIndex', () => {
       ]);
     });
 
+    it('marks a binding that resolves to an anonymous default export', () => {
+      const index = indexOf({
+        '/p/doc.ts': 'export default gql`query A { a }`;',
+        '/p/hook.ts': 'export default function useGetUserQuery() {}',
+        '/p/App.tsx':
+          "import GetUserDocument from './doc';\nimport useUser from './hook';\nuseQuery(GetUserDocument);\nuseUser();",
+      });
+      const anonymous = (name: string) =>
+        index.byName.get(name)?.map((ref) => ref.canonical.anonymousDefault);
+
+      expect(anonymous('GetUserDocument')).toEqual([true]);
+      expect(anonymous('useGetUserQuery')).toEqual([undefined]);
+    });
+
     it('follows export { default as X } from', () => {
       const index = indexOf({
         '/p/doc.ts': 'export default function useGetUserQuery() {}',

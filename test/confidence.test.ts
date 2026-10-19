@@ -237,6 +237,7 @@ describe('describeConfidence', () => {
       'name-referenced',
       'string-mention',
       'heuristic-cap',
+      'never-read',
     ] as const) {
       expect(describeConfidence({ confidence: 'low', reason })).toContain(
         `(${reason}: `,
@@ -291,29 +292,50 @@ describe('gradeFragments', () => {
 
 describe('gradeFieldCandidates', () => {
   const candidates = [
-    { field: 'avatarUrl', locations: [{ file: 'g/a.gql', line: 4 }] },
-    { field: 'bio', locations: [{ file: 'g/b.gql', line: 2 }] },
+    {
+      operation: 'GetUser',
+      path: 'user.avatarUrl',
+      field: 'avatarUrl',
+      locations: [{ file: 'g/a.gql', line: 4 }],
+      traced: true,
+    },
+    {
+      operation: 'GetFeed',
+      path: 'feed.bio',
+      field: 'bio',
+      locations: [{ file: 'g/b.gql', line: 2 }],
+      traced: false,
+    },
   ];
 
-  it('grades every candidate medium with the heuristic cap as the reason', () => {
-    // A candidate only exists because its name appears nowhere in the source,
-    // which would be `high` for an operation. The heuristic cannot see a read
-    // through a rename, a spread or a computed key, so medium is the ceiling
-    // and there is nothing left for a second name search to find.
+  it('grades a traced candidate high and a name-matched one medium', () => {
+    // Every call site of GetUser was followed and none reaches the field. GetFeed
+    // had nothing to trace, so its key was only matched by name, which cannot
+    // see a read through a rename, a spread or a computed key.
     expect(gradeFieldCandidates(candidates)).toEqual([
       {
+        operation: 'GetUser',
+        path: 'user.avatarUrl',
         field: 'avatarUrl',
         locations: [{ file: 'g/a.gql', line: 4 }],
-        confidence: 'medium',
-        reason: 'heuristic-cap',
+        confidence: 'high',
+        reason: 'never-read',
       },
       {
+        operation: 'GetFeed',
+        path: 'feed.bio',
         field: 'bio',
         locations: [{ file: 'g/b.gql', line: 2 }],
         confidence: 'medium',
         reason: 'heuristic-cap',
       },
     ]);
+  });
+
+  it('keeps the trace flag out of the graded finding', () => {
+    for (const graded of gradeFieldCandidates(candidates)) {
+      expect(graded).not.toHaveProperty('traced');
+    }
   });
 
   it('returns [] without candidates', () => {

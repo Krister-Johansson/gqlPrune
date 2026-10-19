@@ -1,0 +1,9 @@
+# FIXTURE for the field-tracing e2e spec. A mutation: its selection may exist
+# only to update the cache, so it falls back to matching keys by name.
+# staleField and the root key are named nowhere in src/.
+mutation SaveTracedUser {
+  saveUser {
+    id
+    staleField
+  }
+}

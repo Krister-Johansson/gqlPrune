@@ -58,9 +58,10 @@ export interface GqlPruneConfig {
   schemaFile?: string;
   /**
    * Opt in to the advisory field-candidate list: response keys selected by a
-   * used operation (or a fragment it reaches) whose name appears nowhere in the
-   * scanned source. Off by default, and never changes the exit code. Set to
-   * `true`, or pass `--fields`.
+   * used operation (or a fragment it spreads) that nothing in the scanned
+   * source appears to read, traced from the operation's call sites or, when
+   * there is none to trace, matched by name. Off by default, and never changes
+   * the exit code. Set to `true`, or pass `--fields`.
    */
   checkFields?: boolean;
   /**

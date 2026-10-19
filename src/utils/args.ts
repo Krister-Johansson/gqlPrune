@@ -147,7 +147,7 @@ export const FLAGS: readonly FlagSpec[] = [
     takesValue: false,
     configFlag: 'checkFields',
     description:
-      'Also list selected fields whose name appears nowhere in the source (candidates)',
+      'Also list selected fields the source appears not to read (candidates)',
   },
   {
     flag: '--inline',

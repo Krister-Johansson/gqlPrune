@@ -1,0 +1,10 @@
+# FIXTURE for the field-tracing e2e spec. Only used through client.query, where
+# the document constant is a property value rather than a call argument, so
+# the trace falls back to matching each key by name. secretRatio is named
+# nowhere in src/; keep it that way, comments included.
+query GetFallbackStats {
+  stats {
+    visits
+    secretRatio
+  }
+}

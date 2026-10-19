@@ -1,0 +1,9 @@
+# FIXTURE for the field-tracing e2e spec. src/Settings.ts passes the settings
+# to a function the trace cannot follow, so everything under them counts as
+# read and nothing is reported.
+query GetEscapedSettings {
+  settings {
+    theme
+    locale
+  }
+}
