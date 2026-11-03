@@ -35,7 +35,9 @@ export function CopyCommand({ command }: { command: string }) {
         aria-label={`Copy the command ${command}`}
       >
         <CopyIcon />
-        <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
+        <span className="cmd-label" aria-live="polite">
+          {copied ? 'Copied' : 'Copy'}
+        </span>
       </button>
     </div>
   );

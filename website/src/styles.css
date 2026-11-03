@@ -250,6 +250,13 @@ body {
   font: 500 14px/1 var(--mono);
   cursor: pointer;
 }
+/* Room for the longer "Copied", so the button keeps its width and nothing
+   next to it moves when the label changes. The font is monospaced. */
+.cmd-label {
+  display: inline-block;
+  min-width: 6ch;
+  text-align: left;
+}
 .cmd button:hover {
   background: #1a2421;
   color: var(--term-text);
