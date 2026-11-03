@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023 Krister Johansson */
 
-/* Ported from the approved design. Theme tokens hang off <html data-theme>,
-   which an inline script in index.html sets before the first paint. */
+/* Ported from the approved design. The theme follows the visitor's system
+   setting; there is no toggle. */
 
 html,
 body {
   margin: 0;
   background: var(--ground);
 }
-[data-theme='dark'] {
+:root {
   --ground: #0e1513;
   --surface: #16201c;
   --raised: #1d2925;
@@ -31,27 +31,29 @@ body {
   --term-ok: #7fd6a0;
   color-scheme: dark;
 }
-[data-theme='light'] {
-  --ground: #f4f6f1;
-  --surface: #ffffff;
-  --raised: #e9ede7;
-  --line: #c9d3ce;
-  --control: #7d8f88;
-  --text: #13201c;
-  --muted: #4d6058;
-  --faint: #4d6058;
-  --accent: #f2b544;
-  --on-accent: #1a1406;
-  --accent-text: #8a5800;
-  --danger: #b42318;
-  --success: #1c7444;
-  --term: #0a100e;
-  --term-text: #c9d6d0;
-  --term-dim: #7a958b;
-  --term-line: #24302c;
-  --term-acc: #f2b544;
-  --term-ok: #7fd6a0;
-  color-scheme: light;
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f4f6f1;
+    --surface: #ffffff;
+    --raised: #e9ede7;
+    --line: #c9d3ce;
+    --control: #7d8f88;
+    --text: #13201c;
+    --muted: #4d6058;
+    --faint: #4d6058;
+    --accent: #f2b544;
+    --on-accent: #1a1406;
+    --accent-text: #8a5800;
+    --danger: #b42318;
+    --success: #1c7444;
+    --term: #0a100e;
+    --term-text: #c9d6d0;
+    --term-dim: #7a958b;
+    --term-line: #24302c;
+    --term-acc: #f2b544;
+    --term-ok: #7fd6a0;
+    color-scheme: light;
+  }
 }
 .gp {
   --display:
@@ -101,14 +103,14 @@ body {
   border-radius: 5px;
   padding: 1px 5px;
 }
-.gp h1,
-.gp h2,
-.gp h3 {
+/* :where() keeps these resets at zero specificity, so a single class such
+   as .caption or .group-label can still set its own margin. */
+:where(.gp) :where(h1, h2, h3) {
   margin: 0;
   text-wrap: balance;
   font-family: var(--display);
 }
-.gp p {
+:where(.gp) :where(p, dl, dd, ol, ul) {
   margin: 0;
 }
 
@@ -469,6 +471,8 @@ body {
 /* Section labels read as a shell prompt: the command the section is about. */
 .eyebrow {
   display: inline-flex;
+  /* Inside the flex-column .stack it would otherwise stretch to full width. */
+  align-self: flex-start;
   align-items: center;
   gap: 8px;
   padding: 5px 12px 5px 10px;
@@ -544,21 +548,6 @@ body {
 .nav-links a:hover {
   color: var(--text);
   background: var(--raised);
-}
-.theme-btn {
-  display: inline-grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.theme-btn:hover {
-  color: var(--text);
-  border-color: var(--control);
 }
 
 /* hero */
@@ -1197,7 +1186,9 @@ body {
   .nav-in {
     gap: 8px;
     min-height: 64px;
-    padding: 6px 0;
+    /* Only the vertical padding: the side padding comes from .wrap. */
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
   .nav-links {
     margin-left: 0;
@@ -1209,9 +1200,6 @@ body {
   .nav-links a {
     padding: 0 12px;
     font-size: 15px;
-  }
-  .nav-tools {
-    margin-left: auto;
   }
   .cmd {
     width: 100%;
@@ -1281,11 +1269,6 @@ body {
 }
 .faq-cta {
   margin-top: 24px;
-}
-.nav-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .gp {
   min-height: 100vh;

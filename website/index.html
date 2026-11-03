@@ -27,20 +27,6 @@
       media="(prefers-color-scheme: light)"
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <script>
-      // Sets the theme before the first paint so a light-theme visitor never
-      // sees a dark flash. src/theme.ts reads the same storage key.
-      (function () {
-        var theme = 'dark';
-        try {
-          var stored = localStorage.getItem('gqlprune-theme');
-          if (stored === 'dark' || stored === 'light') theme = stored;
-          else if (window.matchMedia('(prefers-color-scheme: light)').matches)
-            theme = 'light';
-        } catch (e) {}
-        document.documentElement.dataset.theme = theme;
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

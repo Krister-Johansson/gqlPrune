@@ -13,14 +13,12 @@ import { Nav } from './sections/Nav';
 import { PullRequest } from './sections/PullRequest';
 import { RequiredCheck } from './sections/RequiredCheck';
 import { Scan } from './sections/Scan';
-import { useTheme } from './theme';
 
 /** The landing page. */
 export function App() {
-  const [theme, toggleTheme] = useTheme();
   return (
     <div className="gp">
-      <Nav theme={theme} onToggleTheme={toggleTheme} />
+      <Nav />
       <main id="top">
         <Hero />
         <Scan />

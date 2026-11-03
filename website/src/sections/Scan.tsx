@@ -130,7 +130,7 @@ function useSeen<T extends Element>() {
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
       },
-      { threshold: 0.25 },
+      { threshold: 0.15 },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -183,9 +183,11 @@ export function Scan() {
                 </span>
                 <span className="caret caret-cmd" aria-hidden="true" />
               </div>
-              {LINES.map((line, index) => (
+              {LINES.map((line) => (
                 <div
-                  key={index}
+                  // Each line has its own start time, so the delay is a
+                  // stable, unique key.
+                  key={line.delay}
                   className={['ln', 'tl', line.className]
                     .filter(Boolean)
                     .join(' ')}

@@ -96,8 +96,8 @@ export function RequiredCheck() {
               <span>from the README</span>
             </div>
             <div className="pre">
-              {WORKFLOW.map(([indent, key, value], index) => (
-                <div className="ln" key={index}>
+              {WORKFLOW.map(([indent, key, value]) => (
+                <div className="ln" key={`${indent}${key}${value}`}>
                   {indent}
                   <span className="k">{key}</span>:
                   <span className="v">{value}</span>
