@@ -6,7 +6,9 @@ export default tseslint.config(
   // test/fixtures/** is input data, not project source: it is deliberately
   // written the way a real consumer's tree looks (imports that resolve to
   // nothing, codegen-shaped output) and is only ever string-searched.
-  { ignores: ['dist', 'test/fixtures'] },
+  // website/ is the landing page, a separate project with its own toolchain;
+  // it is not package source and is not linted with the package's rules.
+  { ignores: ['dist', 'test/fixtures', 'website'] },
   ...tseslint.configs.recommended,
   {
     plugins: {

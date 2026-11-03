@@ -14,6 +14,10 @@ version: 2
 triggerPaths:
   - "package.json"
   - "package-lock.json"
+  # The landing page's manifests. Its dependencies never ship in the npm
+  # package, but they do run in the Pages build.
+  - "website/package.json"
+  - "website/package-lock.json"
 
 githubApp:
   enabled: true
