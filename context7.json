@@ -10,7 +10,7 @@
     "node_modules",
     ".claude",
     ".vscode",
-    "docs/research"
+    "design/research"
   ],
   "excludeFiles": [
     "CHANGELOG.md",

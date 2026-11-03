@@ -1,6 +1,6 @@
 # Blocks pull requests that introduce known-vulnerable dependencies:
 # fails on high or critical advisories against the production tree
-# (thresholds and process in docs/security-policies.md).
+# (thresholds and process in security/security-policies.md).
 name: SCA
 
 on:

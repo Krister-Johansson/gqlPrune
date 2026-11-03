@@ -13,7 +13,7 @@ This is a deliberate design, not an accident. It is what makes the tool schema-f
 
 The cost is accuracy at the margins. User feedback (2026-08-16) ranks this as the second most wanted improvement: names assembled dynamically, re-exports, generated barrels, and renamed bindings can all make a used operation look unused, and the whole-word check cannot see through any of them.
 
-The competitive picture comes from the survey in [docs/research/competitive-landscape-2026-08.md](../research/competitive-landscape-2026-08.md), which carries the sources and figures behind these statements. The only tool that took the AST route for this exact problem, @ovrsea/graphql-detect-unused-operations (ts-morph based), is archived with negligible downloads, and it also required a schema. GraphQLSP is type-aware but schema-bound and same-file scoped. No maintained tool combines schema-free operation with static whole-repo scanning; that combination is currently gqlPrune's unchallenged position.
+The competitive picture comes from the survey in [design/research/competitive-landscape-2026-08.md](../research/competitive-landscape-2026-08.md), which carries the sources and figures behind these statements. The only tool that took the AST route for this exact problem, @ovrsea/graphql-detect-unused-operations (ts-morph based), is archived with negligible downloads, and it also required a schema. GraphQLSP is type-aware but schema-bound and same-file scoped. No maintained tool combines schema-free operation with static whole-repo scanning; that combination is currently gqlPrune's unchallenged position.
 
 ## Options
 
@@ -60,5 +60,5 @@ What the new engine covers, and what falls outside it:
 Follow-ups this decision creates:
 
 - #142 is rescoped to "replace the engine" with the table above as its scope; the option 2 flag design is dropped.
-- The README, `docs/architecture.md` and the Limitations section are updated when #142 lands, not before.
+- The README, `design/architecture.md` and the Limitations section are updated when #142 lands, not before.
 - Performance on large trees is measured before and after, and the result is recorded in #142.

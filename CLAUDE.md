@@ -106,7 +106,7 @@ A change moves through these stages. Don't skip ahead.
 ### 1. Research first
 
 - Read the GitHub issue in full, plus any linked issues and the competitive
-  research in `docs/research/`.
+  research in `design/research/`.
 - Read the code the change touches **before** proposing a design. Ground the
   plan in how the code actually behaves, not assumptions.
 - Surface genuine design forks to the maintainer; pick sensible defaults for the
@@ -184,7 +184,7 @@ CodeRabbit auto-reviews the PR. When its comments land:
 - When working through a queue of PRs, space them out; several PRs opened within
   the same hour can still exhaust the budget.
 
-[`docs/coderabbit.md`](docs/coderabbit.md) lists what CodeRabbit flags per path,
+[`.github/coderabbit.md`](.github/coderabbit.md) lists what CodeRabbit flags per path,
 the pre-merge checks, the tools it runs and its commands.
 
 ### 6. Keep the board up to date

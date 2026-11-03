@@ -82,4 +82,4 @@ the `@inquirer` packages, js-yaml) to their respective projects.
 
 How the project handles findings from dependency and static analysis scanners,
 including remediation thresholds and the exploitability (VEX) assessments, is
-documented in [docs/security-policies.md](./docs/security-policies.md).
+documented in [security/security-policies.md](./security/security-policies.md).
