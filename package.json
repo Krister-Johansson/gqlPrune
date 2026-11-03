@@ -76,8 +76,6 @@
     "typescript-eslint": "^8.71.0"
   },
   "overrides": {
-    "js-yaml@3": {
-      "argparse": "^2.0.1"
-    }
+    "argparse@1": "^2.0.1"
   }
 }
