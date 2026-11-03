@@ -1,0 +1,144 @@
+---
+title: Quickstart
+description: How to install gqlPrune, create its config file with gqlprune init, run a first scan and read the report.
+---
+
+gqlPrune needs Node.js 20 or newer. The command is `gqlprune`, in lowercase, and it has no `scan` subcommand: running `gqlprune` on its own runs a scan.
+
+<Steps>
+<Step title="Install gqlPrune">
+
+Add gqlPrune to the project as a development dependency:
+
+```bash
+npm install --save-dev gqlprune
+```
+
+You can also skip the install and run it once through npx, passing the two directories it needs as flags:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+</Step>
+<Step title="Create a config file">
+
+Run `init` in the project root to write `gqlPrune.config.yaml`:
+
+```bash
+npx gqlprune init
+```
+
+`init` searches the project for your GraphQL and source directories, skipping `node_modules`, `.git` and `dist`, and offers what it finds as defaults you can accept or change. When your files sit under several top-level directories, as in a monorepo, it shows a checklist of those directories with every entry ticked. Untick the ones you do not want. If you untick all of them, it asks for a path instead, with the project root as the default.
+
+If the project has a GraphQL Code Generator config, `init` takes its defaults from that file, names the file, and writes every derived setting into `gqlPrune.config.yaml`. See [Codegen config](/configuration/codegen) for what it derives.
+
+`init` also looks for a generated file that would make every operation look used, and pre-fills it into `exclude` so the first run is truthful. If `gqlPrune.config.yaml` already exists, `init` asks before it overwrites the file, and the default answer is No.
+
+This is an `init` session in a small example project, with every default accepted. After writing the file, `init` prints a one-line preview of what a real run would find, counting unused operations and fragments together:
+
+```text
+✔ Enter the path to your GraphQL directory: ./graphql
+✔ Enter the path to your source directory: ./src
+✔ Files or folders to exclude (comma separated; gitignore-style globs allowed):
+Configuration generated successfully!
+✓ Found 3 operations in 5 files; 2 look unused. Run "gqlprune" to see them.
+```
+
+The file it wrote for that project:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+exclude: []
+```
+
+The [config file reference](/configuration/config-file) describes every key.
+
+</Step>
+<Step title="Run a scan">
+
+Run gqlPrune from the project root, where `gqlPrune.config.yaml` lives:
+
+```bash
+npx gqlprune
+```
+
+</Step>
+<Step title="Read the report">
+
+This is the report for the same example project, which has three operations, one of them unused, and one unused fragment:
+
+```text
+Found 5 GraphQL files.
+Found 3 GraphQL operations.
+Found 2 source files.
+
+--- Unused GraphQL Operations ---
+
+Type  Operation       Confidence File
+query GetLegacyReport high       legacyReport.gql
+---------------------------------
+Found 1 unused GraphQL operation. Please remove it.
+
+--- Unused GraphQL Fragments ---
+
+Fragment              Confidence File
+AbandonedTeaserFields high       teaserFields.gql
+--------------------------------
+Found 1 unused GraphQL fragment. Please remove it.
+
+--- Orphaned GraphQL Files ---
+
+Confidence File
+high       graphql/legacyReport.gql
+------------------------------
+Found 1 orphaned GraphQL file. Every definition in it is unused and no document imports it, so it can likely be deleted.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+The first three lines count what the scan read. Check them first: if the source file count is 0 or far lower than you expect, every operation will look unused, and [Troubleshooting](/troubleshooting) explains why.
+
+Each section after that lists one kind of finding. The Confidence column carries a [confidence grade](/concepts/confidence): `high` means the definition's name appears nowhere in the scanned source, and `low` means something still mentions it. The orphaned files section lists files where every definition is unused, so the whole file is a deletion candidate.
+
+The closing line is a reminder that usage comes from reading your source, not from running it. Check each finding before you delete it. To see why an operation was judged used or unused, run the scan again with `--verbose`:
+
+```bash
+npx gqlprune --verbose
+```
+
+When nothing is unused, the report ends with `✓ No unused GraphQL operations or fragments found.` instead of the sections.
+
+The exit code is 0 when nothing unused is found, 1 when unused operations or fragments are found, and 2 when the run itself fails. [Exit codes](/reference/exit-codes) has the details.
+
+</Step>
+<Step title="Add a package.json script">
+
+Add a script so the scan runs the same way locally and in CI:
+
+```json
+{
+  "scripts": {
+    "gql:prune": "gqlprune"
+  }
+}
+```
+
+Run it with npm:
+
+```bash
+npm run gql:prune
+```
+
+Because findings exit with code 1, the script fails a CI job when unused operations or fragments are found. To fail only on the strongest findings, use `gqlprune --min-confidence high` as the script.
+
+</Step>
+</Steps>
+
+## Next steps
+
+- [Usage patterns](/concepts/usage-patterns): if your project does not use the GraphQL Code Generator hooks and `Document` constants, set the patterns, or used operations are reported as unused.
+- [Clients](/configuration/clients): pattern settings for urql, react-query, Apollo Angular and other clients.
+- [GitHub Actions](/ci/github-actions): run gqlPrune on every pull request.
+- [JSON report](/reference/json-report): the machine-readable output from `--json`.
+- [Limitations](/concepts/limitations): what a static scan can and cannot see.

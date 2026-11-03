@@ -1,0 +1,165 @@
+---
+title: Unused fragments
+description: What an unused GraphQL fragment finding from gqlprune means, how fragment spreads and fragment patterns keep a fragment alive, and how to verify a finding before deleting the fragment.
+---
+
+## What it means
+
+Since 2.1, gqlPrune reports fragments that nothing uses, across files and without a schema. A fragment counts as used when either of these holds:
+
+- An operation in your documents spreads it, directly or through other fragments.
+- A reference in source resolves to one of its [fragment patterns](/concepts/usage-patterns#default-fragment-patterns), by default the codegen `{Name}FragmentDoc` constant used for fragment masking. `fragmentUsagePatterns` changes the patterns.
+
+Otherwise it is reported as unused. A fragment spread only by another unused fragment is reported too, since nothing reaches either of them.
+
+Any operation that spreads a fragment keeps it alive, even an operation that is itself unused and reported. Once you remove that operation, the fragment shows up on the next run. Spreads from anonymous operations also count.
+
+With `--inline`, fragments resolve across both kinds of document: a fragment defined in a `.tsx` file and spread from a `.gql` operation counts as used, and so does the reverse.
+
+## Example
+
+This document defines one query and two fragments. The query spreads `UserFields` only:
+
+```graphql
+query GetUser($id: ID!) {
+  user(id: $id) {
+    ...UserFields
+  }
+}
+
+fragment UserFields on User {
+  id
+  name
+}
+
+fragment UserBadgeFields on User {
+  id
+  badge
+}
+```
+
+This component, `src/Profile.tsx`, uses the query:
+
+```tsx
+import { useGetUserQuery } from './generated/graphql';
+
+export function Profile({ id }: { id: string }) {
+  const { data } = useGetUserQuery({ variables: { id } });
+  return <h1 key={data?.user?.id}>{data?.user?.name}</h1>;
+}
+```
+
+No operation spreads `UserBadgeFields`, and no source file references `UserBadgeFieldsFragmentDoc`, so `UserBadgeFields` is a candidate.
+
+## Output
+
+This command scans the example project:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+It prints one row per unused fragment, with the name, the [confidence grade](/concepts/confidence) and the file name:
+
+```text
+Found 1 GraphQL file.
+Found 1 GraphQL operation.
+Found 1 source file.
+
+--- Unused GraphQL Fragments ---
+
+Fragment        Confidence File
+UserBadgeFields high       user.gql
+--------------------------------
+Found 1 unused GraphQL fragment. Please remove it.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+## JSON
+
+With `--json`, each unused fragment is an entry in `unusedFragments` with `name`, `file`, `line`, `confidence` and `reason`, and `summary.unusedFragments` counts them:
+
+```json
+{
+  "unusedOperations": [],
+  "unusedFragments": [
+    {
+      "name": "UserBadgeFields",
+      "file": "graphql/user.gql",
+      "line": 12,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "orphanedFiles": [],
+  "deprecatedUsages": [],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 1,
+    "orphanedFiles": 0,
+    "deprecatedUsages": 0,
+    "byConfidence": {
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}
+```
+
+See [JSON report](/reference/json-report).
+
+## Confidence
+
+Each unused fragment is graded by its bare name, `UserBadgeFields` in the example:
+
+| Grade | Reason | Evidence |
+| --- | --- | --- |
+| `high` | `name-absent` | The name appears nowhere in the scanned source. |
+| `medium` | `generated-only` | The name appears only in files that look generated. |
+| `low` | `name-referenced` | An identifier with exactly that name is read in ordinary source. |
+| `low` | `string-mention` | The name appears inside a string in ordinary source. |
+
+See [confidence grades](/concepts/confidence) for each reason.
+
+## Exit code
+
+An unused fragment sets exit code 1, the same as an unused operation. With `--min-confidence`, only an unused fragment at or above the level does. See [exit codes](/reference/exit-codes).
+
+## GitHub annotation
+
+Under GitHub Actions, or with `--annotate`, each unused fragment gets one `::warning` annotation on stderr, pointing at its file and line and ending with its grade:
+
+```text
+::warning file=graphql/user.gql,line=12::Unused GraphQL fragment "UserBadgeFields" [confidence: high]
+```
+
+See [GitHub Actions](/ci/github-actions).
+
+## How to verify a finding
+
+The finding proves two things about the files gqlPrune scanned: no operation spreads the fragment, directly or through another fragment, and no reference in source resolves to one of its fragment patterns. It does not prove the fragment is dead. A static read can miss uses that:
+
+- spread it from documents outside `graphqlDir`, or from documents embedded in source when `--inline` is off
+- reference it from code outside `srcDir`, or under a constant name your `fragmentUsagePatterns` do not cover
+- live in another repository that imports the same documents
+- build the reference at runtime, for example by reading fragments from a registry by name
+
+To check a finding:
+
+1. Read the grade. `low` means the name is mentioned in ordinary source; follow that mention first.
+2. Search every repository that consumes these documents for `...FragmentName` and for the fragment's generated constant.
+3. If your client embeds documents in source files, run the scan with `--inline` so their spreads count.
+
+This command scans embedded documents as well and prints the evidence behind each grade:
+
+```bash
+npx gqlprune --inline --verbose
+```
+
+## What to do
+
+If the fragment is dead, delete it, regenerate your client code, and run the scan again. A fragment that only the deleted one spread is reported on that next run.
+
+If the fragment is used and gqlPrune missed it, add the constant name your code uses to [fragmentUsagePatterns](/concepts/usage-patterns#fragmentusagepatterns), widen `graphqlDir` or `srcDir`, or turn on `--inline`. gqlPrune has no per-finding ignore list.

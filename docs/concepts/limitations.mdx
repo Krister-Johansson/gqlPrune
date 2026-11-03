@@ -1,0 +1,62 @@
+---
+title: Limitations
+description: What a gqlprune scan cannot see, why its findings are candidates rather than proof, and which project setups produce false positives or hide findings.
+---
+
+gqlPrune reads your source and never runs it. That keeps it schema-free and fast, and it also sets the limits on what a finding can mean.
+
+## Operations and fragments, not fields
+
+The default scan reports whole operations and fragments that nothing references. It does not inspect the fields inside an operation that is used, so over-fetching goes unreported.
+
+The opt-in `--fields` check (or `checkFields: true`) covers that ground by tracing each operation's call sites through the source. It works without a schema or a type checker, so it produces an advisory shortlist rather than a verdict. The trace judges a value by the syntax around it. A value it cannot follow counts as read, which makes it miss dead fields rather than flag live ones. An operation it cannot trace at all falls back to a name search. See [field candidates](/findings/field-candidates).
+
+## Results are candidates, not proof
+
+Usage detection is a static read of `srcDir`: the source is parsed, never executed. gqlPrune reports an operation as unused when no reference resolves to one of its identifiers, and that is not the same as the operation being unreachable. Three cases produce false positives:
+
+- The operation name is assembled at runtime, for example by string concatenation or a lookup table, so the identifier never appears in the source.
+- The code that uses it lives outside the configured `srcDir`, or in a file type gqlPrune does not parse. It parses `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`.
+- Another repository consumes it, for example a shared GraphQL package that several applications import.
+
+Check each finding before you delete it. Its [confidence grade](/concepts/confidence) says how much corroborating evidence there is. `--verbose` prints, for a used operation, the reference that decided it and the import chain behind it, and for an unused one the identifiers it looked for, which usually explains a surprising result quickly.
+
+This command prints that explanation for every operation:
+
+```bash
+npx gqlprune --verbose
+```
+
+## Single-file components
+
+Vue, Svelte and Astro files are not parsed as modules. A file whose extension is not one of the eight above but is named in `sourceExtensions` is scanned by its tokens instead. Every identifier in it counts as a reference by name, strings count as mentions, and imports inside it are not resolved. That keeps a `.vue` file's `useGetUserQuery()` call visible, but a hook it reaches through a renamed import is not followed.
+
+Single-file components are not scanned at all unless you name their extension. This config adds `.vue` files to the scan:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+sourceExtensions:
+  - .ts
+  - .tsx
+  - .vue
+```
+
+`sourceExtensions` replaces the default list, so name every extension you want scanned. A scan that reads no source file at all warns, because every operation would then look unused.
+
+## Generated code can hide findings
+
+The opposite failure also happens. GraphQL Code Generator output inside `srcDir` references every operation from inside the hooks it declares, so everything looks used and nothing is reported, with no error to tell you so.
+
+gqlPrune warns when one source file references at least 70% of all operations in a project with five or more. The warning names the file and goes to stderr, and the JSON report carries it in its `warnings` array. It does not change the exit code. Add the file to `exclude` and run the scan again, or run `gqlprune init`, which detects such a file and writes it into `exclude` for you.
+
+This config keeps a generated file out of the scan:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+exclude:
+  - src/gql/graphql.ts
+```
+
+The same output hides [field candidates](/findings/field-candidates): each generated hook returns the result of the call it wraps, and a returned value counts as read with everything under it.

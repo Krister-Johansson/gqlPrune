@@ -1,0 +1,117 @@
+---
+title: Reading your codegen config
+description: Which gqlPrune settings are derived from a GraphQL Code Generator config, how they rank against flags and gqlPrune.config.yaml, and what happens when the codegen config cannot be read.
+---
+
+A GraphQL Code Generator config already states where your documents live, where the generated code goes, which schema you use and which plugins name your hooks. gqlPrune reads that config so you do not have to restate it. Since 3.0.
+
+## When gqlPrune reads it
+
+gqlPrune looks in the current working directory for the first of these files that exists and holds a codegen config:
+
+1. `codegen.ts`
+2. `codegen.mts`
+3. `codegen.cts`
+4. `codegen.js`
+5. `codegen.mjs`
+6. `codegen.cjs`
+7. `codegen.yml`
+8. `codegen.yaml`
+9. `codegen.json`
+10. a `codegen` key in `package.json`
+
+It does this only when nothing else says which directories to scan: neither `graphqlDir` nor `srcDir` in `gqlPrune.config.yaml`, and no `--graphql` or `--src` flag. That is the run that would otherwise stop with `No configuration found.`, so reading a codegen config can only turn a refusal into a working scan. A project that already configures its directories behaves exactly as it would without a codegen config.
+
+To use a codegen config in another place, name it with `--codegen <file>` or `codegenConfig` in `gqlPrune.config.yaml`. A named file is read however the rest of the project is configured. This command derives settings from a config in a `tools` folder:
+
+```bash
+npx gqlprune --codegen ./tools/codegen.yml
+```
+
+## What is derived
+
+| Codegen setting                          | Becomes                                                                 |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| `documents` globs                        | `graphqlDir` and `srcDir`, with the file-name part of the glob dropped  |
+| `documents` globs starting with `!`      | `exclude` entries                                                       |
+| `documents` in `.ts`, `.tsx`, `.js` or `.jsx` | `inline: true`, so [inline documents](/configuration/config-file#inline) are scanned |
+| `schema`, when it is one local SDL file  | `schemaFile`, which turns on the [deprecated-selection check](/findings/deprecated-selections) |
+| `generates` output paths                 | `exclude` entries, so generated code cannot make every operation look used |
+| preset and plugin names                  | `usagePatterns` and `fragmentUsagePatterns`, see [patterns per client](/configuration/clients) |
+
+gqlPrune collects these keys at any depth, so a `documents` override inside one `generates` entry counts like the top-level one.
+
+A trailing `**` is dropped from a directory as well, since gqlPrune walks directories recursively: `./src/**/*.gql` becomes `./src`. A wildcard further up is kept, because `graphqlDir` and `srcDir` expand globs of their own: `packages/*/src/**/*.gql` becomes `packages/*/src`.
+
+A `schema` entry is used only when it is a single local file ending in `.graphql`, `.gql` or `.graphqls`. A URL, an introspection endpoint, a glob covering several files, a value containing `${...}`, and a JSON or TypeScript schema are ignored.
+
+Given this `codegen.ts`, a scan in the same directory takes `graphqlDir`, `srcDir`, `exclude`, `schemaFile` and `inline` from it:
+
+```ts
+const config = {
+  schema: './schema.graphql',
+  documents: ['./graphql/**/*.gql', './src/**/*.tsx'],
+  generates: {
+    './src/__generated__/': {
+      preset: 'client',
+    },
+  },
+};
+
+export default config;
+```
+
+The run names the file and the settings it took:
+
+```text
+Using settings derived from codegen.ts: graphqlDir, srcDir, exclude, schemaFile, inline.
+```
+
+## How a TypeScript or JavaScript config is read
+
+gqlPrune reads `codegen.ts` and the other JavaScript and TypeScript configs as text and never executes them. It picks out the string literals for `schema` and `documents`, the keys of `generates`, and the plugin and preset names. A value that is computed, imported, spread or built from a template with `${...}` in it cannot be read this way and is skipped, which costs one suggestion and nothing else. Keys inside comments and strings are ignored. YAML and JSON configs are parsed normally.
+
+## Precedence
+
+Precedence runs in one direction:
+
+1. CLI flags
+2. `gqlPrune.config.yaml`
+3. settings derived from the codegen config
+4. the built-in defaults
+
+A derived value fills only a key that nothing above it set. A key that is present in `gqlPrune.config.yaml` but empty (such as `graphqlDir:` on its own line) counts as unset, so the derived value is used for it.
+
+This command scans with the directories from the flags and takes everything else, such as `exclude` and `usagePatterns`, from the codegen config it names:
+
+```bash
+npx gqlprune --codegen ./codegen.yml --graphql ./graphql --src ./src
+```
+
+`gqlprune init` writes the derived settings into the `gqlPrune.config.yaml` it generates, including `usagePatterns` and `inline`. Once that file names `graphqlDir` and `srcDir`, later runs no longer read the codegen config on their own, so a derived setting left out of the file would be lost. Run `init` on an apollo-angular project and the file carries `usagePatterns: ['{Name}GQL', '{Name}Document']`. See [gqlprune init](/configuration/config-file#create-the-file-with-gqlprune-init).
+
+## Seeing what was derived
+
+An inferred setting is never silent. A normal run prints a line naming the file and the settings that came from it. In `--json` mode that line goes to stderr, so stdout stays pure JSON. The line is not repeated in the JSON report's `warnings` array or emitted as a GitHub annotation, because it says where settings came from rather than reporting a problem.
+
+`--verbose` prints every derived value, one per line, starting with `codegen config: <file>`. It also prints why no codegen config was used when one was looked for, such as `No GraphQL Code Generator config found in this directory.`
+
+## When the codegen config cannot be read
+
+Explicit configuration fails loudly, and inference degrades gracefully.
+
+- A codegen config you named with `--codegen` or `codegenConfig` that cannot be read ends the run with exit code 2 and `Could not read <file>.` A file that does not parse ends with `Could not parse <file>: ...`, and a file with no codegen settings in it (a `package.json` without a `codegen` key, or an empty file) ends with `No GraphQL Code Generator configuration in <file>.`
+- A discovered codegen config that cannot be read or parsed is skipped, and gqlPrune tries the next file name in the list. When none is usable and no directories are configured, the run stops with `No configuration found.` and exit code 2. `--verbose` says no codegen config was found.
+- A derived `schemaFile` that is not on disk or is not valid SDL costs you the deprecated-selection check and nothing else. The scan carries on with a warning, which also lands in the JSON `warnings` array. A codegen `schema` is often downloaded or generated at build time, so it may not exist in a fresh checkout:
+
+```text
+⚠ Skipped the deprecated-selection check: the schema "./schema-from-build.graphql" derived from codegen.yml could not be read or parsed. Set "schemaFile" in gqlPrune.config.yaml to check against a schema of your own.
+```
+
+- A derived directory that is not on disk is dropped with a warning naming it and the file it came from, and gqlPrune scans the derived directories that do exist. Only when none is left does the run stop with exit code 2, and the message names the codegen config so you know where the paths came from.
+
+The same values written by you in `gqlPrune.config.yaml` or passed as flags end the run with exit code 2 when they do not resolve, because you asked for them. See [exit codes](/reference/exit-codes).
+
+## Generated output and false all-clears
+
+The `generates` paths become `exclude` entries for a reason. GraphQL Code Generator output inside `srcDir` references every `{Name}Document` constant from the hook it declares for it, so with that output scanned, every operation looks used and nothing is reported. Excluding the output keeps the scan honest. Findings remain candidates either way: check each one before you delete it.

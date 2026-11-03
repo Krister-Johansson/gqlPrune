@@ -1,0 +1,219 @@
+---
+title: JSON report
+description: Every key of the gqlprune --json report, with its type and when it is present.
+---
+
+`gqlprune --json` prints one JSON document on stdout instead of the human-readable tables. stdout carries only that document. Info lines, warnings, `--verbose` output and GitHub annotations go to stderr, so the report pipes cleanly into `jq` or a file. The exit code is the same as without `--json`: 0 clean, 1 findings, 2 failed run (see [exit codes](/reference/exit-codes)). A failed run prints nothing on stdout.
+
+This command writes the report to a file:
+
+```bash
+npx gqlprune --json > gqlprune-report.json
+```
+
+## Example
+
+A scan with `--inline`, `--fields` and `--schema` produces every kind of entry. This is real output from such a scan:
+
+```json
+{
+  "unusedOperations": [
+    {
+      "name": "GetCombinedGhost",
+      "type": "query",
+      "file": "graphql/ghost.gql",
+      "line": 3,
+      "confidence": "high",
+      "reason": "name-absent"
+    },
+    {
+      "name": "GetCombinedLegacyExport",
+      "type": "query",
+      "file": "graphql/legacy.gql",
+      "line": 4,
+      "confidence": "low",
+      "reason": "string-mention"
+    },
+    {
+      "name": "GetCombinedInlineGhost",
+      "type": "query",
+      "file": "src/Dashboard.tsx",
+      "line": 19,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "unusedFragments": [],
+  "orphanedFiles": [
+    {
+      "file": "graphql/ghost.gql",
+      "confidence": "high",
+      "reason": "name-absent"
+    },
+    {
+      "file": "graphql/legacy.gql",
+      "confidence": "low",
+      "reason": "string-mention"
+    }
+  ],
+  "deprecatedUsages": [
+    {
+      "message": "The field User.legacyEmail is deprecated. Use contact.email instead.",
+      "file": "graphql/user.gql",
+      "line": 11
+    }
+  ],
+  "unusedFields": [
+    {
+      "operation": "GetCombinedUser",
+      "path": "user.internalNotes",
+      "field": "internalNotes",
+      "locations": [
+        {
+          "file": "graphql/user.gql",
+          "line": 12
+        }
+      ],
+      "confidence": "high",
+      "reason": "never-read"
+    }
+  ],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 3,
+    "unusedFragments": 0,
+    "orphanedFiles": 2,
+    "deprecatedUsages": 1,
+    "unusedFields": 1,
+    "byConfidence": {
+      "high": 4,
+      "medium": 0,
+      "low": 2
+    }
+  }
+}
+```
+
+Every entry is a candidate from a static read of the source, not proof. Check a finding before you delete what it names.
+
+## Top-level keys
+
+| Key                | Type     | Present                                      |
+| ------------------ | -------- | -------------------------------------------- |
+| `unusedOperations` | array    | always                                       |
+| `unusedFragments`  | array    | always                                       |
+| `orphanedFiles`    | array    | always                                       |
+| `deprecatedUsages` | array    | always; empty unless a schema is configured  |
+| `unusedFields`     | array    | only with `--fields` or `checkFields: true`  |
+| `warnings`         | string[] | always; empty when there are none            |
+| `summary`          | object   | always                                       |
+
+An array is empty when there is nothing to report. `unusedFields` is the exception: without the field check the key is absent, not empty, so a consumer can tell "nothing found" from "never checked". `summary.unusedFields` follows the same rule.
+
+With `--min-confidence` or `minConfidence`, findings below the level are left out of every graded array and of the counts in `summary`. `deprecatedUsages` is not graded and is never filtered.
+
+## unusedOperations
+
+One object per operation that nothing in the scanned source references.
+
+| Key          | Type   | Notes                                                    |
+| ------------ | ------ | -------------------------------------------------------- |
+| `name`       | string | the operation name                                       |
+| `type`       | string | `query`, `mutation` or `subscription`                    |
+| `file`       | string | the `.gql`/`.graphql` file, or the source file of an [inline document](/configuration/config-file#inline-documents) |
+| `line`       | number | 1-based line of the definition; omitted when unknown    |
+| `confidence` | string | `high`, `medium` or `low`                                |
+| `reason`     | string | the evidence behind the grade, see below                 |
+
+## unusedFragments
+
+One object per fragment that no operation spreads and no fragment pattern references.
+
+| Key          | Type   | Notes                                                 |
+| ------------ | ------ | ----------------------------------------------------- |
+| `name`       | string | the fragment name                                     |
+| `file`       | string | the file that defines it                              |
+| `line`       | number | 1-based line of the definition; omitted when unknown  |
+| `confidence` | string | `high`, `medium` or `low`                             |
+| `reason`     | string | the evidence behind the grade                         |
+
+## orphanedFiles
+
+One object per `.gql`/`.graphql` file whose every definition is unused and that no other document imports. Since 3.0 each entry is an object; in 2.x it was a path string (see [migrating to 3.0](/migration/v3)).
+
+| Key          | Type   | Notes                                                       |
+| ------------ | ------ | ----------------------------------------------------------- |
+| `file`       | string | the file path                                               |
+| `confidence` | string | the lowest grade among the definitions in the file          |
+| `reason`     | string | the reason that goes with that grade                        |
+
+An orphaned file never changes the exit code on its own, because its definitions already appear in `unusedOperations` or `unusedFragments`.
+
+## deprecatedUsages
+
+One object per selection of a field or enum value that the schema marks `@deprecated`. The array stays empty unless `--schema` or `schemaFile` is set. These entries come from validation against a real schema, so they carry no `confidence` or `reason`, and they never change the exit code.
+
+| Key       | Type   | Notes                                                        |
+| --------- | ------ | ------------------------------------------------------------ |
+| `message` | string | the validator's message, naming the field and its replacement |
+| `file`    | string | the file with the selection                                  |
+| `line`    | number | 1-based line; omitted when unknown                           |
+
+## unusedFields
+
+Present only when the field check ran. One object per operation and response path that nothing in the source appears to read. Advisory: these never change the exit code. See [field candidates](/findings/field-candidates).
+
+| Key          | Type     | Notes                                                                  |
+| ------------ | -------- | ---------------------------------------------------------------------- |
+| `operation`  | string   | the used operation that selects the field                              |
+| `path`       | string   | response keys from the operation's root, joined with dots              |
+| `field`      | string   | the last key of `path`; the alias when the field is aliased            |
+| `locations`  | array    | every place the key is selected for this operation                     |
+| `confidence` | string   | `high` (traced) or `medium` (matched by name)                          |
+| `reason`     | string   | `never-read` or `heuristic-cap`                                        |
+
+Each entry of `locations` is an object with `file` (string) and `line` (number, omitted when unknown).
+
+## warnings
+
+An array of strings. Each one is an advisory message that gqlPrune also prints on stderr, for example:
+
+- a source file that references most operations and probably is generated code masking the results
+- an operation or fragment name defined more than once
+- a file or directory the scan could not read or parse
+- a scan that read no source file at all
+- a directory or schema derived from a codegen config that was skipped because it is not on disk
+
+Warnings never change the exit code. The line naming a codegen config that settings were derived from is provenance, not a warning, so it goes to stderr only and does not appear here.
+
+## summary
+
+| Key                | Type   | Notes                                                   |
+| ------------------ | ------ | ------------------------------------------------------- |
+| `unusedOperations` | number | length of `unusedOperations`                            |
+| `unusedFragments`  | number | length of `unusedFragments`                             |
+| `orphanedFiles`    | number | length of `orphanedFiles`                               |
+| `deprecatedUsages` | number | length of `deprecatedUsages`                            |
+| `unusedFields`     | number | length of `unusedFields`; present only with that array  |
+| `byConfidence`     | object | counts of graded findings per level                     |
+
+`byConfidence` always has the keys `high`, `medium` and `low`, each a number. It counts every graded finding in the report together: unused operations, unused fragments, orphaned files and field candidates. Deprecated selections are not counted.
+
+## reason values
+
+Every graded entry carries a `confidence` and the `reason` behind it. See [confidence grades](/concepts/confidence) for how they are decided.
+
+| `reason`          | Grade  | Applies to                                  | Meaning                                                                 |
+| ----------------- | ------ | ------------------------------------------- | ----------------------------------------------------------------------- |
+| `name-absent`     | high   | operations, fragments, orphaned files       | the bare name appears nowhere in the scanned source                     |
+| `generated-only`  | medium | operations, fragments, orphaned files       | the name appears only in files that look generated                      |
+| `name-referenced` | low    | operations, fragments, orphaned files       | an identifier with exactly that name is read in ordinary source         |
+| `string-mention`  | low    | operations, fragments, orphaned files       | the name appears inside a string in ordinary source                     |
+| `never-read`      | high   | field candidates                            | every call site was traced and no read reaches the field                |
+| `heuristic-cap`   | medium | field candidates                            | the operation had no call site to trace, so the field was matched by name |
+
+Since 4.0, `name-referenced` and `string-mention` replace the earlier `source-mention`. A script that switches on `reason` should handle every value in the table.
+
+## Stability
+
+An end-to-end test in the gqlPrune repository compares the key sets above exactly, so no key can be added, renamed or removed without that test failing. An intended change to a key goes into the release notes and a major version, as the `orphanedFiles` change did in 3.0.

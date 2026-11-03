@@ -1,0 +1,178 @@
+---
+title: Confidence grades
+description: What the high, medium and low confidence grades and each reason value on a gqlprune finding mean, and how --min-confidence filters findings and sets the exit code.
+---
+
+Since 3.0, every candidate gqlPrune reports carries a confidence grade and a reason. The grade answers one question: how much evidence is there that something references the definition anyway, even though no usage pattern matched?
+
+The scan itself looks for references to the identifiers your [usage patterns](/concepts/usage-patterns) expand to, such as `useGetUserQuery` and `GetUserDocument`. The grading looks for the bare definition name, `GetUser`, both as an identifier and inside string literals, which the usage check never does. A grade never turns a finding into proof. A `high` finding is still a candidate to check before you delete anything.
+
+## Levels
+
+| Level | Meaning |
+| --- | --- |
+| `high` | No trace of the name in the scanned source, or, for a field, every call site was traced and no read reaches it. |
+| `medium` | The name appears only in files that look generated, or the detection itself is too weak to claim more. |
+| `low` | Something in ordinary source mentions the name, just not through a usage pattern. |
+
+## Reasons
+
+The `reason` value says which evidence produced the grade. Each finding has exactly one.
+
+### name-absent
+
+Grade: `high`. Applies to unused operations, unused fragments and orphaned files.
+
+The bare name appears in no scanned source file, neither as an identifier nor inside a string. Nothing in `srcDir` knows the name at all.
+
+### generated-only
+
+Grade: `medium`. Applies to unused operations, unused fragments and orphaned files.
+
+The name appears only in files that look generated. A file looks generated when it alone references at least 70% of all operations, in a project with at least five operations. This is the same check that prints the warning about [generated code hiding findings](/concepts/limitations#generated-code-can-hide-findings). The mention is probably codegen output rather than hand-written use.
+
+### name-referenced
+
+Grade: `low`. Applies to unused operations, unused fragments and orphaned files. Since 4.0.
+
+An identifier with exactly the definition's name is read in ordinary source, but nothing resolves to a usage pattern. A naming convention gqlPrune does not know about, or a lookup by name, is plausible. Check your `usagePatterns`.
+
+### string-mention
+
+Grade: `low`. Applies to unused operations, unused fragments and orphaned files. Since 4.0.
+
+The name appears inside a string in ordinary source. A registry key or a telemetry event may build the reference at runtime. Check where that string goes.
+
+`name-referenced` and `string-mention` replaced the 3.x reason `source-mention`, because the 4.0 engine can tell an identifier from a string.
+
+### heuristic-cap
+
+Grade: `medium`. Applies to field candidates only.
+
+The field's operation had no call site gqlPrune could trace, so the field was matched by name against the source text instead. A name search cannot see a field read through a rename, a spread or a computed key, so a candidate matched by name never rises above `medium`, whatever the name evidence says. See [field candidates](/findings/field-candidates).
+
+### never-read
+
+Grade: `high`. Applies to field candidates only. Since 4.1.
+
+Every call site of the field's operation was traced, anything the trace lost track of already counted as read, and no read path reaches the field.
+
+## Which findings are graded
+
+| Finding | Graded | How |
+| --- | --- | --- |
+| [Unused operations](/findings/unused-operations) | yes | by the bare operation name |
+| [Unused fragments](/findings/unused-fragments) | yes | by the bare fragment name |
+| [Orphaned files](/findings/orphaned-files) | yes | the lowest grade among the definitions in the file |
+| [Field candidates](/findings/field-candidates) | yes | `never-read` when traced, `heuristic-cap` when matched by name |
+| [Deprecated selections](/findings/deprecated-selections) | no | validated against a real schema, so they are facts rather than candidates |
+
+An orphaned file takes the lowest grade among its definitions, because one definition that still looks live undermines the verdict on the whole file.
+
+## Where the grade appears
+
+- the Confidence column of each candidate table in the human-readable output
+- `confidence` and `reason` on each finding in the JSON report, plus a per-level count in `summary.byConfidence` (see [JSON report](/reference/json-report))
+- the end of each GitHub Actions annotation, for example `[confidence: high]`
+- one line per finding under `--verbose`, with the evidence in words
+
+This scan of a project with three dead operations shows one of each grade. The warning about a suspected generated file is trimmed:
+
+```text
+Found 2 GraphQL files.
+Found 11 GraphQL operations.
+Found 2 source files.
+...
+
+--- Unused GraphQL Operations ---
+
+Type  Operation           Confidence File
+query GetConfidenceHigh   high       dead.gql
+query GetConfidenceMedium medium     dead.gql
+query GetConfidenceLow    low        dead.gql
+---------------------------------
+Found 3 unused GraphQL operations. Please remove them.
+
+--- Orphaned GraphQL Files ---
+
+Confidence File
+low        confidence/graphql/dead.gql
+------------------------------
+Found 1 orphaned GraphQL file. Every definition in it is unused and no document imports it, so it can likely be deleted.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+The same scan with `--verbose` explains each grade:
+
+```text
+[verbose] confidence: operation "GetConfidenceHigh" is high (name-absent: the name appears in no scanned source file)
+[verbose] confidence: operation "GetConfidenceMedium" is medium (generated-only: the name appears only in files that look generated)
+[verbose] confidence: operation "GetConfidenceLow" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)
+[verbose] confidence: orphaned file "confidence/graphql/dead.gql" is low (string-mention: the name appears inside a string in ordinary source, which may be a reference built at runtime)
+```
+
+## --min-confidence
+
+Since 3.0, `--min-confidence <level>` (or `minConfidence` in the config file) reports only the findings graded at that level or above. The accepted values are `high`, `medium` and `low`. When you omit the setting, nothing is filtered.
+
+| Setting | Reported |
+| --- | --- |
+| omitted | every finding |
+| `low` | every graded finding |
+| `medium` | `medium` and `high` |
+| `high` | `high` only |
+
+This command fails only on findings whose name appears nowhere in the source:
+
+```bash
+npx gqlprune --min-confidence high
+```
+
+The same gate in `gqlPrune.config.yaml`:
+
+```yaml
+minConfidence: high
+```
+
+The flag overrides the config value.
+
+### How the gate sets the exit code
+
+The exit code follows what is reported, so the gate is also the CI gate. A run exits 1 when an unused operation or an unused fragment at or above the level remains, and 0 when none does. Findings below the level are left out of the tables, the JSON report and the annotations. Orphaned files and field candidates are filtered the same way, but they never change the exit code on their own. Deprecated selections have no grade, so the gate does not filter them. See [exit codes](/reference/exit-codes).
+
+This project's only finding is graded `low`, so the scan without the gate exits 1:
+
+```text
+Found 2 GraphQL files.
+Found 2 GraphQL operations.
+Found 1 source file.
+
+--- Unused GraphQL Operations ---
+
+Type  Operation         Confidence File
+query GetArchivedLedger low        archived.gql
+---------------------------------
+Found 1 unused GraphQL operation. Please remove it.
+
+--- Orphaned GraphQL Files ---
+
+Confidence File
+low        confidence-low/graphql/archived.gql
+------------------------------
+Found 1 orphaned GraphQL file. Every definition in it is unused and no document imports it, so it can likely be deleted.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+With `--min-confidence high`, nothing is left to report and the run exits 0:
+
+```text
+Found 2 GraphQL files.
+Found 2 GraphQL operations.
+Found 1 source file.
+
+✓ No unused GraphQL operations or fragments found.
+```
+
+A common setup fails CI on `high` while developers run `npx gqlprune` locally and review everything. `--verbose` prints the grade and evidence for every finding, including the ones the gate hid.
+
+A value other than `high`, `medium` or `low` stops the run with exit code 2, whether it comes from the flag or from the config file.
