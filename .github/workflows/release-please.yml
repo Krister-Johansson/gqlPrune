@@ -36,6 +36,7 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }} # the commit the release is tagged at
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
@@ -83,3 +84,25 @@ jobs:
       - run: npm run test:e2e
       # prepublishOnly (build + tests) runs as the pre-publish gate.
       - run: npm publish --access public
+
+  # Moves docs-live, the branch Docs7 builds the user docs from, to the commit
+  # npm just shipped, so the hosted docs and the Context7 library describe the
+  # published version and not unreleased work on main. It runs after publish:
+  # if the registry upload fails, the docs stay on the previous release. The
+  # REST call with force=false refuses anything but a fast-forward, and needs
+  # no checkout.
+  docs-live:
+    needs: [release-please, publish]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # update the docs-live ref
+    steps:
+      - name: Fast-forward docs-live to the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/heads/docs-live" \
+            -f sha="$SHA" -F force=false

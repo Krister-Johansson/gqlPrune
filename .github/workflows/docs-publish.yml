@@ -1,0 +1,58 @@
+# Publishes docs-only changes from main between releases by fast-forwarding
+# docs-live, the branch Docs7 builds the user docs from. docs: commits alone
+# do not make release-please open a release, so a docs fix would otherwise
+# wait for the next feat or fix.
+#
+# Refuses when anything that ships to npm users (src/, package.json,
+# package-lock.json) changed since the commit docs-live points at: the docs
+# would then describe behaviour npm does not have yet. Those changes wait for
+# the release, and the release job in release-please.yml moves docs-live then.
+name: docs-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or branch on main to publish
+        required: false
+        default: main
+
+# No checkout; the job only reads a comparison and moves one ref.
+permissions: {}
+
+jobs:
+  publish-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # update the docs-live ref
+    steps:
+      - name: Fast-forward docs-live when no shipping file changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          compare="$(gh api "repos/${GITHUB_REPOSITORY}/compare/docs-live...${TARGET}")"
+          status="$(jq -r .status <<<"$compare")"
+          if [ "$status" != "ahead" ]; then
+            echo "::error::${TARGET} is not ahead of docs-live (status: $status)."
+            exit 1
+          fi
+          # The compare API lists at most 300 files; refuse rather than check half.
+          count="$(jq '.files | length' <<<"$compare")"
+          if [ "$count" -ge 300 ]; then
+            echo "::error::Too many changed files to check ($count). Publish with the next release."
+            exit 1
+          fi
+          blocked="$(jq -r '.files[].filename' <<<"$compare" \
+            | grep -E '^(src/|package\.json$|package-lock\.json$)' || true)"
+          if [ -n "$blocked" ]; then
+            echo "::error::Unreleased changes ship to npm users; publish with the next release:"
+            printf '%s\n' "$blocked"
+            exit 1
+          fi
+          sha="$(jq -r '.commits[-1].sha' <<<"$compare")"
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/heads/docs-live" \
+            -f sha="$sha" -F force=false
+          echo "docs-live now points at ${sha}."

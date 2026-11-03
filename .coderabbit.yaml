@@ -102,6 +102,10 @@ reviews:
       instructions: |
         Plain technical prose. Flag em dashes and en dashes, Title Case headings (headings use sentence case), curly quotes, emojis in headings or bullets, and filler phrases. Docs describe the tool as it is, not as a diff. Findings are described as candidates from a static scan, not as proof that code is dead. CHANGELOG.md belongs to release-please: flag any hand edit to it.
 
+    - path: 'docs/**'
+      instructions: |
+        User documentation: Docs7 builds it from docs.json and MDX, and Context7 indexes the raw MDX for coding agents. The Markdown prose rules apply to .mdx as well. Flag a CLI flag, config key, default or JSON report key that does not exist in src/utils/args.ts, src/types/ or test/e2e/contract.e2e.test.ts; terminal output that was not produced by the CLI; a `gqlprune scan` subcommand (there is none); a page without title and description frontmatter; a page missing from the docs.json navigation; and custom React components.
+
     - path: '.github/workflows/**'
       instructions: |
         Every action is pinned by full commit SHA with a version comment. permissions are least privilege, set per job, with a read-only default at the top. No pull_request_target trigger. actions/checkout sets persist-credentials: false. Flag ${{ github.event.* }} values interpolated straight into run scripts. The job names "ci / build + test (node 20)", "ci / build + test (node 22)" and "ci / linked issue" are required checks; flag a rename.

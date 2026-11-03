@@ -59,6 +59,7 @@ test/                     Jest specs, one per source module
     completion.e2e.test.ts  The shell completion scripts
     packaging.e2e.test.ts   Pack, install, run the installed binary
   fixtures/e2e/           Static project trees the e2e cases scan
+docs/                     User docs: docs.json and MDX pages, built by Docs7
 website/                  Landing page: a separate project, not part of the package
   index.html              Vite entry point
   vite.config.ts          React plugin and the relative base './'
@@ -130,6 +131,28 @@ spec asserts that. The root `tsconfig.json` compiles only `src/`. ESLint and
 the unit Jest config ignore `website/`. Dependabot updates it under its own
 entry, `socket.yml` scans its manifests, and `context7.json` leaves it out of
 the indexed docs. CodeQL does analyze it, on purpose.
+
+### The user docs (`docs/`)
+
+`docs/` holds the user documentation: `docs.json` (navigation, colours) and
+one `.mdx` page per topic. Context7's Docs7 builds the hosted site from it,
+and Context7 indexes the same raw MDX for coding agents (`context7.json` has
+`"folders": ["docs"]`). Preview locally with `npx @upstash/docs7 dev ./docs`.
+
+The site publishes from the `docs-live` branch, not from `main`, so the docs
+match the version on npm:
+
+- The `docs-live` job in `release-please.yml` fast-forwards `docs-live` to the
+  release commit after `npm publish` succeeds.
+- `docs-publish.yml` (run by hand) publishes a docs-only fix between releases.
+  It refuses when `src/`, `package.json` or `package-lock.json` changed since
+  `docs-live`, because those wait for the release.
+
+`test/docs.test.ts` fails when a flag in `FLAGS`, a key of `GqlPruneConfig`, a
+`ConfidenceReason` or a JSON report key pinned by the contract spec is missing
+from its reference page. A change to any of those needs the matching docs
+change in the same pull request. Pages follow the README's rules: no em or en
+dashes, sentence-case headings, and findings described as candidates.
 
 ## How we work
 
