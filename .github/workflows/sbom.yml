@@ -1,7 +1,7 @@
 # Attaches a CycloneDX SBOM to every GitHub release, signed with keyless
 # cosign, so each published version ships with a machine-readable inventory
 # of its runtime dependency tree and a verifiable signature over it
-# (see docs/security-policies.md and the Verifying a release section of
+# (see security/security-policies.md and the Verifying a release section of
 # SECURITY.md).
 #
 # Two jobs on purpose: generating the SBOM runs npm ci, and dependency

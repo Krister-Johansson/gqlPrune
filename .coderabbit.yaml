@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 #
-# CodeRabbit review settings for gqlPrune. docs/coderabbit.md explains what
+# CodeRabbit review settings for gqlPrune. .github/coderabbit.md explains what
 # CodeRabbit checks here and how to work with its reviews.
 #
 # The review budget is the constraint that shapes this file: reviews are
@@ -58,7 +58,7 @@ reviews:
   path_filters:
     - '!package-lock.json'
     # Competitive research notes, read for context and not maintained as docs.
-    - '!docs/research/**'
+    - '!design/research/**'
 
   path_instructions:
     - path: 'src/**'
@@ -90,9 +90,9 @@ reviews:
       instructions: |
         Input data for the e2e suite, never compiled or linted. Each fixture file says it is a fixture in a comment. Do not flag unresolved imports, unused code, codegen-shaped output or style in these files; they imitate a consumer's tree on purpose. Do flag a fixture file without the fixture comment.
 
-    - path: 'docs/adr/**'
+    - path: 'design/adr/**'
       instructions: |
-        ADRs follow docs/adr/README.md. A new ADR has status proposed; flag a new ADR with status accepted, because only the maintainer accepts ADRs.
+        ADRs follow design/adr/README.md. A new ADR has status proposed; flag a new ADR with status accepted, because only the maintainer accepts ADRs.
 
     - path: '**/*.md'
       instructions: |

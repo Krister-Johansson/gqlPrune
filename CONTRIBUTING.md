@@ -105,11 +105,11 @@ review before merge. A review checks four things:
 - Correctness: the change does what it claims, edge cases included, and comes
   with tests that fail without it.
 - Fit: the code matches the surrounding style and the design rule in
-  [docs/architecture.md](./docs/architecture.md) (pure functions wired by
+  [design/architecture.md](./design/architecture.md) (pure functions wired by
   `mainFunction`), and the change stays focused on one issue.
 - Security: no new execution of scanned input, no path handling that escapes
   the configured directories, no new dependencies without need (see
-  [docs/security-policies.md](./docs/security-policies.md)).
+  [security/security-policies.md](./security/security-policies.md)).
 - Documentation: user-visible changes update the README in the same pull
   request.
 

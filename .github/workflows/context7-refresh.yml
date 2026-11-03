@@ -6,7 +6,7 @@
 #
 # Needs the CONTEXT7_API_KEY repository secret: an API key from the Context7
 # dashboard (https://context7.com/dashboard). It can only trigger refreshes of
-# libraries the account owns; see docs/security-policies.md.
+# libraries the account owns; see security/security-policies.md.
 name: context7-refresh
 
 on:
