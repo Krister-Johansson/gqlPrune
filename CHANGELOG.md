@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.1.1](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v4.1.0...gqlprune-v4.1.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **deps:** bump the npm-production group with 3 updates ([#220](https://github.com/Krister-Johansson/gqlPrune/issues/220)) ([2492964](https://github.com/Krister-Johansson/gqlPrune/commit/2492964355836497cd12bf62f1cf911de5aa9f07))
+
 ## [4.1.0](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v4.0.0...gqlprune-v4.1.0) (2026-10-19)
 
 
