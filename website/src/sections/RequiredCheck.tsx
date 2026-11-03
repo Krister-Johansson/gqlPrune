@@ -4,8 +4,11 @@
 import { Cross, Lock, XCircle } from '../components/Icons';
 
 const EXIT_CODES: [number, string][] = [
-  [0, 'The scan finished and found nothing unused.'],
-  [1, 'The scan finished and found unused operations or fragments.'],
+  [
+    0,
+    'The scan finished and reported no unused operations or fragments. Findings below the --min-confidence grade are not reported and do not count.',
+  ],
+  [1, 'The scan finished and reported unused operations or fragments.'],
   [
     2,
     'The run failed: a bad flag, no configuration, or a directory that does not exist.',

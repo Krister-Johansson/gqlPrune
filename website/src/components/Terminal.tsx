@@ -7,7 +7,7 @@ type TerminalProps = {
   /** The working directory shown in the title bar. */
   cwd: string;
   exitCode: number;
-  /** Describes the recording for screen readers, which skip the lines. */
+  /** Names the terminal for screen readers, which also read its lines. */
   label: string;
   className?: string;
   /** An optional status line along the bottom edge. */
@@ -27,7 +27,7 @@ export function Terminal({
   return (
     <div
       className={['term', className].filter(Boolean).join(' ')}
-      role="img"
+      role="group"
       aria-label={label}
     >
       <div className="term-bar">
