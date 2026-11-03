@@ -59,6 +59,10 @@ test/                     Jest specs, one per source module
     completion.e2e.test.ts  The shell completion scripts
     packaging.e2e.test.ts   Pack, install, run the installed binary
   fixtures/e2e/           Static project trees the e2e cases scan
+website/                  Landing page: a separate project, not part of the package
+  index.html              Vite entry point
+  vite.config.ts          React plugin and the relative base './'
+  src/                    App.tsx (the page), main.tsx (mount), styles.css
 ```
 
 **Design pattern that matters:** keep logic in small **pure, exported
@@ -98,6 +102,34 @@ npm run build && npm run typecheck && npm run lint && npm test && npm run test:e
 
 Coverage thresholds live in `jest.config.cjs` (statements/functions/lines ≥ 90,
 branches ≥ 80). New code must not drop coverage below the floor.
+
+### The landing page (`website/`)
+
+`website/` is a Vite, React and TypeScript site with its own `package.json`
+and `package-lock.json`. Run its commands inside `website/`:
+
+| Command           | What it does                                              |
+| ----------------- | --------------------------------------------------------- |
+| `npm ci`          | Install the site's own dependencies                       |
+| `npm run dev`     | Vite dev server with hot reload                           |
+| `npm run build`   | Typecheck (`tsc --noEmit`), then build to `website/dist/` |
+| `npm run preview` | Serve the built `website/dist/` locally                   |
+
+`.github/workflows/website.yml` builds the site on every pull request that
+touches `website/` and deploys it to GitHub Pages
+(https://krister-johansson.github.io/gqlPrune/) on a push to `main`. Its jobs
+are not required checks. Deploying needs Settings > Pages > Source set to
+"GitHub Actions".
+
+The root gate above does not build the site. A change under `website/` needs
+`npm ci && npm run build` inside `website/` to pass as well.
+
+The site stays out of everything that belongs to the package. `files` in
+`package.json` and `.npmignore` leave it out of the tarball, and the packaging
+spec asserts that. The root `tsconfig.json` compiles only `src/`. ESLint and
+the unit Jest config ignore `website/`. Dependabot updates it under its own
+entry, `socket.yml` scans its manifests, and `context7.json` leaves it out of
+the indexed docs. CodeQL does analyze it, on purpose.
 
 ## How we work
 
@@ -146,6 +178,11 @@ A change moves through these stages. Don't skip ahead.
 - **Conventional Commits** — `release-please` derives the version and changelog
   from them. Use `feat:` (minor), `fix:` (patch), `docs:`, `chore:`, `ci:`,
   `refactor:`, `test:`. Scope when useful, e.g. `feat(scan): ...`.
+- **Site commits never use `feat:` or `fix:`.** Give a change to `website/`
+  a `docs:`, `chore:` or `ci:` prefix. `release-please-config.json` lists
+  `website` under `exclude-paths`, so release-please skips a commit whose files
+  are all under `website/`. A commit that also touches the workflow or any root
+  file is counted, and its prefix decides whether the CLI gets a release.
 - **Never bump the version or edit `CHANGELOG.md` by hand** — release-please owns
   both. (See the release-process memory for the close/reopen CI stopgap.)
 
