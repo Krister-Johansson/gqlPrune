@@ -6,7 +6,7 @@
 const DESCRIPTION =
   'Finds unused GraphQL operations and fragments by scanning .gql/.graphql files and parsing your TypeScript/JavaScript source to check whether each one is referenced, following imports and re-exports. No schema or running server needed.';
 
-const INSTALL_COMMAND = 'npx gqlprune scan';
+const INSTALL_COMMAND = 'npx gqlprune';
 
 const LINKS = [
   { label: 'GitHub', href: 'https://github.com/Krister-Johansson/gqlPrune' },
