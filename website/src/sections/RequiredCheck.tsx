@@ -34,7 +34,7 @@ export function RequiredCheck() {
     <section className="sec" id="ci" aria-labelledby="ci-h">
       <div className="wrap split">
         <div className="stack">
-          <div className="eyebrow">$ echo $?</div>
+          <div className="eyebrow">echo $?</div>
           <h2 className="h2" id="ci-h">
             Run it as a required check
           </h2>

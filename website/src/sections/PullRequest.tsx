@@ -17,7 +17,7 @@ export function PullRequest() {
     <section className="sec" id="pr" aria-labelledby="pr-h">
       <div className="wrap split">
         <div className="stack">
-          <div className="eyebrow">$ gqlprune --annotate</div>
+          <div className="eyebrow">gqlprune --annotate</div>
           <h2 className="h2" id="pr-h">
             Findings show up on the pull request
           </h2>

@@ -365,7 +365,7 @@ body {
 .term-body .lo {
   color: var(--term-dim);
 }
-.term-body .pr {
+.term-body .prompt {
   color: var(--term-acc);
 }
 .term-body .warn {
@@ -466,20 +466,22 @@ body {
   padding: 112px 0;
   border-top: 1px solid var(--line);
 }
+/* Section labels read as a shell prompt: the command the section is about. */
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 5px 12px 5px 10px;
+  border-radius: 8px;
+  background: var(--term);
+  border: 1px solid var(--term-line);
   font: 500 13px/18px var(--mono);
-  color: var(--accent-text);
+  color: var(--term-text);
   margin-bottom: 18px;
 }
 .eyebrow::before {
-  content: '';
-  width: 18px;
-  height: 2px;
-  background: var(--accent-text);
-  border-radius: 2px;
+  content: '$';
+  color: var(--term-acc);
 }
 .h2 {
   font-size: 40px;
@@ -653,6 +655,17 @@ body {
     width: 40ch;
   }
 }
+.caret-cmd {
+  animation:
+    blink 1s steps(1) infinite,
+    gone 0s linear 1.75s forwards;
+}
+@keyframes gone {
+  from,
+  to {
+    visibility: hidden;
+  }
+}
 @keyframes blink {
   50% {
     opacity: 0;
@@ -668,44 +681,47 @@ body {
     transform: none;
   }
 }
-.counts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-.count {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px 18px;
+/* A status line along the bottom of the terminal, like tmux or a shell
+   prompt's right side, instead of separate tiles. */
+.term-status {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 24px;
+  padding: 11px 22px;
+  border-top: 1px solid var(--term-line);
+  background: #0d1412;
+  font: 500 13px/20px var(--mono);
+  color: var(--term-dim);
   animation: reveal 0.3s ease-out both;
   animation-delay: 5.54s;
 }
-.count b {
-  font: 700 32px/1 var(--display);
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
+.term-status b {
+  color: var(--term-text);
+  font-weight: 700;
 }
-.count span {
-  font-size: 15px;
-  line-height: 20px;
-  color: var(--muted);
+.term-status .grade {
+  color: var(--term-acc);
 }
-.count .chip {
-  align-self: flex-start;
+.term-status .exit {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--term-text);
+}
+.term-status .exit::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 .caption {
   margin-top: 14px;
   font-size: 14px;
   line-height: 21px;
   color: var(--faint);
-}
-.term-wide .term-body {
-  min-height: 640px;
 }
 
 /* PR mock */
@@ -1208,14 +1224,12 @@ body {
     line-height: 18px;
     padding: 16px 14px 18px;
   }
-  .term-wide .term-body {
-    min-height: 0;
-  }
   .typed {
     width: 40ch;
   }
-  .counts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .term-status {
+    padding: 10px 14px;
+    font-size: 12px;
   }
   .steps,
   .checks,
@@ -1280,6 +1294,7 @@ body {
 /* The scan recording holds still until it scrolls into view. */
 .scan-demo:not(.playing) .typed,
 .scan-demo:not(.playing) .tl,
-.scan-demo:not(.playing) .count {
+.scan-demo:not(.playing) .caret-cmd,
+.scan-demo:not(.playing) .term-status {
   animation-play-state: paused;
 }

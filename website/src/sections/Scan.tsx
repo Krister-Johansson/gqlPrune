@@ -100,24 +100,24 @@ const LINES: Line[] = [
     delay: 5.04,
     content: (
       <>
-        <span className="pr">$ </span>
+        <span className="prompt">$ </span>
         <span className="dim">echo $?</span>
       </>
     ),
   },
   { delay: 5.34, className: 'hi', content: '1' },
-];
-
-const COUNTS = [
-  { label: 'unused operation', chip: 'high', chipClass: 'chip-high' },
-  { label: 'unused fragment', chip: 'high', chipClass: 'chip-high' },
-  { label: 'orphaned file', chip: 'high', chipClass: 'chip-high' },
   {
-    label: 'exit code: findings were reported',
-    chip: 'exit 1',
-    chipClass: 'chip-flag',
+    delay: 5.6,
+    content: (
+      <>
+        <span className="prompt">$ </span>
+        <span className="caret" aria-hidden="true" />
+      </>
+    ),
   },
 ];
+
+const SUMMARY = ['unused operation', 'unused fragment', 'orphaned file'];
 
 /** Starts true the first time the element scrolls into view. */
 function useSeen<T extends Element>() {
@@ -138,7 +138,7 @@ function useSeen<T extends Element>() {
   return [ref, seen] as const;
 }
 
-/** The animated scan recording and the counts under it. */
+/** The animated scan recording with its summary status line. */
 export function Scan() {
   // The recording waits until it is on screen, or it would finish before
   // anyone scrolls down to it.
@@ -148,7 +148,7 @@ export function Scan() {
       <div className="wrap">
         <div className="split split-end" style={{ marginBottom: 40 }}>
           <div>
-            <div className="eyebrow">$ gqlprune</div>
+            <div className="eyebrow">gqlprune</div>
             <h2 className="h2" id="scan-h">
               One scan, three kinds of dead GraphQL
             </h2>
@@ -165,13 +165,23 @@ export function Scan() {
               cwd="~/app"
               exitCode={1}
               label="Terminal recording: gqlPrune scans the app fixture and reports one unused operation, one unused fragment and one orphaned file, all graded high."
+              status={
+                <>
+                  {SUMMARY.map((label) => (
+                    <span key={label}>
+                      <b>1</b> {label} <span className="grade">high</span>
+                    </span>
+                  ))}
+                  <span className="exit">exit 1</span>
+                </>
+              }
             >
               <div className="ln">
-                <span className="pr">$ </span>
+                <span className="prompt">$ </span>
                 <span className="typed">
                   npx gqlprune --graphql graphql --src src
                 </span>
-                <span className="caret" aria-hidden="true" />
+                <span className="caret caret-cmd" aria-hidden="true" />
               </div>
               {LINES.map((line, index) => (
                 <div
@@ -185,15 +195,6 @@ export function Scan() {
                 </div>
               ))}
             </Terminal>
-          </div>
-          <div className="counts">
-            {COUNTS.map((count) => (
-              <div className="count" key={count.label}>
-                <b>1</b>
-                <span>{count.label}</span>
-                <span className={`chip ${count.chipClass}`}>{count.chip}</span>
-              </div>
-            ))}
           </div>
         </div>
         <p className="caption">

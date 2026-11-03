@@ -116,7 +116,7 @@ export function Faq() {
     <section className="sec" id="faq" aria-labelledby="faq-h">
       <div className="wrap faq-grid">
         <div>
-          <div className="eyebrow">$ gqlprune --help</div>
+          <div className="eyebrow">gqlprune --help</div>
           <h2 className="h2" id="faq-h">
             Questions
           </h2>

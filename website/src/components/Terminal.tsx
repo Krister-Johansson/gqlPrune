@@ -10,6 +10,8 @@ type TerminalProps = {
   /** Describes the recording for screen readers, which skip the lines. */
   label: string;
   className?: string;
+  /** An optional status line along the bottom edge. */
+  status?: ReactNode;
   children: ReactNode;
 };
 
@@ -19,6 +21,7 @@ export function Terminal({
   exitCode,
   label,
   className,
+  status,
   children,
 }: TerminalProps) {
   return (
@@ -37,6 +40,7 @@ export function Terminal({
         <span>exit {exitCode}</span>
       </div>
       <div className="term-body">{children}</div>
+      {status && <div className="term-status">{status}</div>}
     </div>
   );
 }

@@ -32,7 +32,7 @@ export function Grades() {
       <div className="wrap">
         <div className="split split-end">
           <div>
-            <div className="eyebrow">$ gqlprune --min-confidence high</div>
+            <div className="eyebrow">gqlprune --min-confidence high</div>
             <h2 className="h2" id="grades-h">
               Candidates, graded by the evidence against them
             </h2>
@@ -71,7 +71,7 @@ export function Grades() {
           label="Terminal output from the combined fixture with two high and one low finding"
         >
           <div className="ln">
-            <span className="pr">$ </span>npx gqlprune
+            <span className="prompt">$ </span>npx gqlprune
           </div>
           <div className="ln dim">
             Using settings derived from codegen.ts: graphqlDir, srcDir, exclude,

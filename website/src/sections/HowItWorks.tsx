@@ -89,7 +89,7 @@ export function HowItWorks() {
       <div className="wrap">
         <div className="split split-end">
           <div>
-            <div className="eyebrow">$ gqlprune --verbose</div>
+            <div className="eyebrow">gqlprune --verbose</div>
             <h2 className="h2" id="how-h">
               How a scan works
             </h2>
