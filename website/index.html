@@ -5,11 +5,42 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gqlPrune: find unused GraphQL operations and fragments</title>
     <meta
       name="description"
-      content="Finds unused GraphQL operations and fragments by scanning .gql/.graphql files and parsing your TypeScript/JavaScript source to check whether each one is referenced, following imports and re-exports. No schema or running server needed."
+      content="gqlPrune reads your .graphql files, parses your TypeScript and JavaScript, and follows imports, re-exports and barrel files to find operations and fragments nothing references. No schema, server or introspection needed."
     />
-    <title>gqlPrune</title>
+    <meta property="og:title" content="gqlPrune" />
+    <meta
+      property="og:description"
+      content="Find the GraphQL operations your code no longer uses. No schema, server or introspection needed."
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      name="theme-color"
+      content="#0E1513"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="theme-color"
+      content="#F4F6F1"
+      media="(prefers-color-scheme: light)"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Sets the theme before the first paint so a light-theme visitor never
+      // sees a dark flash. src/theme.ts reads the same storage key.
+      (function () {
+        var theme = 'dark';
+        try {
+          var stored = localStorage.getItem('gqlprune-theme');
+          if (stored === 'dark' || stored === 'light') theme = stored;
+          else if (window.matchMedia('(prefers-color-scheme: light)').matches)
+            theme = 'light';
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
