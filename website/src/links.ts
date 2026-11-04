@@ -5,9 +5,9 @@ const REPO = 'https://github.com/Krister-Johansson/gqlPrune';
 
 /** Every outbound URL on the page, in one place. */
 export const LINKS = {
-  // The docs site on Docs7 does not exist yet; the README is the reference
-  // until it does.
-  docs: `${REPO}#readme`,
+  // The user docs, hosted on Docs7 and built from docs/ on the docs-live
+  // branch. Moves to the custom domain once it is set up.
+  docs: 'https://krister-johansson-gqlprune.docs7.io',
   github: REPO,
   npm: 'https://www.npmjs.com/package/gqlprune',
   changelog: `${REPO}/blob/main/CHANGELOG.md`,
