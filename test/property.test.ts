@@ -27,12 +27,30 @@ import { GraphqlFileEntities } from '../src/utils/operations.js';
 const lower = 'abcdefghijklmnopqrstuvwxyz';
 const alnum = lower + lower.toUpperCase() + '0123456789_';
 const charFrom = (chars: string) => fc.constantFrom(...chars.split(''));
+// Words the reference-index shapes below cannot hold as an identifier, so a
+// generated name is never one of them. `if;` is a syntax error, not a
+// reference, and the index rightly finds nothing there. The first group is the
+// ES reserved words and literals, which break the expression shapes; the
+// second is the TypeScript type keywords, which break only `let t: X;`.
+// Strict-mode words such as `let`, `yield` and `static` parse in every shape
+// and stay in. This is the TypeScript keyword list run through each shape.
+const reservedWords = new Set([
+  ...['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger'],
+  ...['default', 'delete', 'do', 'else', 'enum', 'export', 'extends'],
+  ...['false', 'finally', 'for', 'function', 'if', 'import', 'in'],
+  ...['instanceof', 'new', 'null', 'return', 'super', 'switch', 'this'],
+  ...['throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with'],
+  ...['any', 'bigint', 'boolean', 'infer', 'keyof', 'never', 'number'],
+  ...['object', 'readonly', 'string', 'symbol', 'undefined', 'unique'],
+  'unknown',
+]);
 const identifierArb = fc
   .tuple(
     charFrom(lower + lower.toUpperCase()),
     fc.array(charFrom(alnum), { maxLength: 12 }),
   )
-  .map(([head, tail]) => head + tail.join(''));
+  .map(([head, tail]) => head + tail.join(''))
+  .filter((name) => !reservedWords.has(name));
 const operationArb: fc.Arbitrary<OperationInfo> = fc.record({
   name: identifierArb,
   type: fc.constantFrom<'query' | 'mutation' | 'subscription'>(
