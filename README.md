@@ -15,7 +15,7 @@
 
 `gqlPrune` is a schema-free CLI that finds unused GraphQL operations (queries, mutations, subscriptions), unused fragments and orphaned `.gql` files. It needs no schema file, no running server and no introspection step. It reads your `.gql` and `.graphql` files, parses your TypeScript and JavaScript source, and follows imports, re-exports and barrel files to see whether anything still references each definition.
 
-What it reports are candidates for you to review, not proof: a static read can miss a name built at runtime, a caller in another repository, or a file type the parser does not take. Each finding carries a confidence grade.
+What it reports are candidates for you to review, not proof: a static read can miss a name built at runtime, a caller in another repository, or a file type the parser does not take. Each unused operation, fragment, orphaned file and field candidate carries a confidence grade; deprecated selections come from a schema you supply and are not graded.
 
 **Documentation: https://krister-johansson-gqlprune.docs7.io**
 
@@ -54,7 +54,7 @@ Every key has a matching CLI flag except `sourceExtensions`, and a flag override
 
 ## In CI
 
-The exit code is 0 when nothing is reported, 1 when unused operations or fragments are reported, and 2 when the run itself fails. This script fails the job only on findings whose name appears nowhere in your source:
+The exit code is 0 when no unused operation or fragment is reported, 1 when unused operations or fragments are reported, and 2 when the run itself fails. Orphaned files, field candidates and deprecated selections never set it on their own. This script fails the job only on findings whose name appears nowhere in your source:
 
 ```json
 {
