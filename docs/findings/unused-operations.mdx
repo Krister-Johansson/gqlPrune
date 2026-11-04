@@ -1,0 +1,163 @@
+---
+title: Unused operations
+description: What an unused GraphQL operation finding from gqlprune means, how it looks in the output and JSON report, and how to verify it before deleting the operation.
+---
+
+## What it means
+
+A named query, mutation or subscription in a `.gql` or `.graphql` file is reported as unused when no reference in the scanned source resolves to any identifier its [usage patterns](/concepts/usage-patterns) expand to. With the default patterns, `query GetUser` is used when some code references `useGetUserQuery`, `useGetUserLazyQuery`, `useGetUserSuspenseQuery` or `GetUserDocument`, directly or through imports, re-exports and barrel files (see [how detection works](/concepts/how-detection-works)).
+
+Anonymous operations are never reported, because gqlPrune tracks usage by name. With `--inline`, operations embedded in source files are checked too, and one also counts as used when the constant it is assigned to is referenced.
+
+## Example
+
+This document defines two queries:
+
+```graphql
+query GetUser($id: ID!) {
+  user(id: $id) {
+    id
+    name
+  }
+}
+
+query GetLegacyUser($id: ID!) {
+  legacyUser(id: $id) {
+    id
+  }
+}
+```
+
+This component, `src/Profile.tsx`, calls the hook for `GetUser` only:
+
+```tsx
+import { useGetUserQuery } from './generated/graphql';
+
+export function Profile({ id }: { id: string }) {
+  const { data } = useGetUserQuery({ variables: { id } });
+  return <h1 key={data?.user?.id}>{data?.user?.name}</h1>;
+}
+```
+
+Nothing references `useGetLegacyUserQuery`, `useGetLegacyUserLazyQuery`, `useGetLegacyUserSuspenseQuery` or `GetLegacyUserDocument`, so `GetLegacyUser` is a candidate.
+
+## Output
+
+This command scans the example project:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+It prints one row per unused operation, with the operation type, the name, the [confidence grade](/concepts/confidence) and the file name:
+
+```text
+Found 1 GraphQL file.
+Found 2 GraphQL operations.
+Found 1 source file.
+
+--- Unused GraphQL Operations ---
+
+Type  Operation     Confidence File
+query GetLegacyUser high       user.gql
+---------------------------------
+Found 1 unused GraphQL operation. Please remove it.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+## JSON
+
+With `--json`, each unused operation is an entry in `unusedOperations` with `name`, `type`, `file`, `line`, `confidence` and `reason`, and `summary.unusedOperations` counts them:
+
+```json
+{
+  "unusedOperations": [
+    {
+      "name": "GetLegacyUser",
+      "type": "query",
+      "file": "graphql/user.gql",
+      "line": 8,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "unusedFragments": [],
+  "orphanedFiles": [],
+  "deprecatedUsages": [],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 1,
+    "unusedFragments": 0,
+    "orphanedFiles": 0,
+    "deprecatedUsages": 0,
+    "byConfidence": {
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}
+```
+
+`type` is one of `query`, `mutation` or `subscription`. `line` is the line the operation starts on. See [JSON report](/reference/json-report).
+
+## Confidence
+
+Each unused operation is graded by its bare name, `GetLegacyUser` in the example:
+
+| Grade | Reason | Evidence |
+| --- | --- | --- |
+| `high` | `name-absent` | The name appears nowhere in the scanned source. |
+| `medium` | `generated-only` | The name appears only in files that look generated. |
+| `low` | `name-referenced` | An identifier with exactly that name is read in ordinary source. |
+| `low` | `string-mention` | The name appears inside a string in ordinary source. |
+
+See [confidence grades](/concepts/confidence) for each reason.
+
+## Exit code
+
+An unused operation sets exit code 1. With `--min-confidence`, only an unused operation at or above the level does; one below it is left out of the report and does not change the exit code. See [exit codes](/reference/exit-codes).
+
+## GitHub annotation
+
+Under GitHub Actions, or with `--annotate`, each unused operation gets one `::warning` annotation on stderr, pointing at its file and line and ending with its grade:
+
+```text
+::warning file=graphql/user.gql,line=8::Unused GraphQL operation "GetLegacyUser" (query) [confidence: high]
+```
+
+See [GitHub Actions](/ci/github-actions).
+
+## How to verify a finding
+
+The finding proves one thing: in the files gqlPrune scanned, no reference resolves to any identifier the usage patterns produce for this operation. It does not prove that the operation is never sent. A static read can miss uses that:
+
+- build the operation name at runtime, through string concatenation or a lookup table
+- live outside `srcDir`, or in a file type gqlPrune does not parse
+- live in another repository that imports the same documents
+- use a naming convention your `usagePatterns` do not cover
+
+To check a finding:
+
+1. Read the grade. `low` means the name is mentioned in ordinary source; follow that mention first.
+2. Run the scan with `--verbose`. For each unused operation it lists the identifiers it looked for, and for each used one the reference that decided it.
+3. Search every repository that consumes these documents for the operation name and for the identifiers your client generates.
+4. Check that no source file that should be scanned is excluded or outside `srcDir`.
+
+This command prints the identifiers looked for and the evidence behind each grade:
+
+```bash
+npx gqlprune --verbose
+```
+
+## What to do
+
+If the operation is dead, delete it from its `.gql` or `.graphql` file, regenerate your client code, and run the scan again. Removing an operation can leave a fragment that only it spread, which the next run reports as an [unused fragment](/findings/unused-fragments).
+
+If the operation is used and gqlPrune missed it, fix the cause rather than the symptom:
+
+- A naming convention gqlPrune does not know: add a pattern to [usagePatterns](/concepts/usage-patterns).
+- Code outside the scan: widen `srcDir`, or add the extension to `sourceExtensions`.
+- A renamed or default export reached through a path alias: check `baseUrl` and `paths` in the nearest `tsconfig.json`, which gqlPrune reads to resolve the alias.
+
+gqlPrune has no per-finding ignore list. To keep a definition out of the report for good, move it to a file and list that file in `exclude`. An excluded file's fragment spreads no longer count, so a fragment only that file spread is then reported.

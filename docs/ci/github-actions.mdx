@@ -1,0 +1,109 @@
+---
+title: GitHub Actions
+description: How to run gqlprune on pull requests in GitHub Actions, gate on high-confidence findings, get inline annotations, and script the JSON report with jq.
+---
+
+gqlPrune exits with code 1 when it reports an unused operation or fragment, so a CI job that runs it fails on findings. Exit code 2 means the run itself failed, such as a missing directory or a bad flag. See [exit codes](/reference/exit-codes).
+
+## Workflow for pull requests
+
+This workflow runs gqlPrune on every pull request and fails the job only on high-confidence findings. It assumes `gqlprune` is a dev dependency and `gqlPrune.config.yaml` sits in the repository root:
+
+```yaml
+name: gqlprune
+on: [pull_request]
+jobs:
+  gqlprune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx gqlprune --min-confidence high
+```
+
+gqlPrune needs Node.js 20 or newer. Install it as a dev dependency so CI runs the version your lockfile pins:
+
+```bash
+npm install --save-dev gqlprune
+```
+
+## Gate on confidence
+
+`--min-confidence high` reports only findings whose name appears nowhere in the scanned source, and the exit code follows what is reported. Lower-graded findings are left out of the report and do not fail the job, while a developer running `npx gqlprune` locally still sees all of them. Drop the flag to fail on every finding, or set `minConfidence` in the config file instead. See [confidence grades](/concepts/confidence).
+
+A high grade is still a candidate, not proof. A static read cannot see an operation name built at runtime, a caller in another repository, or a reference in a file type gqlPrune does not parse.
+
+To gate the same way from a package script, add the flag to the script:
+
+```json
+{
+  "scripts": {
+    "gql:prune": "gqlprune --min-confidence high"
+  }
+}
+```
+
+## Annotations
+
+Under GitHub Actions, gqlPrune emits `::warning` workflow commands that GitHub shows inline on the pull request's Files changed tab. It turns them on automatically when the `GITHUB_ACTIONS` environment variable is `true`, which GitHub sets in every job, so the workflow above needs no extra step.
+
+gqlPrune annotates:
+
+- each unused operation and fragment, at its file and line
+- each orphaned file
+- each deprecated selection, when a [schema](/configuration/config-file#schemafile) is configured
+- each field candidate with `--fields`, at its first selection, naming the path and the operation
+
+Every candidate annotation ends with its confidence grade, so a reviewer can triage from the Files changed tab. For a project with one unused operation and one unused fragment in a dead file, the annotations look like this:
+
+```text
+::warning file=app/graphql/legacyReport.gql,line=3::Unused GraphQL operation "GetLegacyReport" (query) [confidence: high]
+::warning file=app/graphql/fragments/teaserFields.gql,line=4::Unused GraphQL fragment "AbandonedTeaserFields" [confidence: high]
+::warning file=app/graphql/legacyReport.gql::Orphaned GraphQL file: every definition is unused and no document imports it [confidence: high]
+```
+
+In annotation mode, advisory warnings (such as a suspected generated file) also become `::warning` lines, and command-line usage errors (an unknown flag or command, a flag missing its value, a value a flag does not accept) become `::error` lines, for example `::error::Unknown flag: --nope`.
+
+### --annotate
+
+To produce the same annotations outside GitHub Actions, for example to test them locally or in another CI system that reads the format, pass `--annotate`:
+
+```bash
+npx gqlprune --annotate
+```
+
+Annotations go to stderr, so you can combine `--annotate` with `--json` and stdout still carries only the JSON report.
+
+## JSON for scripts
+
+`--json` prints a machine-readable report on stdout and nothing else. Diagnostics, warnings, `--verbose` lines and annotations go to stderr. The exit code is the same as without `--json`. See the [JSON report reference](/reference/json-report) for every key.
+
+Write the report to a file and keep the exit code, then read the file with `jq`. Piping `gqlprune` straight into `jq` hides gqlPrune's exit code unless the shell has `pipefail` set. This step prints each unused operation and fragment as `file:line name [grade]`, then fails the step if gqlPrune reported findings:
+
+```yaml
+      - name: gqlprune report
+        run: |
+          npx gqlprune --json > gqlprune-report.json || code=$?
+          jq -r '.unusedOperations[], .unusedFragments[] | "\(.file):\(.line) \(.name) [\(.confidence)]"' gqlprune-report.json
+          exit "${code:-0}"
+```
+
+For the project above, the `jq` line prints:
+
+```text
+app/graphql/legacyReport.gql:3 GetLegacyReport [high]
+app/graphql/fragments/teaserFields.gql:4 AbandonedTeaserFields [high]
+```
+
+These commands read other parts of the same report file:
+
+```bash
+jq -r '.orphanedFiles[].file' gqlprune-report.json
+jq '.summary.byConfidence' gqlprune-report.json
+jq -r '.warnings[]' gqlprune-report.json
+```
+
+A failed run (exit code 2) prints nothing on stdout, so check the exit code before you read the report: an empty file means the run failed, not that it found nothing.

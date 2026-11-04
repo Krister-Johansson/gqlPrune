@@ -1,0 +1,178 @@
+---
+title: Troubleshooting
+description: What to check when gqlPrune reports every operation unused, reports nothing unused, exits with code 2, or misses operations used through an unfamiliar GraphQL client.
+---
+
+Most surprising results have one of a few causes. Start with `--verbose`, which prints the resolved configuration, the files scanned, and for each operation the reference that decided it or the identifiers it looked for. Verbose lines go to stderr.
+
+```bash
+npx gqlprune --verbose
+```
+
+## Every operation is reported unused
+
+### No source files were read
+
+Check the counts at the top of the report. When the scan reads no source file at all, it cannot tell "nothing references these" from "nothing was read", so every operation looks unused and grades `high`. gqlPrune prints a warning in that case. This is the output for a Vue project where the only source file is `App.vue`:
+
+```text
+Found 1 GraphQL file.
+Found 1 GraphQL operation.
+Found 0 source files.
+⚠ No source files were read from ./src. Every operation will look unused. Check the directory, and set "sourceExtensions" if this project uses extensions gqlPrune does not scan by default (.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts).
+```
+
+Fix `srcDir` if it points at the wrong directory. If your components are `.vue`, `.svelte` or `.astro` files, name the extension in `sourceExtensions`:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+sourceExtensions:
+  - .vue
+```
+
+Setting `sourceExtensions` replaces the default list, so list `.ts` and the other extensions too if the project also has them. gqlPrune scans single-file components by their tokens and does not resolve imports inside them. See [Limitations](/concepts/limitations).
+
+### The usage patterns do not match your client
+
+gqlPrune counts an operation as used when the source references an identifier built from its name by a [usage pattern](/concepts/usage-patterns). The defaults match GraphQL Code Generator's React Apollo output (`useGetUserQuery`, `useGetUserLazyQuery`, `useGetUserSuspenseQuery`, `GetUserDocument`). If your client generates other names, nothing matches and every operation is reported. See [Operations used by a client gqlPrune does not know](#operations-used-by-a-client-gqlprune-does-not-know).
+
+### The callers live outside srcDir
+
+Code that uses an operation but sits outside the configured `srcDir`, in a file type gqlPrune does not parse, or in another repository, is invisible to the scan. Add the directories to `srcDir` (it takes a list or a glob such as `'packages/*/src'`), or treat the findings as candidates to check by hand.
+
+## Nothing is reported unused
+
+### Generated code inside srcDir
+
+GraphQL Code Generator output inside `srcDir` is the usual cause. A single generated file such as `src/gql/graphql.ts` references every `{Name}Document` constant from inside the hook it declares for it, so every operation looks used, and no error tells you so.
+
+gqlPrune warns when one source file references at least 70% of all operations, provided the project has at least 5 operations. The warning names the file and starts with `Suspected generated file`, followed by the path, the share and count of operations it references, and `and looks generated` when the file name or header looks generated. It ends with `add it to "exclude" in gqlPrune.config.yaml or unused results will be unreliable.`
+
+This is a run on a project where `src/pretend-codegen/graphql.ts` references all 6 operations. The scan passes:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+The warning prints on stderr, and the report says nothing is unused. Exclude the generated file and run again:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --exclude src/pretend-codegen/graphql.ts
+```
+
+With the file excluded, the same project reports five unused operations:
+
+```text
+Found 2 GraphQL files.
+Found 6 GraphQL operations.
+Found 1 source file.
+
+--- Unused GraphQL Operations ---
+
+Type     Operation          Confidence File
+query    GetCatalogItem     high       catalog.gql
+query    GetCatalogFacets   high       catalog.gql
+mutation UpdateCatalogItem  high       catalog.gql
+query    GetInventoryLevels high       inventory.gql
+query    GetInventoryAlerts high       inventory.gql
+---------------------------------
+Found 5 unused GraphQL operations. Please remove them.
+...
+```
+
+To make the fix permanent, add the file or a pattern for it to `exclude` in `gqlPrune.config.yaml`:
+
+```yaml
+exclude:
+  - '**/*.generated.ts'
+  - src/gql/graphql.ts
+```
+
+`gqlprune init` detects such a file and pre-fills it into `exclude`. When gqlPrune derives its settings from your [codegen config](/configuration/codegen), the `generates` output paths become `exclude` entries.
+
+The warning goes to stderr, so it also appears in `--json` mode, and the JSON report carries it in its `warnings` array. It does not change the exit code. Below the threshold there is no warning, so with fewer than 5 operations, or a generated file that references fewer than 70% of them, check the `--verbose` output: if every used operation is decided by a reference in the same file, that file is almost certainly generated output.
+
+### A minimum confidence filters the findings
+
+`--min-confidence` and `minConfidence` in the config leave findings below the level out of the report, and the exit code follows what is reported. A run gated on `high` exits 0 when only `medium` and `low` findings exist. `--verbose` prints the grade and evidence for every finding, including the ones the gate hid. See [confidence grades](/concepts/confidence).
+
+### A usage pattern is too broad
+
+Every extra usage pattern is another way for a dead operation to look used. A bare `{Name}` pattern matches any identifier that shares the operation's name. Keep `usagePatterns` to the names your client generates.
+
+## Exit code 2
+
+Exit code 2 means the run itself failed, not that findings exist. gqlPrune prints the reason on stderr and nothing on stdout, also in `--json` mode. In GitHub Actions, or with `--annotate`, command-line errors print as `::error` annotations.
+
+| Cause | Message on stderr |
+| --- | --- |
+| Unknown flag | `Unknown flag: --nope` |
+| Unknown command | `Unknown command: bogus` |
+| Flag without its value | `Missing value for --graphql` |
+| Value outside a flag's fixed set | `Invalid value for --min-confidence: certain (expected high, medium, low)` |
+| Unsupported shell for `completion` | `Unsupported shell: ksh` |
+| No `graphqlDir` or `srcDir` from flags, config file or codegen config | `No configuration found. Create gqlPrune.config.yaml (run "gqlprune init") or pass --graphql <dir> and --src <dir>.` |
+| `gqlPrune.config.yaml` cannot be read | `Error reading gqlPrune.config.yaml.` |
+| A configured directory is not on disk | `These configured directories do not exist: app/nowhere.` |
+| A configured directory glob matches nothing | `These configured directory patterns match no directories: packages/*/nope.` |
+| No directory derived from a codegen config is on disk | `No directory derived from <codegen file> for "graphqlDir" is on disk: ...` |
+| `minConfidence` in the config file is not `high`, `medium` or `low` | `Invalid minConfidence: bogus. Expected one of high, medium, low.` |
+| A usage pattern does not expand to an identifier | `Every entry in "usagePatterns" must expand to an identifier: ...` |
+| A usage pattern is not a non-empty string | `Every entry in "usagePatterns" must be a non-empty string. Got: 8080.` |
+| The schema named by `schemaFile` or `--schema` cannot be read or is not valid SDL | `Could not read or parse the GraphQL schema file: <file>.` |
+| The codegen config named by `--codegen` or `codegenConfig` cannot be read | `Could not read <file>.` |
+
+Command-line errors are followed by `Run "gqlprune --help" for usage.` Pressing Ctrl+C during `gqlprune init` prints `Aborted.` and also exits 2.
+
+A setting gqlPrune derived from your codegen config never fails the run on its own: a derived schema or directory that is not on disk is dropped with a warning and the scan continues. The run stops only when no derived directory is left to scan. A setting you wrote in `gqlPrune.config.yaml` or passed as a flag fails the run when it does not resolve, because you asked for it.
+
+The full list is in [Exit codes](/reference/exit-codes).
+
+## Operations used by a client gqlPrune does not know
+
+If your code calls operations through names the default patterns do not produce, gqlPrune reports them as unused. The grade does not protect you here: when the generated name never contains the bare operation name as a separate identifier, the finding grades `high`.
+
+This Apollo Angular service injects the generated `GetUserGQL` class:
+
+```ts
+import { GetUserGQL } from './generated';
+
+export class UserService {
+  constructor(private getUser: GetUserGQL) {}
+}
+```
+
+A scan with the default patterns reports `GetUser` as unused, graded `high`:
+
+```text
+--- Unused GraphQL Operations ---
+
+Type  Operation Confidence File
+query GetUser   high       user.gql
+```
+
+Run `--verbose` and read the identifiers it looked for. Then set `usagePatterns` to the names your client generates. The patterns replace the defaults, so list every convention you still use:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --pattern '{Name}GQL' --pattern '{Name}Document'
+```
+
+With those patterns the same project reports nothing unused. In `gqlPrune.config.yaml` the setting is:
+
+```yaml
+usagePatterns:
+  - '{Name}GQL'
+  - '{Name}Document'
+```
+
+A pattern takes the placeholders `{name}`, `{Name}`, `{type}` and `{Type}`, and it must expand to an identifier: `{Name}.graphql` stops the run with exit code 2. Fragments have their own setting, `fragmentUsagePatterns`, which defaults to `{Name}FragmentDoc`.
+
+Other cases:
+
+- If the project has a GraphQL Code Generator config, gqlPrune can derive the patterns from its plugins. See [Codegen config](/configuration/codegen).
+- Under the codegen `client` preset, code writes `graphql('query GetUser ...')` and passes the constant around, so no pattern can match. Run with `--inline`, which counts an inline document as used when the constant it is assigned to is referenced.
+- A client that calls operations by their bare name, such as `sdk.GetUser()` from `typescript-graphql-request`, has no distinct identifier to match. The finding then grades `low` with reason `name-referenced`. Check those findings by hand.
+- Operation names built at runtime, by string concatenation or a lookup table, never appear as identifiers, and no pattern can find them.
+
+[Clients](/configuration/clients) lists pattern settings for common clients.

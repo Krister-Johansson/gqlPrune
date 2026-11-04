@@ -1,0 +1,49 @@
+---
+title: Migrating from 3.x to 4.0
+description: What changes for an existing project when it upgrades gqlPrune from 3.x to 4.0, which detects usage by parsing source with the TypeScript compiler.
+---
+
+Usage detection changed engines in 4.0. gqlPrune 3.x decided "used" with a whole-word text search over `srcDir`. 4.0 parses each source file with the TypeScript compiler and resolves imports, re-exports, barrel files, renamed and default imports before it judges an operation. [How detection works](/concepts/how-detection-works) describes the current engine.
+
+The human-readable sections, the exit codes, every configuration key and every JSON key are unchanged. The sections below list what does change for an existing project.
+
+## typescript is a dependency
+
+`typescript` is installed with gqlPrune. Only its parser and module resolver run: gqlPrune creates no program and runs no type checking, and your own TypeScript version is untouched.
+
+## Comments, strings and unread imports no longer count
+
+A name in a comment, in a string or in a template literal no longer counts as usage. An `import` that nothing reads does not count either, and a declaration of a pattern name never did, on purpose. Expect an operation that was "used" only that way to be reported now, graded `low` when the bare name is still mentioned somewhere.
+
+## Re-exports, barrels and renamed imports are followed
+
+gqlPrune now finds usage through a re-export, a barrel `index.ts`, a renamed import (`import { GetUserDocument as Doc }`), a default import or a namespace member. Some findings you had to dismiss by hand disappear.
+
+## New confidence reasons
+
+The JSON `reason` vocabulary changed. `source-mention` is gone. Two values replace it, both graded `low`:
+
+- `name-referenced`: an identifier with the exact bare name is read somewhere.
+- `string-mention`: an exact string literal holds the name.
+
+`name-absent`, `generated-only` and `heuristic-cap` are unchanged, and no key changed shape. A script that switches on `reason` needs the two new values. See [confidence grades](/concepts/confidence).
+
+## Usage patterns must expand to an identifier
+
+A usage pattern must expand to an identifier. `use{Name}{Type}` and `{Name}Document` do. A pattern such as `{Name}.graphql` is rejected with exit code 2, because usage is decided by references to identifiers and such a pattern could never match. See [usage patterns](/concepts/usage-patterns).
+
+## Partly parsed files
+
+A source file that does not fully parse is read as far as it parsed, and the run warns and names it.
+
+## Files outside the JavaScript and TypeScript extensions
+
+Files outside the eight JavaScript and TypeScript extensions, such as a `.vue` file named in `sourceExtensions`, are scanned by their tokens without import resolution. See the single-file components section of [Limitations](/concepts/limitations).
+
+## No network requests
+
+gqlPrune makes no network requests. The once-a-day npm version check and its stderr notice are gone, so `NO_UPDATE_NOTIFIER` has no effect. Dependabot or `npm outdated` report new versions.
+
+## Verbose output and the closing reminder
+
+`--verbose` cites the file, line and column of the reference that decided a used operation, plus the import chain it went through. The closing reminder line now reads "These are candidates from a static scan."

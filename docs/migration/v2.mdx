@@ -1,0 +1,26 @@
+---
+title: Migrating from 1.x to 2.0
+description: What changes when a project upgrades gqlPrune from 1.x to 2.0, including the Node.js 20 requirement, the lowercase gqlprune command and broader usage detection.
+---
+
+## Node.js 20 or newer
+
+gqlPrune 2.x requires Node.js 20 or newer.
+
+## The command is gqlprune
+
+The CLI command is `gqlprune`, in lowercase, matching the package name. Both `npx gqlprune` and a global `gqlprune` work. This command runs a scan through npx:
+
+```bash
+npx gqlprune
+```
+
+## Usage detection is broader and configurable
+
+Usage detection now also matches the lazy and suspense hooks and the generated `<Name>Document` constant, not just `use<Name><Type>`. If you use a different client (urql, react-query, raw documents, and others), set [`usagePatterns`](/concepts/usage-patterns) so your operations are not reported as unused. [Clients](/configuration/clients) lists settings for common clients.
+
+## Folder exclusion works as documented
+
+`excludedFolders` matches by folder name or root-relative path, and `node_modules` and `.git` are always excluded. In 1.x the documented `node_modules` entry silently did nothing.
+
+`excludedFolders` is now deprecated in favor of `exclude`, which takes gitignore-style globs. See the [config file reference](/configuration/config-file).

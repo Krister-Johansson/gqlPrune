@@ -1,0 +1,32 @@
+---
+title: Migrating from 2.x to 3.0
+description: What changes for a project or script when it upgrades gqlPrune from 2.x to 3.0, where orphanedFiles in the JSON report became a list of objects.
+---
+
+## orphanedFiles entries are objects
+
+One field of the `--json` report changed shape. `orphanedFiles` used to be a list of paths and is now a list of objects, so that each orphaned file carries the same [confidence grade](/concepts/confidence) as every other finding:
+
+```diff
+- "orphanedFiles": ["graphql/user.gql"]
++ "orphanedFiles": [{ "file": "graphql/user.gql", "confidence": "high", "reason": "name-absent" }]
+```
+
+A script that read the paths directly needs one change:
+
+```diff
+- report.orphanedFiles.forEach((file) => ...)
++ report.orphanedFiles.forEach(({ file }) => ...)
+```
+
+`summary.orphanedFiles` still counts them, and nothing else in the report changed position or meaning. See the [JSON report reference](/reference/json-report) for the full shape.
+
+## Usage patterns match as whole words
+
+The 3.0.0 changelog lists a second breaking change: usage patterns match as whole words. An operation that 2.x reported as used only because its expanded pattern appeared inside a longer identifier is reported unused in 3.0, which is the correct answer and may add findings to an existing project's report.
+
+Since 4.0, gqlPrune decides usage by parsing the source rather than by searching its text. See [Migrating from 3.x to 4.0](/migration/v4).
+
+## What did not change
+
+The human-readable output, the exit codes, and every configuration key are unchanged.

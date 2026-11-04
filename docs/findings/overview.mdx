@@ -1,0 +1,42 @@
+---
+title: Findings overview
+description: The five kinds of finding gqlprune reports, with the section header, JSON key, grading, exit-code effect and opt-in flag of each.
+---
+
+gqlPrune reports five kinds of finding. Two run on every scan and decide the exit code. Three are opt-in or advisory and never change the exit code on their own. Every graded finding is a candidate from a static scan, not proof that the code is dead (see [limitations](/concepts/limitations)).
+
+| Finding | Section header | JSON key | Graded | Affects exit code | Opt-in flag |
+| --- | --- | --- | --- | --- | --- |
+| [Unused operations](/findings/unused-operations) | `--- Unused GraphQL Operations ---` | `unusedOperations` | yes | yes, exit 1 | none, always on |
+| [Unused fragments](/findings/unused-fragments) | `--- Unused GraphQL Fragments ---` | `unusedFragments` | yes | yes, exit 1 | none, always on |
+| [Orphaned files](/findings/orphaned-files) | `--- Orphaned GraphQL Files ---` | `orphanedFiles` | yes | no | none, always on |
+| [Deprecated selections](/findings/deprecated-selections) | `--- Deprecated Field Usage ---` | `deprecatedUsages` | no | no | `--schema <file>` or `schemaFile` |
+| [Field candidates](/findings/field-candidates) | `--- Unused Field Candidates ---` | `unusedFields` | yes | no | `--fields` or `checkFields: true` |
+
+## Order of the sections
+
+The human-readable report prints the sections in the order of the table. A section only prints when it has at least one entry. When no operation or fragment is unused, the report prints `✓ No unused GraphQL operations or fragments found.` in their place, and the advisory sections follow it.
+
+Any report that lists a candidate ends with this line:
+
+```text
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+The line prints for unused operations, fragments, orphaned files and field candidates. It does not print for deprecated selections alone, because the schema settles those, and it never prints in `--json` mode.
+
+## JSON keys
+
+`unusedOperations`, `unusedFragments`, `orphanedFiles`, `deprecatedUsages` and `warnings` are always present in the JSON report, as empty arrays when there is nothing to report. `unusedFields` is present only when the field check ran, so an absent key means "not checked" and an empty array means "checked, nothing found". `summary` counts each kind, and `summary.byConfidence` counts every graded finding per level. See [JSON report](/reference/json-report) for the full shape.
+
+## Exit codes
+
+A run exits 1 when at least one unused operation or unused fragment is reported, and 0 otherwise. An orphaned file always holds unused definitions, so it never needs to set the exit code itself. Field candidates and deprecated selections are advisory. A run that fails before it can report, such as one with an unknown flag or a missing directory, exits 2. With `--min-confidence`, only the findings that pass the gate count. See [exit codes](/reference/exit-codes) and [confidence grades](/concepts/confidence).
+
+## Inline documents
+
+`--inline` (or `inline: true`) is not a finding of its own. It adds the GraphQL documents embedded in your source files to the scan, so their operations and fragments can appear in the unused sections, the field candidates and the deprecated selections. A source file is never reported as an orphaned file.
+
+## Warnings
+
+Advisory warnings, such as a suspected generated file that masks your results, are not findings. They print to stderr, appear in the JSON report's `warnings` array, and do not change the exit code.

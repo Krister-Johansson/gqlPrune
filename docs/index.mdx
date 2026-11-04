@@ -1,0 +1,35 @@
+---
+title: gqlPrune
+description: What gqlPrune finds in a GraphQL client codebase, what it needs to run, and how to read what it reports.
+---
+
+gqlPrune is a command-line tool that finds unused GraphQL operations and fragments in a TypeScript or JavaScript project. It needs no schema file, no running server and no introspection step. It reads your `.gql` and `.graphql` files for definitions, parses your source with the TypeScript compiler API, and follows imports, re-exports and barrel files to see whether anything references each definition.
+
+The npm package is `gqlprune`, and it needs Node.js 20 or newer.
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+## What it finds
+
+A default scan reports three kinds of finding:
+
+- [Unused operations](/findings/unused-operations): queries, mutations and subscriptions that nothing in your source references.
+- [Unused fragments](/findings/unused-fragments): fragments that no operation spreads and no source file references.
+- [Orphaned files](/findings/orphaned-files): `.gql` and `.graphql` files where every definition is unused and no other document imports the file.
+
+Two more checks are opt-in:
+
+- [Field candidates](/findings/field-candidates), turned on with `--fields`, list fields that a used operation selects but that your source never appears to read.
+- [Deprecated selections](/findings/deprecated-selections), turned on with `--schema`, list fields and enum values your operations select that a local SDL file marks `@deprecated`. This is the one check that reads a schema, and it reads it from disk.
+
+## Findings are candidates
+
+gqlPrune reads your source and never runs it. A static read can miss a real use: an operation name built at runtime, a caller in another repository, or a caller in a file type the parser does not take. It can also err the other way, when generated code inside the scanned source references every operation and makes them all look used. Every finding is a candidate for you to check, not proof that the definition is dead. Each one carries a [confidence grade](/concepts/confidence) that says how much evidence points the other way, and [Limitations](/concepts/limitations) lists the blind spots.
+
+## Where to go next
+
+- [Quickstart](/quickstart): install gqlPrune, create a config and read your first report.
+- [For coding agents](/agents): the Context7 library ID and a fixed loop for running gqlPrune from an agent.
+- [CLI reference](/reference/cli): every command and flag.

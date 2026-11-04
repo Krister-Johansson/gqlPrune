@@ -1,0 +1,156 @@
+---
+title: Usage patterns per client
+description: Which usagePatterns to use for Apollo, urql, React Query, Solid Query, apollo-angular, Vue, the GraphQL Code Generator client preset and graphql-request.
+---
+
+gqlPrune decides that an operation is used when your source references an identifier built from one of the [usage patterns](/concepts/usage-patterns). Each GraphQL Code Generator plugin names its generated hooks and constants its own way, so the patterns have to match the plugin your project uses. With the wrong patterns, live operations are reported as unused.
+
+When your project has a codegen config that gqlPrune [reads](/configuration/codegen), it derives the patterns below from the plugin and preset names on its own. A recognized plugin **replaces** the built-in patterns rather than adding to them, because every extra pattern is another way for a dead operation to look used. Otherwise, set `usagePatterns` in `gqlPrune.config.yaml` (or pass `--pattern`) as shown for each client.
+
+## Patterns by plugin
+
+| Plugin or preset            | `usagePatterns`                                                                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript-react-apollo`   | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `use{Name}Suspense{Type}`, `{Name}Document`                                                    |
+| `typescript-urql`           | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-vue-apollo`     | `use{Name}{Type}`, `use{Name}Lazy{Type}`, `{Name}Document`                                                                               |
+| `typescript-vue-urql`       | `use{Name}{Type}`, `{Name}Document`                                                                                                      |
+| `typescript-react-query`    | `use{Name}{Type}`, `useInfinite{Name}{Type}`, `useSuspense{Name}{Type}`, `useSuspenseInfinite{Name}{Type}`, `{Name}Document`             |
+| `typescript-solid-query`    | `create{Name}{Type}`, `createInfinite{Name}{Type}`, `createSuspense{Name}{Type}`, `createSuspenseInfinite{Name}{Type}`, `{Name}Document` |
+| `typescript-apollo-angular` | `{Name}GQL`, `{Name}Document`                                                                                                            |
+| `typed-document-node`       | `{Name}Document`                                                                                                                         |
+| `client` preset             | no patterns; sets `inline: true` instead                                                                                                 |
+
+Every plugin in the table also derives `fragmentUsagePatterns: ['{Name}FragmentDoc']`. gqlPrune matches the names with or without the `@graphql-codegen/` scope and the `-preset` suffix, so `@graphql-codegen/client-preset` counts as the `client` preset.
+
+## Apollo Client (React)
+
+The built-in patterns are the ones `typescript-react-apollo` generates, so a React Apollo project needs no `usagePatterns`. For `query GetUser`, gqlPrune looks for `useGetUserQuery`, `useGetUserLazyQuery`, `useGetUserSuspenseQuery` and `GetUserDocument`. Passing the document to Apollo's own hook, as in `useQuery(GetUserDocument)`, matches through `{Name}Document`.
+
+This config spells out the defaults:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - use{Name}{Type}
+  - use{Name}Lazy{Type}
+  - use{Name}Suspense{Type}
+  - '{Name}Document'
+```
+
+## urql
+
+`typescript-urql` generates one hook per operation and the document constant. This config matches them:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - use{Name}{Type}
+  - '{Name}Document'
+```
+
+## React Query
+
+`typescript-react-query` generates the plain, infinite, suspense and suspense-infinite hooks. This config matches all four and the document constant:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - use{Name}{Type}
+  - useInfinite{Name}{Type}
+  - useSuspense{Name}{Type}
+  - useSuspenseInfinite{Name}{Type}
+  - '{Name}Document'
+```
+
+## Solid Query
+
+`typescript-solid-query` names its primitives with `create` instead of `use`. This config matches them:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - create{Name}{Type}
+  - createInfinite{Name}{Type}
+  - createSuspense{Name}{Type}
+  - createSuspenseInfinite{Name}{Type}
+  - '{Name}Document'
+```
+
+## apollo-angular
+
+`typescript-apollo-angular` generates an injectable service class per operation, such as `GetUserGQL`, instead of hooks. This config matches the services and the document constant:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - '{Name}GQL'
+  - '{Name}Document'
+```
+
+## Vue
+
+Vue projects need two settings: the patterns for the plugin, and `sourceExtensions`, because gqlPrune does not scan `.vue` files unless you name the extension. This config is for `typescript-vue-apollo`:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+sourceExtensions:
+  - .ts
+  - .vue
+usagePatterns:
+  - use{Name}{Type}
+  - use{Name}Lazy{Type}
+  - '{Name}Document'
+```
+
+For `typescript-vue-urql`, use `use{Name}{Type}` and `{Name}Document`. gqlPrune scans a `.vue` file by its tokens and does not resolve the imports inside it, so a hook reached through a renamed import in a single-file component is not followed. See [single-file components](/configuration/config-file#single-file-components). Codegen derivation does not set `sourceExtensions`; add it yourself.
+
+## GraphQL Code Generator client preset
+
+The client preset leaves no name to match. Your code writes `const q = graphql('query GetUser { ... }')` and passes `q` to a hook, so the operation name never appears at the call site. Turn on the inline scan instead, which counts a document as used when the constant it is assigned to is referenced:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+inline: true
+exclude:
+  - src/gql
+```
+
+Exclude the preset's output folder (here `src/gql`), or its generated `{Name}Document` constants make every operation look used. When gqlPrune reads the codegen config, it derives both `inline: true` and the `exclude` entry from the `generates` path. The preset keeps the built-in patterns, so `.gql` files used through ordinary hooks in the same project are still found. See [inline documents](/configuration/config-file#inline-documents).
+
+## graphql-request
+
+gqlPrune derives no patterns for `typescript-graphql-request`, and a project that uses it keeps the built-in patterns. Its SDK methods are named after the operation alone (`sdk.GetUser(...)`), and a bare `{Name}` pattern matches any identifier with the same name, which can make a dead operation look used.
+
+With the built-in patterns, an operation passed as a document constant, as in `request(url, GetUserDocument)`, is found through `{Name}Document`. An SDK call is not matched by any built-in pattern, so the operation is reported, graded `low` with the reason `name-referenced` because the bare name is read in the source.
+
+To count SDK calls as usage and accept that trade-off, add `{Name}`:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+usagePatterns:
+  - '{Name}'
+  - '{Name}Document'
+```
+
+With this config, any identifier named like an operation, anywhere in `srcDir`, counts as a use of it.
+
+## Conventions gqlPrune does not derive
+
+A project using one of these keeps the built-in patterns:
+
+- `typescript-document-nodes` names its constant after the operation alone (`GetUser`), with the same `{Name}` problem as graphql-request.
+- `typescript-operations` generates types only. Importing the `GetUserQuery` type says nothing about whether the operation still runs.
+- `near-operation-file` changes where output files are written, not what anything is called.
+
+Two codegen options change the generated names in a way gqlPrune does not follow. `omitOperationSuffix` drops the `Query`, `Mutation` or `Subscription` suffix, and `dedupeOperationSuffix` drops it when the operation name already ends with it. With either option, set `usagePatterns` yourself to the names your generated code uses.
+
+Run with `--verbose` to see, for each unused operation, the exact identifiers gqlPrune looked for. Every finding is still a candidate: a static read cannot see a name built at runtime or a caller in another repository.

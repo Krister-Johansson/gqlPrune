@@ -1,7 +1,8 @@
 # Asks Context7 (https://context7.com/krister-johansson/gqlprune) to re-index
-# the repository whenever a GitHub release is published, so the docs that
-# coding agents fetch for gqlPrune follow each release instead of Context7's
-# popularity-based refresh schedule. What gets indexed is governed by
+# the repository. Manual fallback only: every successful Docs7 production
+# build refreshes the library on its own, and Docs7 builds when the release
+# job moves docs-live. A release trigger here would fire before docs-live
+# moves and index the previous release. What gets indexed is governed by
 # context7.json at the repository root.
 #
 # Needs the CONTEXT7_API_KEY repository secret: an API key from the Context7
@@ -10,9 +11,7 @@
 name: context7-refresh
 
 on:
-  release:
-    types: [published]
-  # Manual refresh, e.g. after a README-only change lands on main between releases.
+  # Manual refresh, e.g. when a Docs7 build failed and the library is stale.
   workflow_dispatch:
 
 # No checkout and no GitHub API call, so the job needs no token at all.
