@@ -64,9 +64,16 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/git/refs/heads/docs-live" \
             -f sha="$sha" -F force=false
           echo "docs-live now points at ${sha}."
-      # Docs7 refreshes the library only when it builds, and it does not build
-      # for every docs-live move (a move that changes nothing under docs/, for
-      # one). Refresh here so the library always follows docs-live.
+
+  # A separate job, so "Re-run failed jobs" repeats only the refresh: re-running
+  # publish-docs would stop at its guard, because docs-live already moved.
+  # Docs7 refreshes the library only when it builds, and it does not build for
+  # every docs-live move (a move that changes nothing under docs/, for one).
+  refresh-context7:
+    needs: publish-docs
+    runs-on: ubuntu-latest
+    permissions: {} # uses only the CONTEXT7_API_KEY secret
+    steps:
       - name: Refresh the Context7 library
         env:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
