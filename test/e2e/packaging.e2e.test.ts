@@ -126,6 +126,7 @@ describe('the published tarball', () => {
     expect(files).toContain('dist/cli.js');
     expect(files.filter((file) => file.startsWith('test/'))).toEqual([]);
     expect(files.filter((file) => file.startsWith('scripts/'))).toEqual([]);
+    expect(files.filter((file) => file.startsWith('website/'))).toEqual([]);
   });
 
   it('installs a working gqlprune binary', async () => {

@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) 2023 Krister Johansson -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gqlPrune: find unused GraphQL operations and fragments</title>
+    <meta
+      name="description"
+      content="gqlPrune reads your .graphql files, parses your TypeScript and JavaScript, and follows imports, re-exports and barrel files to find operations and fragments nothing references. No schema, server or introspection needed."
+    />
+    <meta property="og:title" content="gqlPrune" />
+    <meta
+      property="og:description"
+      content="Find the GraphQL operations your code no longer uses. No schema, server or introspection needed."
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      name="theme-color"
+      content="#0E1513"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="theme-color"
+      content="#F4F6F1"
+      media="(prefers-color-scheme: light)"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

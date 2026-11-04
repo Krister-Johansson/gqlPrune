@@ -1,0 +1,352 @@
+---
+title: Config file
+description: Where gqlPrune looks for gqlPrune.config.yaml, how gqlprune init writes it, and what every key in it does.
+---
+
+gqlPrune reads its settings from `gqlPrune.config.yaml`. Every key in that file also has a CLI flag except `sourceExtensions`, so you can run without a file too (see the [CLI reference](/reference/cli)).
+
+## Where gqlPrune looks for the file
+
+gqlPrune reads `./gqlPrune.config.yaml` from the current working directory and looks nowhere else. Run `gqlprune` from the directory that holds the file, normally the project root. Relative paths in the file, and the root that anchored `exclude` patterns are matched against, are relative to that same directory.
+
+- When there is no file, gqlPrune relies on the CLI flags, then on a [GraphQL Code Generator config](/configuration/codegen) in the same directory.
+- An empty file, or one holding only whitespace, counts as no file.
+- A file that is not valid YAML, or that cannot be read, ends the run with `Error reading gqlPrune.config.yaml.` and [exit code 2](/reference/exit-codes).
+- When neither the file, the flags nor a codegen config say which directories to scan, the run stops with `No configuration found.` and exit code 2.
+
+## Create the file with gqlprune init
+
+`gqlprune init` asks a few questions and writes `gqlPrune.config.yaml` in the current directory. Run it from the project root:
+
+```bash
+npx gqlprune init
+```
+
+<Steps>
+  <Step title="Existing file check">
+    If `gqlPrune.config.yaml` already exists, `init` asks before overwriting it. The default answer is No, and answering No keeps the file unchanged.
+  </Step>
+  <Step title="Directory questions">
+    `init` suggests a `graphqlDir` from where your `.gql`/`.graphql` files live and a `srcDir` from where your source files live (`./src` when it exists). The detection skips `node_modules`, `.git` and `dist`. When the files sit under several top-level directories, as in a monorepo, `init` shows a checklist of those directories with every entry ticked. One ticked entry is written as a string, several as a list. Untick everything to get the plain path question back.
+  </Step>
+  <Step title="Codegen defaults">
+    When the project has a [GraphQL Code Generator config](/configuration/codegen), `init` names the file and starts the directory questions from its `documents` globs instead. It also writes the derived `usagePatterns`, `fragmentUsagePatterns`, `schemaFile` and `inline` into the file, because a config that names `graphqlDir` and `srcDir` stops later runs from reading the codegen config. A derived `schemaFile` whose path is not on disk yet is left out.
+  </Step>
+  <Step title="Exclude question">
+    `init` asks for files and folders to exclude, comma separated. It pre-fills the codegen output paths and any source file that references most of your operations, since such a file is usually generated code that would make every operation look used. A comma inside a brace group stays part of the glob, so `src/**/*.generated.{ts,tsx}` is one pattern.
+  </Step>
+  <Step title="Preview">
+    After writing the file, `init` scans the project once and prints a one-line preview such as `✓ Found 42 operations in 12 files; 5 look unused. Run "gqlprune" to see them.`
+  </Step>
+</Steps>
+
+Pressing Ctrl+C during a question prints `Aborted.` and exits with code 2.
+
+## Example file
+
+This file sets every common key; only `graphqlDir` and `srcDir` are needed:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+exclude:
+  - src/gql/graphql.ts
+  - '**/__generated__'
+usagePatterns:
+  - use{Name}{Type}
+  - '{Name}Document'
+fragmentUsagePatterns:
+  - '{Name}FragmentDoc'
+checkFields: true
+inline: true
+minConfidence: high
+```
+
+## Keys
+
+| Key                     | Type                 | Default                                      |
+| ----------------------- | -------------------- | -------------------------------------------- |
+| `graphqlDir`            | `string \| string[]` | none (required)                              |
+| `srcDir`                | `string \| string[]` | none (required)                              |
+| `exclude`               | `string \| string[]` | none; `node_modules` and `.git` always       |
+| `sourceExtensions`      | `string \| string[]` | the eight JavaScript and TypeScript extensions |
+| `excludedFolders`       | `string \| string[]` | none (deprecated)                            |
+| `usagePatterns`         | `string[]`           | the four GraphQL Code Generator patterns     |
+| `fragmentUsagePatterns` | `string[]`           | `['{Name}FragmentDoc']`                      |
+| `schemaFile`            | `string`             | none; the deprecated-selection check is off  |
+| `checkFields`           | `boolean`            | `false`                                      |
+| `codegenConfig`         | `string`             | none; a codegen config in the current directory is found on its own |
+| `inline`                | `boolean`            | `false`                                      |
+| `minConfidence`         | `'high' \| 'medium' \| 'low'` | none; every finding is reported     |
+
+`graphqlDir` and `srcDir` are required unless `--graphql`/`--src` or a codegen config supplies them.
+
+### `graphqlDir`
+
+The directory, or list of directories, that holds your `.gql` and `.graphql` files. gqlPrune walks each one recursively. CLI flag: `--graphql`.
+
+- Type: `string | string[]`, where an entry may be a glob pattern.
+- Default: none.
+
+This config points gqlPrune at one GraphQL directory:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+```
+
+A configured directory that does not exist ends the run with `These configured directories do not exist: ...` and exit code 2.
+
+#### Several directories (monorepos)
+
+Since 2.6, `graphqlDir` and `srcDir` accept a list. This config scans two packages of a monorepo:
+
+```yaml
+graphqlDir:
+  - ./packages/web/graphql
+  - ./packages/admin/graphql
+srcDir:
+  - ./packages/web/src
+  - ./packages/admin/src
+```
+
+#### Glob patterns
+
+Since 2.12, an entry can be a glob pattern. gqlPrune expands it to the directories it matches before the scan, so new packages are picked up without a config change. This config covers every package under `packages/`:
+
+```yaml
+graphqlDir: 'packages/*/graphql'
+srcDir: 'packages/*/src'
+```
+
+- `*` matches one path segment and `**` matches any depth, so `packages/**/graphql` also finds nested workspaces.
+- A pattern ending in `**` covers the directory it names as well as everything under it, so `src/**` scans `src` itself.
+- Quote the pattern in YAML. A value that starts with `*` is not valid YAML otherwise.
+- `node_modules` and `.git` are never searched, and a glob never expands inside them, so `node_modules/*/graphql` matches nothing.
+- A pattern that matches no directory ends the run with `These configured directory patterns match no directories: ...` and exit code 2, so a typo or a moved folder cannot pass as a clean scan.
+
+### `srcDir`
+
+The directory, or list of directories, that holds your source files. gqlPrune parses the files in it and looks there for references to your operations and fragments. CLI flag: `--src`.
+
+- Type: `string | string[]`, with the same list and glob support as [`graphqlDir`](#graphqldir).
+- Default: none.
+
+This config scans a source directory per package with a glob:
+
+```yaml
+graphqlDir: 'packages/*/graphql'
+srcDir: 'packages/*/src'
+```
+
+gqlPrune only reads files whose extension is in [`sourceExtensions`](#sourceextensions). A scan that reads no source file at all warns that every operation will look unused.
+
+### `exclude`
+
+Gitignore-flavored glob patterns for files and folders to skip during the scan. It applies to both the GraphQL and the source directories. CLI flag: `--exclude`. Since 2.9.
+
+- Type: `string | string[]`.
+- Default: none. `node_modules` and `.git` are always excluded.
+
+This config skips generated code and a legacy folder:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+exclude:
+  - '**/__generated__'
+  - '*.generated.ts'
+  - src/legacy
+  - src/gql/graphql.ts
+```
+
+#### Pattern rules
+
+- A name without a slash matches anywhere in the tree: `__generated__` excludes every folder or file with that name.
+- A path with a slash is anchored to the project root: `src/legacy` excludes only that folder.
+- `**` matches any depth, and `*.generated.ts` matches files.
+- Excluding a directory excludes everything under it.
+- `./src/gql`, `src/gql/` and `src/gql` are the same pattern.
+- A leading `!` re-includes a path. A re-include wins regardless of order, but as in gitignore it cannot re-include a path whose parent directory is excluded, because gqlPrune does not walk into excluded directories.
+- A `!node_modules` or `!.git` pattern has no effect. Those two stay excluded.
+
+Exclude GraphQL Code Generator output that sits inside `srcDir`. One generated file can reference every operation, which makes everything look used. gqlPrune warns when one source file references most of your operations, and `gqlprune init` pre-fills such a file into `exclude`.
+
+### `sourceExtensions`
+
+The file extensions gqlPrune reads in `srcDir` when it looks for usage. There is no CLI flag for this key.
+
+- Type: `string | string[]`. gqlPrune lowercases each entry and adds the leading dot when it is missing, so `vue`, `.VUE` and `.vue` mean the same thing.
+- Default: `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts`.
+
+Setting the key replaces the default list, so name every extension you want scanned. This config scans a Vue project's TypeScript files and its single-file components:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+sourceExtensions:
+  - .ts
+  - .vue
+```
+
+#### Single-file components
+
+gqlPrune does not scan Vue, Svelte or Astro files unless you name their extension. It does not parse them as modules either. A file whose extension is not one of the eight defaults is scanned by its tokens: every identifier in it counts as a reference by name, strings count as mentions, and imports inside it are not resolved. A `.vue` file's `useGetUserQuery()` call is found that way, but a hook it reaches through a renamed import is not. See [limitations](/concepts/limitations).
+
+### `excludedFolders`
+
+Deprecated: use [`exclude`](#exclude). Folder names (such as `__generated__`) or paths relative to the project root (such as `src/generated`) to skip. gqlPrune still honors the key and merges it into the same matcher as `exclude`. CLI flag: `--ignore`.
+
+- Type: `string | string[]`.
+- Default: none.
+
+This old-style config still works, and is the same as listing the entries under `exclude`:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+excludedFolders:
+  - __generated__
+  - src/generated
+```
+
+### `usagePatterns`
+
+Templates for the identifiers that count as a use of an operation. gqlPrune expands each template for every operation and looks for a reference that resolves to one of the results. See [usage patterns](/concepts/usage-patterns) and [patterns per client](/configuration/clients). CLI flag: `--pattern`.
+
+- Type: `string[]`. A single pattern written as a plain YAML string also works.
+- Default: `use{Name}{Type}`, `use{Name}Lazy{Type}`, `use{Name}Suspense{Type}` and `{Name}Document`, the names GraphQL Code Generator's `typescript-react-apollo` plugin emits.
+
+The placeholders are:
+
+| Placeholder | Expands to                                    | For `query GetUser` |
+| ----------- | --------------------------------------------- | ------------------- |
+| `{name}`    | the operation name as written                 | `GetUser`           |
+| `{Name}`    | the operation name, first letter capitalized  | `GetUser`           |
+| `{type}`    | `query`, `mutation` or `subscription`         | `query`             |
+| `{Type}`    | the type, first letter capitalized            | `Query`             |
+
+This config matches the hooks and services an apollo-angular project generates:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+usagePatterns:
+  - '{Name}GQL'
+  - '{Name}Document'
+```
+
+Setting the key replaces the defaults; it does not add to them. Every pattern must be a non-empty string that expands to a JavaScript identifier. A pattern such as `{Name}.graphql` stops the run with exit code 2, because usage is decided by references to identifiers and such a pattern could never match. Quote a pattern that starts with `{` in YAML.
+
+### `fragmentUsagePatterns`
+
+Templates for the identifiers that count as a use of a fragment directly in source, such as the `<Name>FragmentDoc` constant under fragment masking. A fragment also counts as used when an operation spreads it, whatever this key says. CLI flag: `--fragment-pattern`.
+
+- Type: `string[]`. Supports `{name}` and `{Name}`.
+- Default: `['{Name}FragmentDoc']`.
+
+This config turns off source-reference detection, so only fragment spreads keep a fragment alive:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+fragmentUsagePatterns: []
+```
+
+The same identifier rule as `usagePatterns` applies. See [unused fragments](/findings/unused-fragments).
+
+### `schemaFile`
+
+The path to a local SDL file. Setting it turns on the [deprecated-selection check](/findings/deprecated-selections), which reports where your operations select fields or enum values the schema marks `@deprecated`. gqlPrune reads the file from disk. It never starts a server or runs introspection, and without this key no schema is read at all. CLI flag: `--schema`. Since 2.12.
+
+- Type: `string`.
+- Default: none.
+
+This config checks the operations against a schema next to the config:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+schemaFile: ./schema.graphql
+```
+
+A `schemaFile` you set that cannot be read or is not valid SDL ends the run with `Could not read or parse the GraphQL schema file: ...` and exit code 2. A schema path derived from a codegen config is skipped with a warning instead (see [codegen](/configuration/codegen)).
+
+### `checkFields`
+
+Set to `true` to add the advisory list of [field candidates](/findings/field-candidates): response keys that a used operation selects and that nothing in the scanned source appears to read. The list never changes the exit code. CLI flag: `--fields`. Since 2.12; call-site tracing since 4.1.
+
+- Type: `boolean`. Only the boolean `true` turns it on.
+- Default: `false`.
+
+This config turns the field check on:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+checkFields: true
+```
+
+### `codegenConfig`
+
+The path to a GraphQL Code Generator config to derive settings from. You only need it when the codegen config sits somewhere gqlPrune does not look: a `codegen.ts`, `.yml`, `.json` or similar in the current directory, or a `codegen` key in `package.json`, is found on its own when nothing configures the directories to scan. CLI flag: `--codegen`. Since 3.0.
+
+- Type: `string`.
+- Default: none.
+
+This config derives the remaining settings from a codegen config in a `tools` folder:
+
+```yaml
+codegenConfig: ./tools/codegen.yml
+```
+
+A named codegen config is read even when the directories are configured, and keys you set here or with a flag win over what it suggests. A named file that cannot be read ends the run with exit code 2. See [reading your codegen config](/configuration/codegen).
+
+### `inline`
+
+Set to `true` to also scan GraphQL documents embedded in your source files. Without it, gqlPrune reads documents only from `.gql` and `.graphql` files. CLI flag: `--inline`. Since 3.0.
+
+- Type: `boolean`. Only the boolean `true` turns it on.
+- Default: `false`.
+
+This config turns the inline scan on for a project that keeps its documents in components:
+
+```yaml
+graphqlDir: ./src
+srcDir: ./src
+inline: true
+```
+
+#### Inline documents
+
+With `inline: true`, gqlPrune recognizes two shapes in the files of `srcDir`:
+
+- Tagged templates: ``gql`query GetUser { ... }` `` and ``graphql`...` ``, including a tag reached through a member expression such as ``api.gql`...` ``.
+- Helper calls with a single string argument: `graphql('query GetUser { ... }')`, `graphql("...")`, ``graphql(`...`)``, and the same for `gql(...)`.
+
+gqlPrune finds them on the parsed syntax tree, so a tag inside a comment or a string is not a document. A finding points at the source file and the line inside it. A body that does not parse, such as an operation name built by interpolation, is skipped and counted, and `--verbose` prints the count.
+
+A document never counts as its own usage. An inline document counts as used when the constant it is assigned to is referenced, in its own file or through an import, which is how the GraphQL Code Generator client preset's `const q = graphql(...)` followed by `useQuery(q)` is found. Fragments resolve across both kinds of file: a fragment defined in a `.tsx` file and spread from a `.gql` operation counts as used, and the reverse too. Whole-file orphan detection never applies to a source file.
+
+### `minConfidence`
+
+Report only findings graded at this [confidence](/concepts/confidence) or above. Because the exit code follows what is reported, this is also the CI gate: a pipeline can fail on `high` findings while a local run still lists everything. CLI flag: `--min-confidence`.
+
+- Type: `'high' | 'medium' | 'low'`.
+- Default: none, which reports every finding.
+
+This config reports only findings whose name appears nowhere in the scanned source:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+minConfidence: high
+```
+
+Any other value ends the run with `Invalid minConfidence: ...` and exit code 2. Deprecated selections carry no grade and are always reported. See [exit codes](/reference/exit-codes).
+
+## Flags and the config file
+
+A CLI flag overrides the matching key in the file. A list flag such as `--exclude` replaces the list from the file rather than adding to it. A switch such as `--fields` can turn a check on over `checkFields: false`, but leaving the flag out never turns a check off. The full precedence, including codegen-derived values, is CLI flags, then `gqlPrune.config.yaml`, then a codegen config, then the built-in defaults.
+
+Whatever a scan reports is a list of candidates. A static read of the source can miss uses, such as names built at runtime or callers in another repository, so check each finding before you delete it.

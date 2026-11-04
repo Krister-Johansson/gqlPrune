@@ -1,0 +1,233 @@
+---
+title: Field candidates
+description: What the opt-in --fields check in gqlprune reports, how it traces call sites or falls back to a name match, and how to verify a field candidate before trimming a selection.
+---
+
+## What it means
+
+`--fields` (or `checkFields: true` in the config) adds an advisory list of fields your app selects but appears never to read. The check has existed since 2.12. Since 4.1, it traces each operation's results through the source instead of only searching for field names.
+
+This command runs a scan with the field check on:
+
+```bash
+npx gqlprune --fields
+```
+
+gqlPrune builds the selection of every used operation, with the fragments it spreads merged in, keyed by response key: the alias when a field is aliased (`nickname: displayName` contributes `nickname`), otherwise the field name. `__typename` is always skipped. Operations and fragments that are already reported unused are skipped too, since they are reported whole. Each operation is then judged in one of two ways.
+
+### Traced from its call sites
+
+gqlPrune finds every call site of the operation: a call to one of its usage-pattern identifiers, such as `useGetUserQuery()`, or a call that takes its document constant, such as `useQuery(GetUserDocument)`. It follows each call's result through the function it sits in, starting at `data`, also when the hook returns a tuple. The trace follows:
+
+- variable aliases and plain assignments
+- destructuring, nested and renamed (`const { user: { name: fullName } } = data`)
+- property and optional chains, string keys (`user['name']`) and the `!` operator
+- list callbacks and loops (`map`, `forEach`, `filter`, `find`, `some`, `every`, `flatMap`, `for...of`, `[0]`)
+- one JSX attribute into a function component the import index resolves, such as `<UserCard user={data.user} />` into `UserCard`
+
+A value the trace cannot follow counts as read, with everything under it. That covers a value passed to a function, spread, returned, put in an object or array literal, assigned to a property, read with a computed key, or handed on to a second component. A call site that takes a callback such as `onCompleted` counts as reading all of the data. Reading a value as a whole (a truthiness check, a comparison, a template literal, JSX text) reads that field and nothing under it.
+
+A field that no read path reaches, and that sits under nothing the trace lost track of, is a candidate graded `high`. Only the topmost unread field of a branch is reported, since removing it removes everything under it.
+
+### Matched by name
+
+Some operations have nothing to trace:
+
+- nothing references their identifiers
+- a reference is not a call, as in `client.query({ query: GetUserDocument })` or `refetchQueries: [GetUserDocument]`
+- the operation is a mutation, whose selection may exist only to update the cache
+
+For these, each response key of the operation is matched against the source text as a case-sensitive whole word, so `id` matches `data.id` but not `video`. A key that appears nowhere is a candidate graded `medium`.
+
+## Example
+
+`GetUser` selects three fields:
+
+```graphql
+query GetUser($id: ID!) {
+  user(id: $id) {
+    id
+    name
+    avatarUrl
+  }
+}
+```
+
+`GetStats` selects two:
+
+```graphql
+query GetStats {
+  stats {
+    visits
+    bounceRatio
+  }
+}
+```
+
+This component, `src/Profile.tsx`, calls the `GetUser` hook and reads `id` and `name`:
+
+```tsx
+import { useGetUserQuery } from './generated/graphql';
+
+export function Profile({ id }: { id: string }) {
+  const { data } = useGetUserQuery({ variables: { id } });
+  return <h1 key={data?.user?.id}>{data?.user?.name}</h1>;
+}
+```
+
+This module, `src/stats.ts`, passes the `GetStats` document as a property value, which is not a call the trace can start from:
+
+```ts
+import { client } from './client';
+import { GetStatsDocument } from './generated/graphql';
+
+export async function loadVisits() {
+  const result = await client.query({ query: GetStatsDocument });
+  return result.data.stats.visits;
+}
+```
+
+`user.avatarUrl` is traced and never read. `stats.bounceRatio` is matched by name and appears nowhere in the source.
+
+## Output
+
+This command scans the example project with the field check on:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --fields
+```
+
+The section prints after the other sections, one row per selection, with the operation, the path and the grade on its first row:
+
+```text
+Found 2 GraphQL files.
+Found 2 GraphQL operations.
+Found 2 source files.
+
+✓ No unused GraphQL operations or fragments found.
+
+--- Unused Field Candidates ---
+
+Operation Path              Confidence Selected in
+GetStats  stats.bounceRatio medium     graphql/stats.gql:4
+GetUser   user.avatarUrl    high       graphql/user.gql:5
+-------------------------------
+Found 2 field candidates that nothing in the source appears to read.
+A high candidate was traced from every call site of its operation, and a value handed to code the trace cannot follow counts as read. A medium candidate was matched by name alone, so a read through a computed key or a spread looks the same as no read, and a common name is never flagged. A field read by another repository looks unread either way.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+A field selected in several places, such as a fragment field, gets one row per selection. A fragment field that two operations never read is listed once for each operation.
+
+With `--verbose`, one line per used operation says how its fields were judged:
+
+```text
+[verbose] fields: GetStats (query) matched by name: the reference at src/stats.ts:5:46 is not a call it can trace
+[verbose] fields: GetUser (query) traced through 1 call site: src/Profile.tsx:4:20
+```
+
+## JSON
+
+With `--fields`, the JSON report gains an `unusedFields` array and a `summary.unusedFields` count. Each entry has `operation`, `path` (the response keys from the root, joined with dots), `field` (the last of them), `locations` (every place that key is selected for that operation), `confidence` and `reason`:
+
+```json
+{
+  "unusedOperations": [],
+  "unusedFragments": [],
+  "orphanedFiles": [],
+  "deprecatedUsages": [],
+  "unusedFields": [
+    {
+      "operation": "GetStats",
+      "path": "stats.bounceRatio",
+      "field": "bounceRatio",
+      "locations": [
+        {
+          "file": "graphql/stats.gql",
+          "line": 4
+        }
+      ],
+      "confidence": "medium",
+      "reason": "heuristic-cap"
+    },
+    {
+      "operation": "GetUser",
+      "path": "user.avatarUrl",
+      "field": "avatarUrl",
+      "locations": [
+        {
+          "file": "graphql/user.gql",
+          "line": 5
+        }
+      ],
+      "confidence": "high",
+      "reason": "never-read"
+    }
+  ],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 0,
+    "orphanedFiles": 0,
+    "deprecatedUsages": 0,
+    "unusedFields": 2,
+    "byConfidence": {
+      "high": 1,
+      "medium": 1,
+      "low": 0
+    }
+  }
+}
+```
+
+Without `--fields`, both keys are absent, so a consumer can tell "never checked" from "nothing found". See [JSON report](/reference/json-report).
+
+## Confidence
+
+Field candidates have two grades of their own:
+
+| Grade | Reason | How the field was judged |
+| --- | --- | --- |
+| `high` | `never-read` | Every call site of the operation was traced and no read reaches the field. |
+| `medium` | `heuristic-cap` | The operation had no call site to trace, so the field was matched by name. |
+
+A candidate matched by name never rises above `medium`, because a name search cannot see a read through a rename, a spread or a computed key. See [confidence grades](/concepts/confidence).
+
+## Exit code
+
+Field candidates never change the exit code. A scan whose only findings are field candidates exits 0. `--min-confidence` filters them like any other graded finding. See [exit codes](/reference/exit-codes).
+
+## GitHub annotation
+
+Under GitHub Actions, or with `--annotate`, each field candidate gets one `::warning` annotation on stderr, placed at its first selection. It names the path and the operation, says how the field was judged, and ends with the grade:
+
+```text
+::warning file=graphql/stats.gql,line=4::Unused GraphQL field candidate "stats.bounceRatio" in operation "GetStats" (name not found in source) [confidence: medium]
+::warning file=graphql/user.gql,line=5::Unused GraphQL field candidate "user.avatarUrl" in operation "GetUser" (no traced read reaches it) [confidence: high]
+```
+
+See [GitHub Actions](/ci/github-actions).
+
+## How to verify a finding
+
+A `high` candidate proves that, in the source gqlPrune read, no traced read path from any call site of the operation reaches the field. A `medium` candidate proves only that the field's response key does not appear as a whole word in the scanned source. Neither proves the field is unused. Read the list as a shortlist, not a verdict:
+
+- A traced candidate is only as complete as the source gqlPrune reads. A field read by another repository, by code outside `srcDir`, or by a component that reads the cache by id (Apollo's `useFragment` with `from`) looks unread.
+- A candidate matched by name errs in both directions. A field reached through a computed key or a spread looks unread, and a field with a common name (`id`, `name`, `title`) matches somewhere and is never flagged, even when it is dead.
+- Generated hooks inside `srcDir` hide candidates, because each hook returns its result and a returned value counts as read.
+
+To check a candidate:
+
+1. Run the scan with `--verbose` to see whether its operation was traced, through which call sites, or why it was matched by name.
+2. Search the scanned source and every other consumer of the operation for the field name.
+3. Check whether anything reads the field from the client cache rather than from the operation's result.
+
+This command prints how each operation's fields were judged and the evidence behind each grade:
+
+```bash
+npx gqlprune --fields --verbose
+```
+
+## What to do
+
+Removing a field changes the response shape for every consumer of that operation, which no schema-free tool can check for you. Verify each candidate by hand before you trim it. Then remove the field from the selection, regenerate your client code, run your type checker and tests, and run the scan again.

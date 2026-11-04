@@ -5,9 +5,15 @@ module.exports = {
   // a bare test run also compiles those trees' stale sources and fails there.
   // test/e2e/ is a separate project (jest.e2e.config.cjs, `npm run test:e2e`):
   // it needs a build first and spawns processes, so it must not slow down or
-  // skew a bare `npm test`.
-  testPathIgnorePatterns: ['/node_modules/', '/\\.claude/', '/test/e2e/'],
-  modulePathIgnorePatterns: ['/\\.claude/'],
+  // skew a bare `npm test`. website/ is the landing page, a separate project
+  // with its own node_modules and build; nothing in it belongs to this suite.
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/\\.claude/',
+    '/test/e2e/',
+    '<rootDir>/website/',
+  ],
+  modulePathIgnorePatterns: ['/\\.claude/', '<rootDir>/website/'],
   // ts-jest suggests isolatedModules for node16 modules, but enabling it breaks
   // type-only imports from our `.d.ts` files under per-file transpilation. The
   // full `tsc` build covers type-checking, so silence the advisory here.

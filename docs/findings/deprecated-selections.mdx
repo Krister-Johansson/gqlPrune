@@ -1,0 +1,164 @@
+---
+title: Deprecated selections
+description: What the opt-in deprecated-selection check in gqlprune reports when you pass a local SDL schema with --schema or schemaFile, and how to act on a finding.
+---
+
+## What it means
+
+Since 2.12, gqlPrune can report where your documents still use schema elements marked `@deprecated`. This is the one check that needs a schema, so it is opt-in: point gqlPrune at a local SDL file with `--schema <file>` or `schemaFile` in the config. Without one, the check does not run and the scan stays schema-free.
+
+The file is read from disk. gqlPrune still never starts a server and never runs introspection.
+
+Every `.gql` and `.graphql` file that parsed is validated against the schema as one document, so a fragment spread resolves even when the fragment lives in another file. With `--inline`, documents embedded in source files are validated too and reported against the source file. Only graphql-js's deprecation rule (`NoDeprecatedCustomRule`) runs. It reports a selected deprecated field, and also a deprecated argument, input field or enum value used in a document. Fields the schema does not define, duplicate names and other mismatches are ignored rather than reported.
+
+## Example
+
+This schema, `schema.graphql`, deprecates `User.nickname`:
+
+```graphql
+type Query {
+  user(id: ID!): User
+}
+
+type User {
+  id: ID!
+  displayName: String
+  nickname: String @deprecated(reason: "Use displayName.")
+}
+```
+
+This document still selects it:
+
+```graphql
+query GetUser($id: ID!) {
+  user(id: $id) {
+    id
+    nickname
+  }
+}
+```
+
+This component, `src/Profile.tsx`, uses the query and reads the field:
+
+```tsx
+import { useGetUserQuery } from './generated/graphql';
+
+export function Profile({ id }: { id: string }) {
+  const { data } = useGetUserQuery({ variables: { id } });
+  return <h1 key={data?.user?.id}>{data?.user?.nickname}</h1>;
+}
+```
+
+## Output
+
+This command scans the example project with the schema:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --schema ./schema.graphql
+```
+
+The section prints after the unused sections, with the file, the line and graphql-js's message, which names the deprecated element and the deprecation reason:
+
+```text
+Found 1 GraphQL file.
+Found 1 GraphQL operation.
+Found 1 source file.
+
+✓ No unused GraphQL operations or fragments found.
+
+--- Deprecated Field Usage ---
+
+File             Line Message
+graphql/user.gql 4    The field User.nickname is deprecated. Use displayName.
+------------------------------
+Found 1 selection of deprecated schema fields or enum values. It is advisory and does not affect the exit code.
+```
+
+The closing line "These are candidates from a static scan" does not print for this section, because the schema settles each finding.
+
+The same check from the config file:
+
+```yaml
+graphqlDir: ./graphql
+srcDir: ./src
+schemaFile: ./schema.graphql
+```
+
+## JSON
+
+With `--json`, each finding is an entry in `deprecatedUsages` with `message`, `file` and `line`, and `summary.deprecatedUsages` counts them. The array is always present and stays empty when no schema is configured:
+
+```json
+{
+  "unusedOperations": [],
+  "unusedFragments": [],
+  "orphanedFiles": [],
+  "deprecatedUsages": [
+    {
+      "message": "The field User.nickname is deprecated. Use displayName.",
+      "file": "graphql/user.gql",
+      "line": 4
+    }
+  ],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 0,
+    "unusedFragments": 0,
+    "orphanedFiles": 0,
+    "deprecatedUsages": 1,
+    "byConfidence": {
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}
+```
+
+See [JSON report](/reference/json-report).
+
+## Confidence
+
+Deprecated selections carry no grade. They come from validating your documents against the SDL file you supply, so they hold for that file; when it differs from the schema your API serves, the result can differ too. They have no `confidence` or `reason` key, `summary.byConfidence` does not count them, and `--min-confidence` does not filter them. See [confidence grades](/concepts/confidence).
+
+## Exit code
+
+Deprecated selections never change the exit code. A scan whose only findings are deprecated selections exits 0.
+
+A schema file that cannot be read or is not valid SDL stops the run with exit code 2 rather than skipping the check. This command names a file that does not exist:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --schema ./nope.graphql
+```
+
+It prints the reason and exits 2:
+
+```text
+Could not read or parse the GraphQL schema file: ./nope.graphql.
+ENOENT: no such file or directory, open './nope.graphql'
+```
+
+A `schemaFile` that gqlPrune derived from your codegen config is different: when that file is missing, gqlPrune warns, drops the check and carries on. See [codegen](/configuration/codegen) and [exit codes](/reference/exit-codes).
+
+## GitHub annotation
+
+Under GitHub Actions, or with `--annotate`, each deprecated selection gets one `::warning` annotation on stderr. The message is graphql-js's message as printed, with no grade:
+
+```text
+::warning file=graphql/user.gql,line=4::The field User.nickname is deprecated. Use displayName.
+```
+
+See [GitHub Actions](/ci/github-actions).
+
+## How to verify a finding
+
+A deprecated selection is not a candidate in the sense the other findings are. It proves that the document uses an element the given schema file marks `@deprecated`. It is only as current as that file, though:
+
+- A schema file that is older or newer than the server you deploy against can report a deprecation the server does not have, or miss one it does.
+- The check reads documents, not source code, so it reports a deprecated field even in an operation that is itself unused.
+
+To check a finding, confirm the deprecation in the schema your server serves today, and read the deprecation reason in the message for the replacement.
+
+## What to do
+
+Move the document to the replacement the deprecation reason names, regenerate your client code, update the code that reads the old field, and run the scan again. If the operation holding the selection is itself reported unused, delete the operation instead.

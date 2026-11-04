@@ -1,0 +1,83 @@
+{
+  "$schema": "https://context7.com/schema/docs7.json",
+  "name": "gqlPrune",
+  "description": "Schema-free CLI that reports unused GraphQL operations, fragments and orphaned .gql files in TypeScript and JavaScript projects as candidates to review.",
+  "colors": {
+    "primary": "#8A5800",
+    "light": "#F2B544",
+    "dark": "#8A5800"
+  },
+  "favicon": "/favicon.svg",
+  "feedback": { "thumbsRating": true },
+  "filterSidebar": true,
+  "seo": { "indexing": "navigable" },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/Krister-Johansson/gqlPrune"
+      },
+      { "label": "npm", "href": "https://www.npmjs.com/package/gqlprune" },
+      {
+        "label": "Releases",
+        "href": "https://github.com/Krister-Johansson/gqlPrune/releases"
+      }
+    ]
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": ["index", "quickstart", "agents"]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/how-detection-works",
+          "concepts/usage-patterns",
+          "concepts/confidence",
+          "concepts/limitations"
+        ]
+      },
+      {
+        "group": "Findings",
+        "pages": [
+          "findings/overview",
+          "findings/unused-operations",
+          "findings/unused-fragments",
+          "findings/orphaned-files",
+          "findings/deprecated-selections",
+          "findings/field-candidates"
+        ]
+      },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/config-file",
+          "configuration/codegen",
+          "configuration/clients"
+        ]
+      },
+      {
+        "group": "CI",
+        "pages": ["ci/github-actions"]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/cli",
+          "reference/json-report",
+          "reference/exit-codes"
+        ]
+      },
+      {
+        "group": "Help",
+        "pages": ["troubleshooting"]
+      },
+      {
+        "group": "Upgrading",
+        "pages": ["migration/v4", "migration/v3", "migration/v2"]
+      }
+    ]
+  }
+}

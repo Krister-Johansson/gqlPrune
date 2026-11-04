@@ -1,0 +1,104 @@
+---
+title: For coding agents
+description: How a coding agent should fetch the gqlPrune docs, run a scan, read the JSON report and exit codes, and verify each finding before deleting anything.
+---
+
+This page is for coding agents that run gqlPrune, and for the people who configure them. It describes one fixed loop: pin the version, run with `--json`, branch on the exit code, explain surprises with `--verbose`, and verify every finding before deleting it.
+
+## Fetch the docs
+
+The Context7 library ID for gqlPrune is `/krister-johansson/gqlprune`. An agent with the Context7 MCP server can query the docs with that ID and skip the library search step.
+
+This site is hosted by Context7's Docs7, which serves an `llms.txt` index of the pages and a Markdown version of each page, so an agent can read the docs as plain text without rendering HTML.
+
+## The loop
+
+### Pin the version
+
+Run a fixed version through npx so every run in a session, and every session on the project, uses the same scanner. Replace `4.1.1` with the version you have reviewed or the one in the project's lockfile:
+
+```bash
+npx gqlprune@4.1.1 --version
+```
+
+If the project already lists `gqlprune` in its `devDependencies`, `npx gqlprune` runs that installed copy.
+
+### Run with --json
+
+Pass `--json`. Stdout then carries only the JSON report, and every diagnostic goes to stderr, so parse stdout and log stderr separately:
+
+```bash
+npx gqlprune@4.1.1 --json > gqlprune-report.json
+```
+
+The report has these top-level keys:
+
+| Key | Contents |
+| --- | --- |
+| `unusedOperations` | One entry per unused operation: `name`, `type` (`query`, `mutation` or `subscription`), `file`, `line`, `confidence`, `reason` |
+| `unusedFragments` | One entry per unused fragment: `name`, `file`, `line`, `confidence`, `reason` |
+| `orphanedFiles` | One entry per orphaned file: `file`, `confidence`, `reason` |
+| `deprecatedUsages` | One entry per deprecated selection: `message`, `file`, `line`. Empty unless a schema is configured |
+| `unusedFields` | One entry per field candidate: `operation`, `path`, `field`, `locations` (each `file` and `line`), `confidence`, `reason`. Present only with `--fields` |
+| `warnings` | Advisory messages as strings |
+| `summary` | A count per kind (`unusedOperations`, `unusedFragments`, `orphanedFiles`, `deprecatedUsages`, and `unusedFields` with `--fields`) and `byConfidence` with `high`, `medium` and `low` counts |
+
+An absent `unusedFields` key means the field check did not run. An empty array means it ran and found nothing. The [JSON report reference](/reference/json-report) describes each key.
+
+Read `warnings` before acting on the findings. A warning can mean the findings themselves are unreliable: one says a generated file references most operations and may be hiding unused ones, another says no source file was read and every operation will look unused. [Troubleshooting](/troubleshooting) covers both.
+
+### Read the exit code
+
+| Exit code | Meaning | What to do |
+| --- | --- | --- |
+| 0 | The scan completed and reported no unused operations or fragments | Nothing was reported at the active confidence gate (`--min-confidence` or `minConfidence`); lower-graded candidates can still exist. Advisory findings (deprecated selections, field candidates) can still be in the report |
+| 1 | The scan completed and found unused operations or fragments | Parse stdout and verify each finding |
+| 2 | The run failed: bad flags, missing or invalid configuration, a directory that does not exist | Read stderr and fix the command or config. Stdout is empty, so there is no report to parse |
+
+Exit code 1 always means findings and nothing else. Orphaned files, deprecated selections and field candidates never change the exit code on their own. See [Exit codes](/reference/exit-codes).
+
+### Use --verbose to see why
+
+When a finding looks wrong, run the scan again with `--verbose`. For each used operation it prints the reference that decided it, with file, line and column, and the import chain behind it. For each unused operation it prints the identifiers it looked for. It also prints the grade and evidence for every finding. Verbose lines go to stderr, so `--verbose --json` still writes pure JSON to stdout:
+
+```bash
+npx gqlprune@4.1.1 --json --verbose > gqlprune-report.json 2> gqlprune-verbose.log
+```
+
+If every operation is reported unused, the identifiers in the verbose output usually show that the project's client uses a naming convention the [usage patterns](/concepts/usage-patterns) do not cover. Fix the patterns rather than deleting anything.
+
+### Verify each finding before deleting
+
+gqlPrune reports candidates, not proof. It reads the source and never runs it, so it cannot see an operation name built at runtime, a caller in another repository, or a caller in a file type it does not parse. For each finding, before deleting:
+
+1. Search the whole repository for the definition name, including files outside the scanned source directories and file types other than TypeScript and JavaScript.
+2. Check whether the GraphQL files are a shared package that another repository or application imports.
+3. Read `confidence` and `reason`. `high` (`name-absent`) means the name appears nowhere in the scanned source. `medium` (`generated-only`) means it appears only in files that look generated. `low` means the name is still read as an identifier (`name-referenced`) or appears inside a string (`string-mention`).
+4. Delete only what the checks above leave without a caller, and run the project's own build and tests afterwards.
+
+### Never delete on a low grade without checking
+
+A `low` grade means something in ordinary source still mentions the name. That is often a naming convention gqlPrune does not know, a lookup by name, or a registry key that builds the reference at runtime. Find where the name is used before deciding. This command lists the low-graded unused operations for review:
+
+```bash
+npx gqlprune@4.1.1 --json | jq '.unusedOperations[] | select(.confidence == "low")'
+```
+
+Do not pass `--min-confidence` to hide low findings from yourself. It filters what is reported and changes the exit code, but it does not make the hidden findings safe to delete or the reported ones certain. See [confidence grades](/concepts/confidence).
+
+## Snippet for AGENTS.md or CLAUDE.md
+
+Paste this into the project's `AGENTS.md` or `CLAUDE.md` and set the version:
+
+```markdown
+## Unused GraphQL (gqlPrune)
+
+- Docs: Context7 library `/krister-johansson/gqlprune`.
+- Run `npx gqlprune@4.1.1 --json`. Parse stdout as JSON; stderr carries diagnostics.
+- Exit 0: nothing reported at the active confidence gate; lower-graded candidates can still exist. Exit 1: findings in the report. Exit 2: the run failed; read stderr, fix the command or config, and do not treat it as a clean result.
+- Read `warnings` first. A suspected generated file or "No source files were read" means the findings are unreliable.
+- Findings are candidates, not proof. Before deleting an operation, fragment or file, search the whole repository for its name, check for callers in other repositories, and read its `confidence` and `reason`.
+- Never delete a `low` finding without finding out what still mentions the name.
+- When a result is surprising, rerun with `--verbose` and read the stderr explanation before changing anything.
+- After deleting, run the project's build and tests.
+```

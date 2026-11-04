@@ -59,6 +59,11 @@ test/                     Jest specs, one per source module
     completion.e2e.test.ts  The shell completion scripts
     packaging.e2e.test.ts   Pack, install, run the installed binary
   fixtures/e2e/           Static project trees the e2e cases scan
+docs/                     User docs: docs.json and MDX pages, built by Docs7
+website/                  Landing page: a separate project, not part of the package
+  index.html              Vite entry point
+  vite.config.ts          React plugin and the relative base './'
+  src/                    App.tsx (the page), main.tsx (mount), styles.css
 ```
 
 **Design pattern that matters:** keep logic in small **pure, exported
@@ -98,6 +103,56 @@ npm run build && npm run typecheck && npm run lint && npm test && npm run test:e
 
 Coverage thresholds live in `jest.config.cjs` (statements/functions/lines ≥ 90,
 branches ≥ 80). New code must not drop coverage below the floor.
+
+### The landing page (`website/`)
+
+`website/` is a Vite, React and TypeScript site with its own `package.json`
+and `package-lock.json`. Run its commands inside `website/`:
+
+| Command           | What it does                                              |
+| ----------------- | --------------------------------------------------------- |
+| `npm ci`          | Install the site's own dependencies                       |
+| `npm run dev`     | Vite dev server with hot reload                           |
+| `npm run build`   | Typecheck (`tsc --noEmit`), then build to `website/dist/` |
+| `npm run preview` | Serve the built `website/dist/` locally                   |
+
+`.github/workflows/website.yml` builds the site on every pull request that
+touches `website/` and deploys it to GitHub Pages
+(https://krister-johansson.github.io/gqlPrune/) on a push to `main`. Its jobs
+are not required checks. Deploying needs Settings > Pages > Source set to
+"GitHub Actions".
+
+The root gate above does not build the site. A change under `website/` needs
+`npm ci && npm run build` inside `website/` to pass as well.
+
+The site stays out of everything that belongs to the package. `files` in
+`package.json` and `.npmignore` leave it out of the tarball, and the packaging
+spec asserts that. The root `tsconfig.json` compiles only `src/`. ESLint and
+the unit Jest config ignore `website/`. Dependabot updates it under its own
+entry, `socket.yml` scans its manifests, and `context7.json` leaves it out of
+the indexed docs. CodeQL does analyze it, on purpose.
+
+### The user docs (`docs/`)
+
+`docs/` holds the user documentation: `docs.json` (navigation, colours) and
+one `.mdx` page per topic. Context7's Docs7 builds the hosted site from it,
+and Context7 indexes the same raw MDX for coding agents (`context7.json` has
+`"folders": ["docs"]`). Preview locally with `npx @upstash/docs7 dev ./docs`.
+
+The site publishes from the `docs-live` branch, not from `main`, so the docs
+match the version on npm:
+
+- The `docs-live` job in `release-please.yml` fast-forwards `docs-live` to the
+  release commit after `npm publish` succeeds.
+- `docs-publish.yml` (run by hand) publishes a docs-only fix between releases.
+  It refuses when `src/`, `package.json` or `package-lock.json` changed since
+  `docs-live`, because those wait for the release.
+
+`test/docs.test.ts` fails when a flag in `FLAGS`, a key of `GqlPruneConfig`, a
+`ConfidenceReason` or a JSON report key pinned by the contract spec is missing
+from its reference page. A change to any of those needs the matching docs
+change in the same pull request. Pages follow the README's rules: no em or en
+dashes, sentence-case headings, and findings described as candidates.
 
 ## How we work
 
@@ -146,6 +201,11 @@ A change moves through these stages. Don't skip ahead.
 - **Conventional Commits** — `release-please` derives the version and changelog
   from them. Use `feat:` (minor), `fix:` (patch), `docs:`, `chore:`, `ci:`,
   `refactor:`, `test:`. Scope when useful, e.g. `feat(scan): ...`.
+- **Site commits never use `feat:` or `fix:`.** Give a change to `website/`
+  a `docs:`, `chore:` or `ci:` prefix. `release-please-config.json` lists
+  `website` under `exclude-paths`, so release-please skips a commit whose files
+  are all under `website/`. A commit that also touches the workflow or any root
+  file is counted, and its prefix decides whether the CLI gets a release.
 - **Never bump the version or edit `CHANGELOG.md` by hand** — release-please owns
   both. (See the release-process memory for the close/reopen CI stopgap.)
 

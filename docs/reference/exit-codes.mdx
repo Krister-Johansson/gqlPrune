@@ -1,0 +1,78 @@
+---
+title: Exit codes
+description: What exit codes 0, 1 and 2 from gqlprune mean, which findings never change the exit code, and how --min-confidence decides what counts.
+---
+
+gqlprune exits with one of three codes, so a pipeline can tell "clean up your GraphQL" (1) apart from "fix the pipeline" (2). The codes are the same with and without `--json`.
+
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| 0    | The run completed and reported no unused operation or fragment. |
+| 1    | The run completed and reported unused operations or fragments. |
+| 2    | The run itself failed.                                         |
+
+This command runs a scan and prints its exit code:
+
+```bash
+npx gqlprune; echo "exit code: $?"
+```
+
+## Exit code 0
+
+The scan completed and reported no unused operation and no unused fragment. These also exit 0:
+
+- `--help`, `--version` and `gqlprune completion <shell>` with a supported shell.
+- `gqlprune init` when it writes the config file, or when you decline to overwrite an existing one.
+- A scan whose only output is advisory (see below).
+- A scan with `--min-confidence` whose findings all fall below the level.
+
+## Exit code 1
+
+The scan completed and reported at least one unused operation or unused fragment. Exit code 1 always means findings and nothing else.
+
+These are candidates from a static read, not proof. An operation can be reported because its name is built at runtime, because the caller lives outside `srcDir` or in another repository, or because the reference is in a file type gqlPrune does not parse. Check each finding before you delete it.
+
+## Exit code 2
+
+The run could not complete. The reason goes to stderr, and a failed scan prints nothing on stdout, also with `--json`, so a consumer never mistakes an error for a report. Exit code 2 covers:
+
+- an unknown flag (`Unknown flag: --nope`) or an unknown command (`Unknown command: bogus`)
+- a flag missing its value (`Missing value for --graphql`)
+- a value a flag does not accept (`Invalid value for --min-confidence: certain (expected high, medium, low)`)
+- a value given to a switch, such as `--json=false`
+- `gqlprune completion` with no shell or an unsupported one (`Unsupported shell: ksh`)
+- no configuration at all (`No configuration found.`)
+- a `gqlPrune.config.yaml` that cannot be read or is not valid YAML
+- an invalid `minConfidence` in the config file (`Invalid minConfidence: ...`)
+- a usage pattern that is not a string or does not expand to an identifier
+- a configured directory that does not exist (`These configured directories do not exist: ...`)
+- a directory glob that matches no directory (`These configured directory patterns match no directories: ...`)
+- a configured schema file that cannot be read or parsed (`Could not read or parse the GraphQL schema file: ...`)
+- a codegen config named with `--codegen` or `codegenConfig` that cannot be read (`Could not read codegen/nowhere.yml.`) or parsed
+- no directory derived from a codegen config left on disk
+- `gqlprune init` aborted with Ctrl+C, or any unexpected error
+
+A value you configured yourself fails loudly with exit code 2. A value gqlPrune derived from a [codegen config](/configuration/codegen) degrades instead: a derived schema or directory that is not on disk is skipped with a warning, and the run exits 2 only when no derived directory is left.
+
+## Findings that never change the exit code
+
+Only unused operations and unused fragments set exit code 1. These are reported but never change the exit code on their own:
+
+- Orphaned files. An orphaned file always holds unused definitions, and those already set exit code 1.
+- [Deprecated selections](/findings/deprecated-selections) from `--schema`.
+- [Field candidates](/findings/field-candidates) from `--fields`.
+- Advisory warnings, such as a suspected generated file masking results or a duplicate operation name. They appear on stderr and in the JSON `warnings` array.
+
+A clean project with a deprecated selection and a field candidate still exits 0.
+
+## How --min-confidence filters what counts
+
+`--min-confidence <level>` (or `minConfidence` in the config file) leaves findings below the level out of the report, and the exit code follows the report. With `--min-confidence high`, a run whose unused operations and fragments are all graded `medium` or `low` exits 0, while the same run without the flag exits 1. Deprecated selections carry no grade and are not filtered, but they do not affect the exit code either way.
+
+This command fails only on findings whose name appears nowhere in the scanned source:
+
+```bash
+npx gqlprune --min-confidence high
+```
+
+`--verbose` still prints the grade and evidence of the findings the gate hid. See [confidence grades](/concepts/confidence) and the [GitHub Actions setup](/ci/github-actions).

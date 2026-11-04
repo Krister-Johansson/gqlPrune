@@ -1,0 +1,193 @@
+---
+title: Orphaned files
+description: What an orphaned GraphQL file finding from gqlprune means, how #import comments keep a file off the list, and how to verify that a whole .gql file can be deleted.
+---
+
+## What it means
+
+Since 2.12, gqlPrune reports a `.gql` or `.graphql` file as orphaned when every operation and fragment it defines is unused and no other document pulls it in with an `#import` comment. The whole file is then a deletion candidate, rather than a few definitions inside it, so it gets a section of its own.
+
+Import comments are read from the raw file text, the convention graphql-tag and the webpack GraphQL loaders use, and resolved against the importing file's directory. `#import "./fields.gql"` keeps the `fields.gql` next to it off the list, even when every definition in `fields.gql` is unused.
+
+Three kinds of file are never reported:
+
+- a file that defines nothing, including one that fails to parse
+- a file that contains an anonymous operation, whose usage gqlPrune cannot track by name
+- a source file such as a `.tsx` component, even when `--inline` finds that every document in it is unused
+
+## Example
+
+The project has three documents. `graphql/user.gql` holds a used query and imports its fragment:
+
+```graphql
+#import "./userFields.gql"
+
+query GetUser($id: ID!) {
+  user(id: $id) {
+    ...UserFields
+  }
+}
+```
+
+`graphql/legacyReport.gql` holds a query and a fragment that nothing uses, and no document imports it:
+
+```graphql
+query GetLegacyReport {
+  legacyReport {
+    id
+    title
+  }
+}
+
+fragment LegacyReportRow on Report {
+  id
+}
+```
+
+This component, `src/Profile.tsx`, uses `GetUser` only:
+
+```tsx
+import { useGetUserQuery } from './generated/graphql';
+
+export function Profile({ id }: { id: string }) {
+  const { data } = useGetUserQuery({ variables: { id } });
+  return <h1 key={data?.user?.id}>{data?.user?.name}</h1>;
+}
+```
+
+`legacyReport.gql` is orphaned. Its definitions are also reported one by one in the unused sections.
+
+## Output
+
+This command scans the example project:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src
+```
+
+The orphaned section follows the unused operations and fragments, with the [confidence grade](/concepts/confidence) and the file path:
+
+```text
+Found 3 GraphQL files.
+Found 2 GraphQL operations.
+Found 1 source file.
+
+--- Unused GraphQL Operations ---
+
+Type  Operation       Confidence File
+query GetLegacyReport high       legacyReport.gql
+---------------------------------
+Found 1 unused GraphQL operation. Please remove it.
+
+--- Unused GraphQL Fragments ---
+
+Fragment        Confidence File
+LegacyReportRow high       legacyReport.gql
+--------------------------------
+Found 1 unused GraphQL fragment. Please remove it.
+
+--- Orphaned GraphQL Files ---
+
+Confidence File
+high       graphql/legacyReport.gql
+------------------------------
+Found 1 orphaned GraphQL file. Every definition in it is unused and no document imports it, so it can likely be deleted.
+These are candidates from a static scan. Verify each one before deleting.
+```
+
+## JSON
+
+With `--json`, each orphaned file is an object in `orphanedFiles` with `file`, `confidence` and `reason`, and `summary.orphanedFiles` counts them:
+
+```json
+{
+  "unusedOperations": [
+    {
+      "name": "GetLegacyReport",
+      "type": "query",
+      "file": "graphql/legacyReport.gql",
+      "line": 1,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "unusedFragments": [
+    {
+      "name": "LegacyReportRow",
+      "file": "graphql/legacyReport.gql",
+      "line": 8,
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "orphanedFiles": [
+    {
+      "file": "graphql/legacyReport.gql",
+      "confidence": "high",
+      "reason": "name-absent"
+    }
+  ],
+  "deprecatedUsages": [],
+  "warnings": [],
+  "summary": {
+    "unusedOperations": 1,
+    "unusedFragments": 1,
+    "orphanedFiles": 1,
+    "deprecatedUsages": 0,
+    "byConfidence": {
+      "high": 3,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}
+```
+
+Before 3.0, each entry was a plain path string. See [migrating to 3.0](/migration/v3) and [JSON report](/reference/json-report).
+
+## Confidence
+
+An orphaned file takes the lowest grade among the definitions it holds, with that definition's reason. One definition that still looks live undermines the verdict on the whole file. If one query in the file grades `high` and a fragment in it grades `low` with `string-mention`, the file grades `low` with `string-mention`.
+
+See [confidence grades](/concepts/confidence) for each reason.
+
+## Exit code
+
+An orphaned file never changes the exit code on its own. It always holds unused definitions, and those already set exit code 1. With `--min-confidence`, orphaned files below the level are left out of the report. See [exit codes](/reference/exit-codes).
+
+## GitHub annotation
+
+Under GitHub Actions, or with `--annotate`, each orphaned file gets one `::warning` annotation on stderr. It points at the file without a line and ends with the grade:
+
+```text
+::warning file=graphql/legacyReport.gql::Orphaned GraphQL file: every definition is unused and no document imports it [confidence: high]
+```
+
+See [GitHub Actions](/ci/github-actions).
+
+## How to verify a finding
+
+The finding proves that, within this scan, every definition in the file is an unused candidate and no scanned document imports the file with an `#import` comment. It does not prove that nothing reads the file. A static read can miss:
+
+- another repository that imports or copies the file
+- a runtime loader, build step or tool that reads the file by path
+- an import mechanism other than `#import` comments, such as a bundler that loads `.graphql` files from source code
+- any use that makes one of its definitions look unused by mistake (see [unused operations](/findings/unused-operations#how-to-verify-a-finding))
+
+To check a finding:
+
+1. Check each definition in the file the way you would check an unused operation or fragment.
+2. Search the repository and its build configuration for the file name.
+3. Search every repository that consumes these documents for the file name.
+
+This command shows the grade and evidence for the file and for every definition in it:
+
+```bash
+npx gqlprune --verbose
+```
+
+## What to do
+
+If the file is dead, delete it, regenerate your client code, and run the scan again. A fragment file that only the deleted file imported, or a fragment only it spread, can be reported on that next run.
+
+If the file is still needed, the fix depends on why. A definition gqlPrune missed is fixed the way an [unused operation](/findings/unused-operations#what-to-do) is. A file read by a tool gqlPrune cannot see can be listed in `exclude`, which removes it from the scan and from every section.

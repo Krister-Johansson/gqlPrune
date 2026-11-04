@@ -134,6 +134,8 @@ out
 .pnp.*
 .secrets
 dist/**
+# The landing page's build output. The rule above only covers the root dist/.
+website/dist/
 
 # Local research artifacts (kept locally, not committed for now)
 design/research/

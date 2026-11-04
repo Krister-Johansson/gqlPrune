@@ -90,6 +90,10 @@ reviews:
       instructions: |
         Input data for the e2e suite, never compiled or linted. Each fixture file says it is a fixture in a comment. Do not flag unresolved imports, unused code, codegen-shaped output or style in these files; they imitate a consumer's tree on purpose. Do flag a fixture file without the fixture comment.
 
+    - path: 'website/**'
+      instructions: |
+        The landing page: a separate Vite, React and TypeScript project that .github/workflows/website.yml deploys to GitHub Pages. It is not part of the npm package. Flag an import from src/ or the root package.json, a change to the relative base './' in vite.config.ts, and a new dependency beyond vite, @vitejs/plugin-react, react, react-dom, typescript and the React types without a reason in the PR description. Source files carry the SPDX header that src/ files carry.
+
     - path: 'design/adr/**'
       instructions: |
         ADRs follow design/adr/README.md. A new ADR has status proposed; flag a new ADR with status accepted, because only the maintainer accepts ADRs.
@@ -97,6 +101,10 @@ reviews:
     - path: '**/*.md'
       instructions: |
         Plain technical prose. Flag em dashes and en dashes, Title Case headings (headings use sentence case), curly quotes, emojis in headings or bullets, and filler phrases. Docs describe the tool as it is, not as a diff. Findings are described as candidates from a static scan, not as proof that code is dead. CHANGELOG.md belongs to release-please: flag any hand edit to it.
+
+    - path: 'docs/**'
+      instructions: |
+        User documentation: Docs7 builds it from docs.json and MDX, and Context7 indexes the raw MDX for coding agents. The Markdown prose rules apply to .mdx as well. Flag a CLI flag, config key, default or JSON report key that does not exist in src/utils/args.ts, src/types/ or test/e2e/contract.e2e.test.ts; terminal output that was not produced by the CLI; a `gqlprune scan` subcommand (there is none); a page without title and description frontmatter; a page missing from the docs.json navigation; and custom React components.
 
     - path: '.github/workflows/**'
       instructions: |

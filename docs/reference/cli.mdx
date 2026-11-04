@@ -1,0 +1,258 @@
+---
+title: CLI reference
+description: The gqlprune commands and every flag, with its alias, argument, default and the config key it overrides.
+---
+
+## Synopsis
+
+```text
+gqlprune [command] [flags]
+```
+
+Run it with `npx gqlprune` from the project root, or as `gqlprune` from a package script or a global install. gqlPrune needs Node.js 20 or newer.
+
+## Commands
+
+### Scan (no command)
+
+`gqlprune` with no command runs a scan. There is no `scan` subcommand. The scan reads its settings from the flags, `gqlPrune.config.yaml` and a [codegen config](/configuration/codegen), reports unused operations, unused fragments and orphaned files, and sets the [exit code](/reference/exit-codes). This command scans with the settings in `gqlPrune.config.yaml`:
+
+```bash
+npx gqlprune
+```
+
+Findings are candidates for you to review, not proof that something is dead. A static read can miss uses such as names built at runtime, callers in another repository, or references in a file type gqlPrune does not parse.
+
+### init
+
+`gqlprune init` creates `gqlPrune.config.yaml` interactively. It suggests directories, pre-fills `exclude`, takes defaults from a codegen config when there is one, asks before overwriting an existing file, and prints a preview of what a scan would find. See [create the file with gqlprune init](/configuration/config-file#create-the-file-with-gqlprune-init). This command starts it:
+
+```bash
+npx gqlprune init
+```
+
+### completion
+
+`gqlprune completion <shell>` prints a tab-completion script for `bash`, `zsh` or `fish` on stdout. The script completes the commands, every flag, and the shell names for `completion` itself. `--graphql`, `--src`, `--schema` and `--codegen` complete file paths. Since 2.12.
+
+Add one line to your shell config to load it. For bash, add this to `~/.bashrc`:
+
+```bash
+eval "$(gqlprune completion bash)"
+```
+
+For zsh, add this to `~/.zshrc`:
+
+```zsh
+eval "$(gqlprune completion zsh)"
+```
+
+For fish, add this to `~/.config/fish/config.fish`:
+
+```fish
+gqlprune completion fish | source
+```
+
+gqlPrune never edits your shell config files. Completion needs `gqlprune` on your `PATH`, so it applies to a global install (`npm i -g gqlprune`) and to `npm link`. Shells do not complete `npx gqlprune` or an npm script. A missing or unsupported shell name exits with code 2.
+
+## How flags work
+
+- Value flags accept both `--flag value` and `--flag=value`, in any order relative to the command.
+- A flag overrides the matching key in `gqlPrune.config.yaml`. Flags alone work without a config file, and a config file alone works without flags.
+- A repeatable flag builds a list, and that list replaces the one from the config file rather than adding to it.
+- Repeating a flag that is not repeatable keeps the last value.
+- A switch such as `--fields` takes no value. `--json=false` is a usage error, not a way to turn the switch off.
+- An unknown flag, a flag missing its value, a value outside a flag's fixed set, or an unknown command stops the run with exit code 2 and the message `Run "gqlprune --help" for usage.`
+
+This command passes every setting as a flag, with no config file:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./src --exclude __generated__
+```
+
+Quote glob arguments so the shell passes the pattern through instead of expanding it, as in `--graphql 'packages/*/graphql'`.
+
+## Flags
+
+| Flag                         | Alias | Config key              | Repeatable |
+| ---------------------------- | ----- | ----------------------- | ---------- |
+| `--graphql <dir>`            |       | `graphqlDir`            | yes        |
+| `--src <dir>`                |       | `srcDir`                | yes        |
+| `--exclude <glob>`           |       | `exclude`               | yes        |
+| `--ignore <folder>`          |       | `excludedFolders`       | yes        |
+| `--pattern <template>`       |       | `usagePatterns`         | yes        |
+| `--fragment-pattern <t>`     |       | `fragmentUsagePatterns` | yes        |
+| `--schema <file>`            |       | `schemaFile`            | no         |
+| `--codegen <file>`           |       | `codegenConfig`         | no         |
+| `--fields`                   |       | `checkFields`           | no         |
+| `--inline`                   |       | `inline`                | no         |
+| `--min-confidence <level>`   |       | `minConfidence`         | no         |
+| `--json`                     |       |                         | no         |
+| `--annotate`                 |       |                         | no         |
+| `--verbose`                  |       |                         | no         |
+| `--version`                  | `-v`  |                         | no         |
+| `--help`                     | `-h`  |                         | no         |
+
+`sourceExtensions` is the one config key without a flag. Set it in [`gqlPrune.config.yaml`](/configuration/config-file#sourceextensions).
+
+### `--graphql`
+
+A directory with `.gql`/`.graphql` files. Argument: `<dir>`, which may be a glob pattern. Repeatable. Overrides `graphqlDir`. Default: none; the scan needs it from a flag, the config file or a codegen config.
+
+This command scans the GraphQL files of every package in a monorepo:
+
+```bash
+npx gqlprune --graphql 'packages/*/graphql' --src 'packages/*/src'
+```
+
+### `--src`
+
+A directory with source files to search for usage. Argument: `<dir>`, which may be a glob pattern. Repeatable. Overrides `srcDir`. Default: none.
+
+This command searches two source directories:
+
+```bash
+npx gqlprune --graphql ./graphql --src ./apps/web/src --src ./apps/admin/src
+```
+
+### `--exclude`
+
+A file or folder to skip, as a gitignore-flavored glob. Argument: `<glob>`. Repeatable. Overrides `exclude`, replacing its list. Default: none; `node_modules` and `.git` are always excluded. See the [pattern rules](/configuration/config-file#pattern-rules).
+
+This command skips generated folders and files:
+
+```bash
+npx gqlprune --exclude '**/__generated__' --exclude '*.generated.ts'
+```
+
+### `--ignore`
+
+Deprecated: use `--exclude`. A folder name or root-relative path to skip. Argument: `<folder>`. Repeatable. Overrides `excludedFolders`. Default: none.
+
+This command skips a generated folder the old way:
+
+```bash
+npx gqlprune --ignore __generated__
+```
+
+### `--pattern`
+
+An operation usage pattern: a template for an identifier that counts as a use of an operation. Argument: `<template>`, with the placeholders `{name}`, `{Name}`, `{type}` and `{Type}`. Repeatable. Overrides `usagePatterns`, replacing the defaults. Default: `use{Name}{Type}`, `use{Name}Lazy{Type}`, `use{Name}Suspense{Type}` and `{Name}Document`. A pattern that does not expand to an identifier stops the run with exit code 2. See [patterns per client](/configuration/clients).
+
+This command matches apollo-angular's generated services and document constants:
+
+```bash
+npx gqlprune --pattern '{Name}GQL' --pattern '{Name}Document'
+```
+
+### `--fragment-pattern`
+
+A fragment usage pattern: a template for an identifier that counts as a use of a fragment in source. Argument: `<t>`, with the placeholders `{name}` and `{Name}`. Repeatable. Overrides `fragmentUsagePatterns`. Default: `{Name}FragmentDoc`.
+
+This command sets the fragment pattern explicitly:
+
+```bash
+npx gqlprune --fragment-pattern '{Name}FragmentDoc'
+```
+
+To turn source-reference detection for fragments off, set `fragmentUsagePatterns: []` in the config file. The flag cannot express an empty list.
+
+### `--schema`
+
+A local SDL file. Turns on the [deprecated-selection check](/findings/deprecated-selections), which reports selections of fields and enum values marked `@deprecated`. Argument: `<file>`. Overrides `schemaFile`. Default: none; without it no schema is read. A file that cannot be read or is not valid SDL stops the run with exit code 2.
+
+This command checks the operations against a local schema:
+
+```bash
+npx gqlprune --schema ./schema.graphql
+```
+
+### `--codegen`
+
+A GraphQL Code Generator config to derive settings from. Argument: `<file>`. Overrides `codegenConfig`. Default: none; a codegen config in the current directory is found on its own when no directories are configured. A named file that cannot be read stops the run with exit code 2. See [reading your codegen config](/configuration/codegen).
+
+This command derives settings from a codegen config outside the project root:
+
+```bash
+npx gqlprune --codegen ./tools/codegen.yml
+```
+
+### `--fields`
+
+Also list [field candidates](/findings/field-candidates): selected fields the source appears not to read. Takes no argument. Sets `checkFields` to `true`. Default: off. The list is advisory and never changes the exit code.
+
+This command adds the field-candidate section:
+
+```bash
+npx gqlprune --fields
+```
+
+### `--inline`
+
+Also scan GraphQL documents inside source files: ``gql`...` `` and ``graphql`...` `` tagged templates and `gql(...)`/`graphql(...)` calls. Takes no argument. Sets `inline` to `true`. Default: off. See [inline documents](/configuration/config-file#inline-documents).
+
+This command scans inline documents as well as `.gql` files:
+
+```bash
+npx gqlprune --inline
+```
+
+### `--min-confidence`
+
+Report only findings at this [confidence](/concepts/confidence) or above. Argument: `<level>`, one of `high`, `medium` or `low`; any other value stops the run with exit code 2. Overrides `minConfidence`. Default: none, which reports every finding. The exit code follows what is reported, so this flag is also the CI gate.
+
+This command fails only on findings whose name appears nowhere in the scanned source:
+
+```bash
+npx gqlprune --min-confidence high
+```
+
+### `--json`
+
+Print a machine-readable report on stdout instead of the tables. Takes no argument. Default: off. stdout carries only the JSON document; diagnostics, warnings and annotations go to stderr. The exit code does not change. See the [JSON report](/reference/json-report).
+
+This command writes the report to a file:
+
+```bash
+npx gqlprune --json > gqlprune-report.json
+```
+
+### `--annotate`
+
+Emit GitHub Actions `::warning` annotations for each finding on stderr. Takes no argument. Default: off, but turned on automatically when the `GITHUB_ACTIONS` environment variable is `true`. See [GitHub Actions](/ci/github-actions#annotations).
+
+This command prints the annotations outside GitHub Actions:
+
+```bash
+npx gqlprune --annotate
+```
+
+### `--verbose`
+
+Explain each verdict on stderr. Takes no argument. Default: off. It prints the resolved configuration, the files scanned, any codegen-derived values, and for each operation the reference that decided it was used (file, line, column and import chain) or the identifiers looked for when it is unused. It also prints the grade and evidence for every finding, including those `--min-confidence` hid. Because the lines go to stderr, `--verbose --json` still prints pure JSON on stdout.
+
+This command explains every verdict:
+
+```bash
+npx gqlprune --verbose
+```
+
+### `--version`
+
+Print the installed version and exit. Alias: `-v`. Takes no argument.
+
+This command prints the version:
+
+```bash
+npx gqlprune --version
+```
+
+### `--help`
+
+Print the list of commands and flags and exit. Alias: `-h`. Takes no argument.
+
+This command prints the help screen:
+
+```bash
+npx gqlprune --help
+```

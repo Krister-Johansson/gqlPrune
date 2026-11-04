@@ -1,0 +1,96 @@
+---
+title: How detection works
+description: How gqlprune decides that a GraphQL operation or fragment is used, from parsing documents and source files to resolving imports and matching usage patterns.
+---
+
+gqlPrune decides "used" without a schema, a running server or an introspection query. It reads two things: your GraphQL documents, and the TypeScript and JavaScript source that is supposed to use them. An operation counts as used when some reference in the source resolves to an identifier derived from the operation's name. Everything it reports is a candidate for you to review, not proof that the code is dead (see [limitations](/concepts/limitations)).
+
+A scan runs in four steps.
+
+## Parse the GraphQL documents
+
+gqlPrune walks every directory in `graphqlDir` and parses each `.gql` and `.graphql` file with graphql-js. Each named operation (query, mutation or subscription) and each fragment comes out with its name, its type, its file and the line it starts on. The scan also records which fragments every operation and fragment spreads, and which files each document pulls in with an `#import "./file.gql"` comment.
+
+An anonymous operation is never reported, because gqlPrune tracks usage by name. Its fragment spreads still count, so a fragment that only an anonymous operation spreads stays alive.
+
+A file that cannot be read or parsed is skipped with a warning that names it, because anything only that file referenced may then look unused.
+
+With `--inline` (or `inline: true`), gqlPrune also reads documents embedded in source files: `gql` and `graphql` tagged templates, and `graphql(...)` or `gql(...)` calls with a single string argument.
+
+## Parse the source into a module model
+
+gqlPrune walks every directory in `srcDir` and parses each `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts` file with the TypeScript compiler. This is a parse only. gqlPrune creates no program, runs no type checker and executes nothing, and your own TypeScript version is not involved.
+
+Each file is reduced to a module model:
+
+- its import bindings (named, default and namespace) and the module specifier each came from
+- its exports, including `export { a as b } from` and `export * from`
+- every identifier in a reference position, with its line and column
+- the identifier-shaped words written inside its strings, which feed the [confidence grades](/concepts/confidence) and never decide usage
+
+A file that does not fully parse is read as far as it parsed, and the run warns and names it.
+
+A file whose extension is not one of the eight above but is listed in `sourceExtensions`, such as a `.vue` file, is not parsed as a module. gqlPrune reads its identifier tokens instead, without resolving its imports (see [single-file components](/concepts/limitations#single-file-components)).
+
+## Resolve imports, re-exports and barrels
+
+Every reference is followed back to the name it was exported under. gqlPrune resolves these forms:
+
+- named imports, including renamed ones: `import { GetUserDocument as Doc } from './generated/graphql'`
+- default imports: `import userDoc from './api/userDoc'`
+- namespace imports and their members: `import * as api from './api'` followed by `api.useGetUserQuery()`
+- re-exports: `export { useGetUserQuery } from '../generated/graphql'`
+- star re-exports and barrel files: an `index.ts` with `export * from './hooks'`
+
+Module specifiers are resolved with the TypeScript compiler's own module resolution, run over an in-memory view of the files the scan read. A resolution can only land on a scanned file. gqlPrune reads `baseUrl`, `paths` and `rootDirs` from the nearest `tsconfig.json` (or `jsconfig.json`) at or above the working directory, so path aliases such as `@/api` resolve. It always resolves with `moduleResolution: bundler` and `allowJs`, whatever the tsconfig says. A tsconfig it cannot read produces a warning, and path aliases from it then do not resolve.
+
+When a chain leaves the scanned files, for example at `export { useGetUserQuery } from '../generated/graphql'` where the generated file is excluded or outside `srcDir`, the last known name stands. That is why importing `useGetUserQuery` from generated code you do not scan still counts as using `GetUser`.
+
+## Match against usage patterns
+
+For each operation, gqlPrune expands the [usage patterns](/concepts/usage-patterns) into concrete identifiers. With the defaults, `query GetUser` expands to `useGetUserQuery`, `useGetUserLazyQuery`, `useGetUserSuspenseQuery` and `GetUserDocument`. The operation is used when at least one reference resolves to one of those identifiers. Otherwise it is reported as an [unused operation](/findings/unused-operations).
+
+A fragment is used when an operation spreads it, directly or through other fragments, or when a reference resolves to one of its fragment patterns (by default `{Name}FragmentDoc`). Otherwise it is reported as an [unused fragment](/findings/unused-fragments).
+
+An inline document found with `--inline` is also used when the constant it is assigned to is referenced, in its own file or through an import.
+
+## What counts as a reference
+
+Since 4.0, usage is decided by references, not by text. gqlPrune 3.x ran a whole-word text search over `srcDir`. In 4.0 a name only counts where the parser sees code reading it.
+
+These count as a reference to the name they contain:
+
+| Form | Example |
+| --- | --- |
+| A call | `useGetUserQuery()` |
+| An argument | `useQuery(GetUserDocument)` |
+| A property access | `api.useGetUserQuery()` |
+| A shorthand property | `{ GetUserDocument }` |
+| A type annotation | `let doc: typeof GetUserDocument` |
+| A JSX tag | `<GetUserComponent />` |
+
+A property access counts by the property name, so `client.useGetUserQuery()` is a reference to `useGetUserQuery` whatever `client` is.
+
+These do not count:
+
+| Form | Example |
+| --- | --- |
+| An import nothing reads | `import { useGetUserQuery } from './generated'` with no later use |
+| A declaration | `export const GetUserDocument = {}` |
+| An object key | `{ GetUserDocument: 1 }` |
+| A comment | `// TODO: drop useGetUserQuery` |
+| A string or template literal | `'useGetUserQuery'` |
+
+An operation that 3.x reported as used only because of one of the forms in the second table is reported as unused from 4.0 on. When its bare name is still mentioned somewhere, the finding is graded `low` (see [confidence grades](/concepts/confidence)).
+
+## See why a verdict was reached
+
+Run the scan with `--verbose` to print, for each used operation, the identifier that was referenced, the file, line and column of the reference, and every import or re-export it went through. For each unused operation it prints the identifiers it looked for.
+
+This command runs a scan with that explanation:
+
+```bash
+npx gqlprune --verbose
+```
+
+Verbose lines go to stderr, so `--verbose --json` still prints only JSON on stdout.
