@@ -1,0 +1,269 @@
+---
+title: Changelog
+description: Every gqlPrune release with its breaking changes, features and fixes, newest first.
+# Generated from CHANGELOG.md by scripts/changelogPage.cjs. Do not edit by
+# hand: the release-please workflow regenerates it on each release PR.
+---
+
+Each entry lists the commits that went into one gqlPrune release. The [upgrade guides](/migration/v4) walk through the breaking changes of each major version.
+
+<Update label="4.1.1" description="2026-11-03">
+
+**Bug Fixes**
+
+* **deps:** bump the npm-production group with 3 updates ([#220](https://github.com/Krister-Johansson/gqlPrune/issues/220)) ([2492964](https://github.com/Krister-Johansson/gqlPrune/commit/2492964355836497cd12bf62f1cf911de5aa9f07))
+
+</Update>
+
+<Update label="4.1.0" description="2026-10-19">
+
+**Features**
+
+* **fields:** trace call-site results to find fields nothing reads ([#209](https://github.com/Krister-Johansson/gqlPrune/issues/209)) ([2bedf3f](https://github.com/Krister-Johansson/gqlPrune/commit/2bedf3fa5a003fc9b8d0f36b04675592e223f8b5)), closes [#145](https://github.com/Krister-Johansson/gqlPrune/issues/145)
+
+</Update>
+
+<Update label="4.0.0" description="2026-10-07">
+
+**⚠ BREAKING CHANGES**
+
+* **scan:** usage is detected by parsing source files with the TypeScript compiler API and resolving imports, re-exports, barrels and renamed bindings, instead of a whole-word string search. A name in a comment, a string or an unread import no longer counts as usage. The confidence reason `source-mention` is replaced by `name-referenced` and `string-mention` (both low). Usage patterns must expand to identifiers. `typescript` is a runtime dependency. Files outside the eight JS/TS extensions get lexical detection without import resolution. Refs ADR 0001.
+
+**Features**
+
+* **scan:** add the module model and reference index for the AST engine ([#191](https://github.com/Krister-Johansson/gqlPrune/issues/191)) ([d76ed39](https://github.com/Krister-Johansson/gqlPrune/commit/d76ed39e4639194a0ee2b749ed92aeee10c4f408)), closes [#190](https://github.com/Krister-Johansson/gqlPrune/issues/190)
+* **scan:** replace the string search with TypeScript AST usage detection ([#192](https://github.com/Krister-Johansson/gqlPrune/issues/192)) ([a6b440a](https://github.com/Krister-Johansson/gqlPrune/commit/a6b440a011629436235f209da4cc2ecfa83830f7)), closes [#142](https://github.com/Krister-Johansson/gqlPrune/issues/142)
+
+**Bug Fixes**
+
+* **cli:** remove the npm update check and the createRequire use that Socket flags ([#199](https://github.com/Krister-Johansson/gqlPrune/issues/199)) ([eeb0761](https://github.com/Krister-Johansson/gqlPrune/commit/eeb0761b443e9bbc652fff328cca75887f4e1f65)), closes [#197](https://github.com/Krister-Johansson/gqlPrune/issues/197)
+
+</Update>
+
+<Update label="3.0.0" description="2026-09-04">
+
+**⚠ BREAKING CHANGES**
+
+* **scan:** usage patterns match as whole words. An operation that was reported used only because its expanded pattern appeared inside a longer identifier is now reported unused, which is the correct answer and may add findings to an existing project's report.
+* **scan:** the `--json` report's `orphanedFiles` is now a list of objects (`{ file, confidence, reason }`) instead of a list of path strings, so an orphaned file carries the same grade as every other finding. Read the path as `entry.file`. `summary.orphanedFiles` is unchanged, and no other key changed position or meaning.
+
+**Features**
+
+* **config:** derive settings from a GraphQL Code Generator config ([#151](https://github.com/Krister-Johansson/gqlPrune/issues/151)) ([c5d9da0](https://github.com/Krister-Johansson/gqlPrune/commit/c5d9da092011827a2e2d887d47cd676e43510b67))
+* **scan:** grade findings by confidence ([#153](https://github.com/Krister-Johansson/gqlPrune/issues/153)) ([487c3b1](https://github.com/Krister-Johansson/gqlPrune/commit/487c3b1ec98f56737f491b5de971499d324e6ee9))
+* **scan:** opt-in inline GraphQL document scanning ([#149](https://github.com/Krister-Johansson/gqlPrune/issues/149)) ([dbfd428](https://github.com/Krister-Johansson/gqlPrune/commit/dbfd428dbbc301db33934c887e3837fa20cdefee))
+
+**Bug Fixes**
+
+* **cli:** reject unusable input instead of crashing or misreading it ([#175](https://github.com/Krister-Johansson/gqlPrune/issues/175)) ([3473566](https://github.com/Krister-Johansson/gqlPrune/commit/3473566f40f54cec49cf32f2070a672f5607b2d0))
+* **scan:** match exclude patterns against whole paths, not basenames ([#171](https://github.com/Krister-Johansson/gqlPrune/issues/171)) ([c320512](https://github.com/Krister-Johansson/gqlPrune/commit/c320512e6411b6a9979536989c7cdebb5d54a471)), closes [#165](https://github.com/Krister-Johansson/gqlPrune/issues/165)
+* **scan:** match usage patterns as whole words, not substrings ([#173](https://github.com/Krister-Johansson/gqlPrune/issues/173)) ([5ba1540](https://github.com/Krister-Johansson/gqlPrune/commit/5ba154059f918b4f3c1dac2b3a3ff6b789618035))
+* **scan:** report the files a scan could not read or parse ([#174](https://github.com/Krister-Johansson/gqlPrune/issues/174)) ([fb46e02](https://github.com/Krister-Johansson/gqlPrune/commit/fb46e02d7a21939623081fc3231b02c895bd5ac1))
+* **scan:** stop inline scanning reporting live documents as unused ([#172](https://github.com/Krister-Johansson/gqlPrune/issues/172)) ([fcc5019](https://github.com/Krister-Johansson/gqlPrune/commit/fcc5019957be63dcbb0a759c2724d243e2018ba8))
+
+</Update>
+
+<Update label="2.12.0" description="2026-08-15">
+
+**Features**
+
+* **cli:** add a completion subcommand for bash, zsh, and fish ([#136](https://github.com/Krister-Johansson/gqlPrune/issues/136)) ([3ecbe7d](https://github.com/Krister-Johansson/gqlPrune/commit/3ecbe7dac30a848da00975a088c77c0d9e9193c0))
+* **cli:** remind that findings are candidates to verify ([#131](https://github.com/Krister-Johansson/gqlPrune/issues/131)) ([1020892](https://github.com/Krister-Johansson/gqlPrune/commit/10208925456cb79053df1f2bee7cab60b5215add))
+* **config:** expand glob patterns in graphqlDir and srcDir ([#135](https://github.com/Krister-Johansson/gqlPrune/issues/135)) ([4ccae89](https://github.com/Krister-Johansson/gqlPrune/commit/4ccae893d7bf06cf959f93d9b4789dc06b581a23))
+* **init:** offer a checklist of roots for multi-root layouts ([#133](https://github.com/Krister-Johansson/gqlPrune/issues/133)) ([f7edd75](https://github.com/Krister-Johansson/gqlPrune/commit/f7edd752c97625d5ffe7a3acb02a3b8a22dcbf64))
+* **scan:** detect deprecated-field usage via a local SDL ([#134](https://github.com/Krister-Johansson/gqlPrune/issues/134)) ([ffb935f](https://github.com/Krister-Johansson/gqlPrune/commit/ffb935fda659f9e08d7dc631647a7a31113a5277))
+* **scan:** detect orphaned GraphQL files ([#132](https://github.com/Krister-Johansson/gqlPrune/issues/132)) ([041ec8d](https://github.com/Krister-Johansson/gqlPrune/commit/041ec8df1a9775ed3a5aa33646b434f4ced89911))
+* **scan:** opt-in unused-field candidates via --fields ([#138](https://github.com/Krister-Johansson/gqlPrune/issues/138)) ([08503a4](https://github.com/Krister-Johansson/gqlPrune/commit/08503a4044ac479e2dd5ea348ff03dd107202521))
+
+</Update>
+
+<Update label="2.11.2" description="2026-08-15">
+
+**Miscellaneous Chores**
+
+* release 2.11.2 ([#123](https://github.com/Krister-Johansson/gqlPrune/issues/123)) ([1153b53](https://github.com/Krister-Johansson/gqlPrune/commit/1153b536fc19b61a9bc821267655dc8486fa87c2)), closes [#122](https://github.com/Krister-Johansson/gqlPrune/issues/122)
+
+</Update>
+
+<Update label="2.11.1" description="2026-08-15">
+
+**Miscellaneous Chores**
+
+* release 2.11.1 ([#114](https://github.com/Krister-Johansson/gqlPrune/issues/114)) ([84a7aff](https://github.com/Krister-Johansson/gqlPrune/commit/84a7aff193998879634c5bdd5febd5ca2be75f3a)), closes [#113](https://github.com/Krister-Johansson/gqlPrune/issues/113)
+
+</Update>
+
+<Update label="2.11.0" description="2026-08-14">
+
+**Features**
+
+* **cli:** add --help, --exclude, repeatable dirs, and strict usage errors ([#66](https://github.com/Krister-Johansson/gqlPrune/issues/66)) ([1487565](https://github.com/Krister-Johansson/gqlPrune/commit/14875655868cb73c72de5759fe045f1f962cd474))
+* **cli:** add --verbose flag to explain scan verdicts ([#63](https://github.com/Krister-Johansson/gqlPrune/issues/63)) ([ce61f84](https://github.com/Krister-Johansson/gqlPrune/commit/ce61f849fd886312a85877a22791c4bb8e0ec741)), closes [#62](https://github.com/Krister-Johansson/gqlPrune/issues/62)
+* **cli:** exit 2 on usage/config errors, reserving exit 1 for findings ([#76](https://github.com/Krister-Johansson/gqlPrune/issues/76)) ([73a1507](https://github.com/Krister-Johansson/gqlPrune/commit/73a1507ac8454921c2f51cb23279d25a888e1d17))
+* **scan:** warn on duplicate names; surface all advisory warnings in JSON ([#83](https://github.com/Krister-Johansson/gqlPrune/issues/83)) ([ae45643](https://github.com/Krister-Johansson/gqlPrune/commit/ae4564372cec5efe407c34c24e756f6531a077f8)), closes [#82](https://github.com/Krister-Johansson/gqlPrune/issues/82)
+
+**Bug Fixes**
+
+* **ci:** scorecard caller uses explicit permissions map; pin shared-configs v1.1.3 ([#81](https://github.com/Krister-Johansson/gqlPrune/issues/81)) ([4990d36](https://github.com/Krister-Johansson/gqlPrune/commit/4990d36911bac89f07bd0195c0657ec10907b3af))
+* **deps:** bump transitive js-yaml to 3.15.1 for DoS advisories ([#101](https://github.com/Krister-Johansson/gqlPrune/issues/101)) ([af82871](https://github.com/Krister-Johansson/gqlPrune/commit/af828718aecfd31158155c217177d7569d9c6d3b)), closes [#100](https://github.com/Krister-Johansson/gqlPrune/issues/100)
+* **deps:** replace inquirer with scoped @inquirer/confirm and @inquirer/input ([#99](https://github.com/Krister-Johansson/gqlPrune/issues/99)) ([58d922e](https://github.com/Krister-Johansson/gqlPrune/commit/58d922e1abb62cad2102a29f25d065ad88f9ca9e)), closes [#98](https://github.com/Krister-Johansson/gqlPrune/issues/98)
+* **init:** confirm before overwriting an existing config; exit cleanly on Ctrl+C ([#70](https://github.com/Krister-Johansson/gqlPrune/issues/70)) ([4937373](https://github.com/Krister-Johansson/gqlPrune/commit/493737399330bd935ad823ab0c91ab82e06e4c61)), closes [#69](https://github.com/Krister-Johansson/gqlPrune/issues/69)
+* **scan:** keep node_modules/.git excluded against "!" re-includes ([#87](https://github.com/Krister-Johansson/gqlPrune/issues/87)) ([9860159](https://github.com/Krister-Johansson/gqlPrune/commit/98601599eab61dcab4332c3c5176927b337416fa)), closes [#86](https://github.com/Krister-Johansson/gqlPrune/issues/86)
+* **scan:** terminate on symlink cycles in the file walker ([#74](https://github.com/Krister-Johansson/gqlPrune/issues/74)) ([b579adc](https://github.com/Krister-Johansson/gqlPrune/commit/b579adc074c0958c060a815a7610f58f0504295f)), closes [#73](https://github.com/Krister-Johansson/gqlPrune/issues/73)
+
+</Update>
+
+<Update label="2.10.0" description="2026-06-25">
+
+**Features**
+
+* **init:** auto-detect a generated file and pre-fill it into `exclude` ([#58](https://github.com/Krister-Johansson/gqlPrune/issues/58)) ([d648d6a](https://github.com/Krister-Johansson/gqlPrune/commit/d648d6a40ebceb584b04765afbff3911cb260d89)), closes [#57](https://github.com/Krister-Johansson/gqlPrune/issues/57)
+
+</Update>
+
+<Update label="2.9.0" description="2026-06-25">
+
+**Features**
+
+* **config:** unified `exclude` with glob support (files + folders) ([#55](https://github.com/Krister-Johansson/gqlPrune/issues/55)) ([2166026](https://github.com/Krister-Johansson/gqlPrune/commit/2166026e839683b022e8c33bd17d32396e89983a))
+
+</Update>
+
+<Update label="2.8.0" description="2026-06-25">
+
+**Features**
+
+* **cli:** add --version / -v flag ([#52](https://github.com/Krister-Johansson/gqlPrune/issues/52)) ([1746399](https://github.com/Krister-Johansson/gqlPrune/commit/174639911d9d1e64af3f78e0d3d98ac847cb508e)), closes [#51](https://github.com/Krister-Johansson/gqlPrune/issues/51)
+
+</Update>
+
+<Update label="2.7.0" description="2026-06-25">
+
+**Features**
+
+* **cli:** notify when a newer gqlprune version is available ([#49](https://github.com/Krister-Johansson/gqlPrune/issues/49)) ([2aaa8ce](https://github.com/Krister-Johansson/gqlPrune/commit/2aaa8ce2fb24a4614ab81bbff7720dae394f8dcf))
+
+</Update>
+
+<Update label="2.6.0" description="2026-06-25">
+
+**Features**
+
+* **config:** support multiple (array) graphqlDir and srcDir ([#47](https://github.com/Krister-Johansson/gqlPrune/issues/47)) ([19ef10a](https://github.com/Krister-Johansson/gqlPrune/commit/19ef10a021997677661adb8b490d62d3d597a25f))
+
+</Update>
+
+<Update label="2.5.0" description="2026-06-25">
+
+**Features**
+
+* **init:** auto-detect project layout and preview results ([#43](https://github.com/Krister-Johansson/gqlPrune/issues/43)) ([ab94881](https://github.com/Krister-Johansson/gqlPrune/commit/ab94881501e1b294377dec5c41d3cbb6919f504b)), closes [#21](https://github.com/Krister-Johansson/gqlPrune/issues/21)
+
+</Update>
+
+<Update label="2.4.0" description="2026-06-25">
+
+**Features**
+
+* **cli:** run without a config file via CLI flags ([#42](https://github.com/Krister-Johansson/gqlPrune/issues/42)) ([36f3d06](https://github.com/Krister-Johansson/gqlPrune/commit/36f3d065ec6027456a5381afdb89b36c39948228))
+* **scan:** warn when a source file masks unused results ([#40](https://github.com/Krister-Johansson/gqlPrune/issues/40)) ([5b24904](https://github.com/Krister-Johansson/gqlPrune/commit/5b2490435208fb588446282e0030b557f11d57c9))
+
+</Update>
+
+<Update label="2.3.0" description="2026-06-25">
+
+**Features**
+
+* GitHub Actions inline annotations ([#38](https://github.com/Krister-Johansson/gqlPrune/issues/38)) ([e459c44](https://github.com/Krister-Johansson/gqlPrune/commit/e459c44399afa112490010e2b8f589d0fb42058b)), closes [#33](https://github.com/Krister-Johansson/gqlPrune/issues/33)
+
+</Update>
+
+<Update label="2.2.0" description="2026-06-25">
+
+**Features**
+
+* --json report output and definition line numbers ([#35](https://github.com/Krister-Johansson/gqlPrune/issues/35)) ([6f00e66](https://github.com/Krister-Johansson/gqlPrune/commit/6f00e667b9a6c1cdf585ce5c2c08820ee67f29c0)), closes [#32](https://github.com/Krister-Johansson/gqlPrune/issues/32)
+
+</Update>
+
+<Update label="2.1.0" description="2026-06-24">
+
+**Features**
+
+* detect unused fragments across files ([#30](https://github.com/Krister-Johansson/gqlPrune/issues/30)) ([30a37ff](https://github.com/Krister-Johansson/gqlPrune/commit/30a37ff739e1eed2817e588f213bfbf50d3baa25)), closes [#26](https://github.com/Krister-Johansson/gqlPrune/issues/26)
+
+</Update>
+
+<Update label="2.0.1" description="2026-06-24">
+
+**Bug Fixes**
+
+* lowercase `gqlprune` CLI command + 1.x→2.0 migration guide ([#17](https://github.com/Krister-Johansson/gqlPrune/issues/17)) ([d00567c](https://github.com/Krister-Johansson/gqlPrune/commit/d00567c1c912be8012c6aabe5c61b4dae9b0f440))
+
+</Update>
+
+<Update label="2.0.0" description="2026-06-24">
+
+**⚠ BREAKING CHANGES**
+
+* requires Node.js >= 20.
+
+**Features**
+
+* **gqlprune:** exit 1 if there are unused operations ([e7d4c53](https://github.com/Krister-Johansson/gqlPrune/commit/e7d4c53691791c5d197d6293d177eff3a0cf08bb))
+* NOTICES generator ([46bda8e](https://github.com/Krister-Johansson/gqlPrune/commit/46bda8ebc92e81181f4b7505baa8847af2e08b15))
+* robust detection, latest deps, and release/CI/security automation ([#15](https://github.com/Krister-Johansson/gqlPrune/issues/15)) ([faa7a2b](https://github.com/Krister-Johansson/gqlPrune/commit/faa7a2b5baf479697f152fa49e29ca84e67eb2ff))
+
+**Bug Fixes**
+
+* add files to gitignore ([69a3b46](https://github.com/Krister-Johansson/gqlPrune/commit/69a3b4643a59925ef0946e43da808714aac9a46b))
+* github action ([e0567a5](https://github.com/Krister-Johansson/gqlPrune/commit/e0567a51fcf6fca2be84a464f6e2f52a031405e3))
+* made NOTICES manuly for now ([2656cb0](https://github.com/Krister-Johansson/gqlPrune/commit/2656cb0ee2ca78115d515d8a016ccf1fcd88cb64))
+* made publish mauly ([23d2594](https://github.com/Krister-Johansson/gqlPrune/commit/23d25948a8f7052a1a5a55c7b55f3b1d4e257dfc))
+* Try to get my git action to work ([96e45f9](https://github.com/Krister-Johansson/gqlPrune/commit/96e45f9710860603988db026d59b68c922293aa0))
+
+</Update>
+
+<Update label="1.1.4" description="2023-10-21">
+
+**Bug Fixes**
+
+* made publish mauly ([23d2594](https://github.com/Krister-Johansson/gqlPrune/commit/23d25948a8f7052a1a5a55c7b55f3b1d4e257dfc))
+
+</Update>
+
+<Update label="1.1.3" description="2023-10-21">
+
+**Bug Fixes**
+
+* made NOTICES manuly for now ([2656cb0](https://github.com/Krister-Johansson/gqlPrune/commit/2656cb0ee2ca78115d515d8a016ccf1fcd88cb64))
+
+</Update>
+
+<Update label="1.1.2" description="2023-10-21">
+
+**Bug Fixes**
+
+* Try to get my git action to work ([96e45f9](https://github.com/Krister-Johansson/gqlPrune/commit/96e45f9710860603988db026d59b68c922293aa0))
+
+</Update>
+
+<Update label="1.1.1" description="2023-10-20">
+
+**Bug Fixes**
+
+* github action ([e0567a5](https://github.com/Krister-Johansson/gqlPrune/commit/e0567a51fcf6fca2be84a464f6e2f52a031405e3))
+
+</Update>
+
+<Update label="1.1.0" description="2023-10-20">
+
+**Features**
+
+* NOTICES generator ([46bda8e](https://github.com/Krister-Johansson/gqlPrune/commit/46bda8ebc92e81181f4b7505baa8847af2e08b15))
+
+**Bug Fixes**
+
+* add files to gitignore ([69a3b46](https://github.com/Krister-Johansson/gqlPrune/commit/69a3b4643a59925ef0946e43da808714aac9a46b))
+
+</Update>

@@ -16,6 +16,7 @@
   ],
   "excludeFiles": [
     "CHANGELOG.md",
+    "changelog.mdx",
     "CLAUDE.md",
     "AGENTS.md",
     "CONTRIBUTING.md",

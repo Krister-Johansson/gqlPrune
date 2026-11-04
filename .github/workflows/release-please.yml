@@ -37,12 +37,70 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       sha: ${{ steps.release.outputs.sha }} # the commit the release is tagged at
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }} # JSON of the release PR, when there is one
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # Manifest mode: release-please-config.json + .release-please-manifest.json.
+
+  # Regenerates docs/changelog.mdx on the release PR branch each time
+  # release-please creates or updates the PR. release-please writes
+  # CHANGELOG.md there, and Docs7 builds only docs/, so the page is a generated
+  # copy that must be in the release commit for docs-live to carry it. The
+  # commit goes through the contents API with RELEASE_PLEASE_TOKEN, so CI runs
+  # on it, and the sha check refuses to overwrite a page that changed since the
+  # checkout. If this job does not run, test/changelogPage.test.ts fails the
+  # release PR. Runs for two close pushes to main take turns: otherwise the
+  # later one's sha check could fail after the earlier one wrote a page for an
+  # older CHANGELOG.md. Each run checks out the branch head when it starts, so
+  # the run that goes last writes the page for the newest changelog. There is
+  # one release branch, so one fixed group covers it.
+  changelog-page:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    concurrency:
+      group: changelog-page
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only used by the GITHUB_TOKEN fallback
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Regenerate the changelog page
+        id: page
+        run: |
+          set -euo pipefail
+          echo "blob=$(git hash-object docs/changelog.mdx)" >> "$GITHUB_OUTPUT"
+          node scripts/changelogPage.cjs
+          if git diff --quiet -- docs/changelog.mdx; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit the page to the release PR branch
+        if: ${{ steps.page.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          BLOB: ${{ steps.page.outputs.blob }}
+        run: |
+          set -euo pipefail
+          gh api --method PUT --silent \
+            "repos/${GITHUB_REPOSITORY}/contents/docs/changelog.mdx" \
+            -f message="docs: regenerate the changelog page" \
+            -f content="$(base64 -w0 docs/changelog.mdx)" \
+            -f branch="$BRANCH" \
+            -f sha="$BLOB"
 
   publish:
     needs: release-please
