@@ -1,8 +1,9 @@
 # Asks Context7 (https://context7.com/krister-johansson/gqlprune) to re-index
-# the repository. Manual fallback only: every successful Docs7 production
-# build refreshes the library on its own, and Docs7 builds when the release
-# job moves docs-live. A release trigger here would fire before docs-live
-# moves and index the previous release. What gets indexed is governed by
+# the repository. Manual fallback only: the docs-live job in
+# release-please.yml and the docs-publish workflow refresh the library right
+# after they move docs-live, and every successful Docs7 production build
+# refreshes it too. A release trigger here would fire before docs-live moves
+# and index the previous release. What gets indexed is governed by
 # context7.json at the repository root.
 #
 # Needs the CONTEXT7_API_KEY repository secret: an API key from the Context7
