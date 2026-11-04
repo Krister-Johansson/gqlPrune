@@ -152,6 +152,14 @@ Both refresh the Context7 library right after they move `docs-live`. Docs7
 refreshes it too when it builds, but it does not build for every move, so the
 library would otherwise go stale.
 
+`docs/changelog.mdx` is generated from `CHANGELOG.md` by
+`scripts/changelogPage.cjs`, one `<Update>` per release. Never edit it by
+hand. The `changelog-page` job in `release-please.yml` regenerates it on the
+release PR branch, so the release commit that `docs-live` moves to carries
+both files. `test/changelogPage.test.ts` fails when they drift apart.
+`context7.json` leaves the page out of the Context7 index, like the root
+changelog.
+
 `test/docs.test.ts` fails when a flag in `FLAGS`, a key of `GqlPruneConfig`, a
 `ConfidenceReason` or a JSON report key pinned by the contract spec is missing
 from its reference page. A change to any of those needs the matching docs

@@ -76,7 +76,12 @@
       },
       {
         "group": "Upgrading",
-        "pages": ["migration/v4", "migration/v3", "migration/v2"]
+        "pages": [
+          "changelog",
+          "migration/v4",
+          "migration/v3",
+          "migration/v2"
+        ]
       }
     ]
   }
