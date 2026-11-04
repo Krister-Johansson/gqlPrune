@@ -119,7 +119,7 @@ See [JSON report](/reference/json-report).
 
 ## Confidence
 
-Deprecated selections carry no grade. They are validated against a real schema, so they are facts rather than candidates. They have no `confidence` or `reason` key, `summary.byConfidence` does not count them, and `--min-confidence` does not filter them. See [confidence grades](/concepts/confidence).
+Deprecated selections carry no grade. They come from validating your documents against the SDL file you supply, so they hold for that file; when it differs from the schema your API serves, the result can differ too. They have no `confidence` or `reason` key, `summary.byConfidence` does not count them, and `--min-confidence` does not filter them. See [confidence grades](/concepts/confidence).
 
 ## Exit code
 

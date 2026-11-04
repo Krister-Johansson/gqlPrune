@@ -51,7 +51,7 @@ Read `warnings` before acting on the findings. A warning can mean the findings t
 
 | Exit code | Meaning | What to do |
 | --- | --- | --- |
-| 0 | The scan completed and found no unused operations or fragments | Nothing to delete. Advisory findings (deprecated selections, field candidates) can still be in the report |
+| 0 | The scan completed and reported no unused operations or fragments | Nothing was reported at the active confidence gate (`--min-confidence` or `minConfidence`); lower-graded candidates can still exist. Advisory findings (deprecated selections, field candidates) can still be in the report |
 | 1 | The scan completed and found unused operations or fragments | Parse stdout and verify each finding |
 | 2 | The run failed: bad flags, missing or invalid configuration, a directory that does not exist | Read stderr and fix the command or config. Stdout is empty, so there is no report to parse |
 
@@ -95,7 +95,7 @@ Paste this into the project's `AGENTS.md` or `CLAUDE.md` and set the version:
 
 - Docs: Context7 library `/krister-johansson/gqlprune`.
 - Run `npx gqlprune@4.1.1 --json`. Parse stdout as JSON; stderr carries diagnostics.
-- Exit 0: nothing unused. Exit 1: findings in the report. Exit 2: the run failed; read stderr, fix the command or config, and do not treat it as a clean result.
+- Exit 0: nothing reported at the active confidence gate; lower-graded candidates can still exist. Exit 1: findings in the report. Exit 2: the run failed; read stderr, fix the command or config, and do not treat it as a clean result.
 - Read `warnings` first. A suspected generated file or "No source files were read" means the findings are unreliable.
 - Findings are candidates, not proof. Before deleting an operation, fragment or file, search the whole repository for its name, check for callers in other repositories, and read its `confidence` and `reason`.
 - Never delete a `low` finding without finding out what still mentions the name.

@@ -38,13 +38,21 @@ jobs:
             echo "::error::${TARGET} is not ahead of docs-live (status: $status)."
             exit 1
           fi
+          # Only reviewed work: the target must already be on main.
+          on_main="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TARGET}...main" --jq .status)"
+          if [ "$on_main" != "ahead" ] && [ "$on_main" != "identical" ]; then
+            echo "::error::${TARGET} is not on main (status: $on_main)."
+            exit 1
+          fi
           # The compare API lists at most 300 files; refuse rather than check half.
           count="$(jq '.files | length' <<<"$compare")"
           if [ "$count" -ge 300 ]; then
             echo "::error::Too many changed files to check ($count). Publish with the next release."
             exit 1
           fi
-          blocked="$(jq -r '.files[].filename' <<<"$compare" \
+          # A rename lists its old path in previous_filename; check both, so
+          # moving a file out of src/ is caught too.
+          blocked="$(jq -r '.files[] | .filename, (.previous_filename // empty)' <<<"$compare" \
             | grep -E '^(src/|package\.json$|package-lock\.json$)' || true)"
           if [ -n "$blocked" ]; then
             echo "::error::Unreleased changes ship to npm users; publish with the next release:"

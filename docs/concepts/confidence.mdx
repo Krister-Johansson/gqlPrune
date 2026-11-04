@@ -65,7 +65,7 @@ Every call site of the field's operation was traced, anything the trace lost tra
 | [Unused fragments](/findings/unused-fragments) | yes | by the bare fragment name |
 | [Orphaned files](/findings/orphaned-files) | yes | the lowest grade among the definitions in the file |
 | [Field candidates](/findings/field-candidates) | yes | `never-read` when traced, `heuristic-cap` when matched by name |
-| [Deprecated selections](/findings/deprecated-selections) | no | validated against a real schema, so they are facts rather than candidates |
+| [Deprecated selections](/findings/deprecated-selections) | no | validated against the SDL file you supply, so they hold for that file and can differ from the schema your API serves |
 
 An orphaned file takes the lowest grade among its definitions, because one definition that still looks live undermines the verdict on the whole file.
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://context7.com/schema/docs7.json",
   "name": "gqlPrune",
-  "description": "Schema-free CLI that finds unused GraphQL operations, fragments and orphaned .gql files in TypeScript and JavaScript projects.",
+  "description": "Schema-free CLI that reports unused GraphQL operations, fragments and orphaned .gql files in TypeScript and JavaScript projects as candidates to review.",
   "colors": {
     "primary": "#8A5800",
     "light": "#F2B544",
@@ -46,8 +46,8 @@
           "findings/unused-operations",
           "findings/unused-fragments",
           "findings/orphaned-files",
-          "findings/field-candidates",
-          "findings/deprecated-selections"
+          "findings/deprecated-selections",
+          "findings/field-candidates"
         ]
       },
       {
