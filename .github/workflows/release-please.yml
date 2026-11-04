@@ -53,10 +53,17 @@ jobs:
   # commit goes through the contents API with RELEASE_PLEASE_TOKEN, so CI runs
   # on it, and the sha check refuses to overwrite a page that changed since the
   # checkout. If this job does not run, test/changelogPage.test.ts fails the
-  # release PR.
+  # release PR. Runs for two close pushes to main take turns: otherwise the
+  # later one's sha check could fail after the earlier one wrote a page for an
+  # older CHANGELOG.md. Each run checks out the branch head when it starts, so
+  # the run that goes last writes the page for the newest changelog. There is
+  # one release branch, so one fixed group covers it.
   changelog-page:
     needs: release-please
     if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    concurrency:
+      group: changelog-page
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write # only used by the GITHUB_TOKEN fallback

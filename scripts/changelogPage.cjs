@@ -24,7 +24,8 @@ const { join } = require('node:path');
 const RELEASE_HEADING =
   /^#{2,3} \[?(\d+\.\d+\.\d+[^\]\s(]*)\]?(?:\([^)]*\))? \((\d{4}-\d{2}-\d{2})\)\s*$/;
 
-const FENCE = /^\s*(```|~~~)/;
+/** A code fence line: up to three spaces, then three or more ` or ~. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 const FRONTMATTER = [
   '---',
@@ -87,10 +88,44 @@ function findRun(line, run, from) {
 }
 
 /**
+ * A line-by-line tracker of fenced code, following CommonMark: a fence opens
+ * on three or more backticks or tildes (a backtick fence's info string holds
+ * no backtick) and closes only on a run of the same character, at least as
+ * long, with nothing after it. The returned function says whether a line is
+ * part of fenced code, the opening and closing lines included.
+ *
+ * @returns {(line: string) => boolean}
+ */
+function fenceTracker() {
+  /** @type {{ char: string, length: number } | null} */
+  let open = null;
+  return (line) => {
+    const fence = FENCE.exec(line);
+    if (open) {
+      if (
+        fence &&
+        fence[1][0] === open.char &&
+        fence[1].length >= open.length &&
+        fence[2].trim() === ''
+      ) {
+        open = null;
+      }
+      return true;
+    }
+    if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
+      open = { char: fence[1][0], length: fence[1].length };
+      return true;
+    }
+    return false;
+  };
+}
+
+/**
  * Splits a changelog into its releases, newest first as the file lists them.
  * Everything above the first release heading (the title and intro) is
- * dropped. Throws when no heading matches, so a change in the changelog
- * format fails loudly instead of emptying the page.
+ * dropped, and a heading inside fenced code is not a release. Throws when no
+ * heading matches, so a change in the changelog format fails loudly instead
+ * of emptying the page.
  *
  * @param {string} markdown
  * @returns {{ version: string, date: string, lines: string[] }[]}
@@ -98,8 +133,9 @@ function findRun(line, run, from) {
 function parseChangelog(markdown) {
   /** @type {{ version: string, date: string, lines: string[] }[]} */
   const releases = [];
+  const inFence = fenceTracker();
   for (const line of markdown.split('\n')) {
-    const heading = RELEASE_HEADING.exec(line);
+    const heading = inFence(line) ? null : RELEASE_HEADING.exec(line);
     if (heading) {
       releases.push({ version: heading[1], date: heading[2], lines: [] });
     } else if (releases.length > 0) {
@@ -115,25 +151,28 @@ function parseChangelog(markdown) {
 /**
  * Renders the body lines of one release: section headings become bold lines
  * (so the page's table of contents lists releases, not a "Bug Fixes" per
- * release), prose is escaped for MDX, fenced code is copied as is.
+ * release), prose is escaped for MDX, fenced code is copied as is. Runs of
+ * blank lines outside fenced code collapse to one, and blank lines at either
+ * end are dropped.
  *
  * @param {string[]} lines
  * @returns {string[]}
  */
 function renderBody(lines) {
+  /** @type {string[]} */
   const out = [];
-  let inFence = false;
+  const inFence = fenceTracker();
   for (const line of lines) {
-    if (FENCE.test(line)) {
-      inFence = !inFence;
+    if (inFence(line)) {
       out.push(line);
-    } else if (inFence) {
-      out.push(line);
+    } else if (line.trim() === '') {
+      if (out.length > 0 && out[out.length - 1] !== '') out.push('');
     } else {
       const heading = /^#{1,6} (.*)$/.exec(line);
       out.push(heading ? `**${escapeMdx(heading[1].trim())}**` : escapeMdx(line));
     }
   }
+  while (out.length > 0 && out[out.length - 1] === '') out.pop();
   return out;
 }
 
@@ -147,21 +186,16 @@ function renderBody(lines) {
 function renderChangelogPage(markdown) {
   const out = [...FRONTMATTER];
   for (const release of parseChangelog(markdown)) {
+    const body = renderBody(release.lines);
     out.push(
       `<Update label="${release.version}" description="${release.date}">`,
       '',
-      ...renderBody(release.lines),
-      '',
+      ...(body.length > 0 ? [...body, ''] : []),
       '</Update>',
       '',
     );
   }
-  return (
-    out
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trimEnd() + '\n'
-  );
+  return out.join('\n').trimEnd() + '\n';
 }
 
 module.exports = { escapeMdx, parseChangelog, renderChangelogPage };

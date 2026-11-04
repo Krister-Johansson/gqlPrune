@@ -98,6 +98,17 @@ describe('parseChangelog', () => {
     expect(releases[0].lines.join('\n')).not.toContain('All notable');
   });
 
+  it('does not split a release on a heading inside fenced code', () => {
+    const fenced = parseChangelog(
+      '## 2.0.0 (2026-01-02)\n\n```md\n## 1.5.0 (2026-01-01)\n```\n\n## 1.0.0 (2023-10-01)\n',
+    );
+    expect(fenced.map((release) => release.version)).toEqual([
+      '2.0.0',
+      '1.0.0',
+    ]);
+    expect(fenced[0].lines).toContain('## 1.5.0 (2026-01-01)');
+  });
+
   it('throws when it finds no release heading', () => {
     expect(() => parseChangelog('# Changelog\n\nNothing yet.\n')).toThrow(
       /no release headings/,
@@ -145,6 +156,27 @@ describe('renderChangelogPage', () => {
     );
     expect(fenced).toContain('```yaml\nkey: {a}\n```');
     expect(fenced).toContain('* \\{b\\}');
+  });
+
+  it('closes a fence only on a matching marker at least as long', () => {
+    const fenced = renderChangelogPage(
+      '## 1.0.0 (2023-10-01)\n\n````md\n~~~\n{a}\n```\n{c}\n````\n\n* {b}\n',
+    );
+    expect(fenced).toContain('````md\n~~~\n{a}\n```\n{c}\n````');
+    expect(fenced).toContain('* \\{b\\}');
+  });
+
+  it('keeps blank lines inside fenced code', () => {
+    const fenced = renderChangelogPage(
+      '## 1.0.0 (2023-10-01)\n\n```yaml\na: 1\n\n\nb: 2\n```\n\n\n* c\n',
+    );
+    expect(fenced).toContain('```yaml\na: 1\n\n\nb: 2\n```\n\n* c');
+  });
+
+  it('renders a release with no notes as an empty Update', () => {
+    expect(renderChangelogPage('## 1.0.0 (2023-10-01)\n\n\n')).toContain(
+      '<Update label="1.0.0" description="2023-10-01">\n\n</Update>\n',
+    );
   });
 });
 
