@@ -110,8 +110,9 @@ review before merge. A review checks four things:
 - Security: no new execution of scanned input, no path handling that escapes
   the configured directories, no new dependencies without need (see
   [security/security-policies.md](./security/security-policies.md)).
-- Documentation: user-visible changes update the README in the same pull
-  request.
+- Documentation: user-visible changes update the matching pages in `docs/`
+  in the same pull request. `test/docs.test.ts` fails when a flag, config key,
+  confidence reason or JSON report key is missing from its reference page.
 
 Review comments are resolved by fixing the code or by replying with a reason;
 the branch ruleset requires every conversation resolved before merge.

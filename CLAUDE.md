@@ -151,8 +151,9 @@ match the version on npm:
 `test/docs.test.ts` fails when a flag in `FLAGS`, a key of `GqlPruneConfig`, a
 `ConfidenceReason` or a JSON report key pinned by the contract spec is missing
 from its reference page. A change to any of those needs the matching docs
-change in the same pull request. Pages follow the README's rules: no em or en
-dashes, sentence-case headings, and findings described as candidates.
+change in the same pull request. Pages follow the same prose rules as the rest
+of the repo: no em or en dashes, sentence-case headings, and findings
+described as candidates.
 
 ## How we work
 
