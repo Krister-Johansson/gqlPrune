@@ -148,6 +148,10 @@ match the version on npm:
   It refuses when `src/`, `package.json` or `package-lock.json` changed since
   `docs-live`, because those wait for the release.
 
+Both refresh the Context7 library right after they move `docs-live`. Docs7
+refreshes it too when it builds, but it does not build for every move, so the
+library would otherwise go stale.
+
 `test/docs.test.ts` fails when a flag in `FLAGS`, a key of `GqlPruneConfig`, a
 `ConfidenceReason` or a JSON report key pinned by the contract spec is missing
 from its reference page. A change to any of those needs the matching docs
