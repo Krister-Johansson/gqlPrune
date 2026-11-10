@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.1.2](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v4.1.1...gqlprune-v4.1.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** override minimatch to 11 for GHSA-g3hv-75wg-m249 ([#244](https://github.com/Krister-Johansson/gqlPrune/issues/244)) ([7ed1453](https://github.com/Krister-Johansson/gqlPrune/commit/7ed145388e4287b7f4c52db4335becfbcb623176)), closes [#243](https://github.com/Krister-Johansson/gqlPrune/issues/243)
+
 ## [4.1.1](https://github.com/Krister-Johansson/gqlPrune/compare/gqlprune-v4.1.0...gqlprune-v4.1.1) (2026-11-03)
 
 
